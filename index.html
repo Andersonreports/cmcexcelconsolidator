@@ -780,6 +780,16 @@
     return norm;
   }
 
+  // A heterozygous variant in a gene with strictly autosomal recessive
+  // inheritance usually means a carrier, not a manifesting disease allele
+  // on its own - flagged in red as a reminder this needs a second variant
+  // (or different interpretation) to explain the phenotype.
+  function isHetWithPureAR(row) {
+    var zygosity = String(row.zygosity || '').trim().toUpperCase();
+    var inheritance = String(row.inheritance || '').trim().toUpperCase();
+    return zygosity === 'HET' && inheritance === 'AR';
+  }
+
   function extractAcmgCode(rawCalc) {
     if (!rawCalc) return '';
     var m = String(rawCalc).trim().match(/^([A-Za-z]+)\s*[:\-]/);
@@ -967,16 +977,26 @@
     } else {
       variantRows.forEach(function (row, rowIndex) {
         var tr = document.createElement('tr');
+        var inheritanceInput = null;
+
+        function updateInheritanceColor() {
+          if (inheritanceInput) inheritanceInput.style.color = isHetWithPureAR(variantRows[rowIndex]) ? '#c2293a' : '';
+        }
+
         VARIANT_COLUMNS.forEach(function (c) {
           var td = document.createElement('td');
           var input = document.createElement('input');
           input.value = row[c.key] != null ? row[c.key] : '';
           input.addEventListener('input', function (e) {
             variantRows[rowIndex][c.key] = e.target.value;
+            updateInheritanceColor();
           });
+          if (c.key === 'inheritance') inheritanceInput = input;
           td.appendChild(input);
           tr.appendChild(td);
         });
+
+        updateInheritanceColor();
         variantTableBody.appendChild(tr);
       });
     }
@@ -1089,9 +1109,13 @@
     VARIANT_COLUMNS.forEach(function (c, i) { headerRow.getCell(i + 1).value = c.header; });
     headerRow.font = { bold: true };
 
+    var inheritanceColIdx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'inheritance'; });
     variantRows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+      if (isHetWithPureAR(row)) {
+        dataRow.getCell(inheritanceColIdx + 1).font = { color: { argb: 'FFC2293A' } };
+      }
     });
 
     workbook.xlsx.writeBuffer().then(function (buffer) {
