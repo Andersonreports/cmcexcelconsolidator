@@ -77,6 +77,22 @@
 
   input[type="file"] { font: inherit; font-size: 13px; }
 
+  .upload-label {
+    display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text);
+  }
+
+  .title-builder {
+    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; align-items: flex-end;
+  }
+  .title-builder label {
+    display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text);
+  }
+  .title-builder-title { flex: 1 1 320px; }
+  .title-builder input, .title-builder select {
+    font: inherit; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg); color: var(--text-h);
+  }
+
   .raw-text-debug { margin-top: 18px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); }
   .raw-text-debug pre {
@@ -146,16 +162,45 @@
     <section class="tab-panel" id="panel-listed-variant" hidden>
       <h2>Listed Variant Excel</h2>
       <p class="tab-description">
-        Upload the Excel file exported from VarSeq. The data is previewed below. Column mapping
-        and filtering rules will be applied here once defined.
+        Upload the Excel file exported from VarSeq. Variants classified Benign or Likely Benign by
+        VarSeq's ACMG classifier are dropped automatically; everything else is mapped into the
+        consolidated layout below for review before download.
       </p>
 
       <div class="upload-row">
-        <input type="file" id="variant-file-input" accept=".xlsx,.xls" />
+        <label class="upload-label">
+          VarSeq Excel
+          <input type="file" id="variant-file-input" accept=".xlsx,.xls" />
+        </label>
         <span class="progress-text" id="variant-progress-text"></span>
       </div>
 
+      <div class="upload-row">
+        <label class="upload-label">
+          ACMG/Franklin reference Excel (optional)
+          <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
+        </label>
+        <span class="progress-text" id="franklin-progress-text"></span>
+      </div>
+
       <div class="error-banner" id="variant-error" hidden></div>
+
+      <div class="title-builder">
+        <label>
+          Link to sample
+          <select id="variant-sample-select">
+            <option value="">— None —</option>
+          </select>
+        </label>
+        <label>
+          Department
+          <input type="text" id="variant-department-input" value="CMC HEMATOLOGY" />
+        </label>
+        <label class="title-builder-title">
+          Report title (editable)
+          <input type="text" id="variant-title-input" placeholder="Pick a sample above, or type a title manually" />
+        </label>
+      </div>
 
       <div class="table-wrapper">
         <table>
@@ -193,6 +238,7 @@
       Object.keys(panels).forEach(function (key) {
         panels[key].hidden = key !== btn.dataset.tab;
       });
+      if (btn.dataset.tab === 'listed-variant') populateSampleSelect();
     });
   });
 
@@ -563,8 +609,240 @@
   // ====================================================================
   // Listed Variant Excel tab
   // ====================================================================
-  var variantHeaders = [];
+  var VARIANT_COLUMNS = [
+    { key: 'sNo', header: 'S.NO' },
+    { key: 'gene', header: 'GENE' },
+    { key: 'variant', header: 'VARIANT' },
+    { key: 'proteinPos', header: 'PROTEIN POS' },
+    { key: 'franklin', header: 'FRANKLIN' },
+    { key: 'clinvar', header: 'CLINVAR' },
+    { key: 'varseq', header: 'VARSEQ' },
+    { key: 'zygosity', header: 'ZYGOSITY' },
+    { key: 'inheritance', header: 'INHERTIANCE' },
+    { key: 'inhouseMerged', header: 'Inhouse merged' },
+    { key: 'inhouseCount', header: 'Hematology Inhouse count' },
+    { key: 'inhouseSampleNames', header: 'Hematology inhouse sample name' },
+    { key: 'vaf', header: 'VAF(%)' },
+    { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
+    { key: 'readDepths', header: 'READ DEPTH' },
+    { key: 'omimTitle', header: 'OMIM TITLE' },
+    { key: 'omimPhenotypes', header: 'OMIM PHENOTYPE' },
+    { key: 'omimDescription', header: 'CONDITIONS' },
+    { key: 'diseaseLabel', header: 'DISEASE LABEL' },
+    { key: 'clingenClass', header: 'CLINGEN GENE-DISEASE CLASSIFICATION' },
+    { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
+    { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
+    { key: 'gnomadGenome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadExome4Count', header: 'GNOM AD EXOME ALL V4' },
+    { key: 'gnomadExome4SA', header: 'GNOM AD EXOME SA V4' },
+    { key: 'gnomadExome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadGenome3AC', header: 'GNOM AD all V3' },
+    { key: 'gnomadGenome3Male', header: 'gnomAD(MALE)' },
+    { key: 'gnomadGenome3Female', header: 'Gnom AD FEMALE' },
+    { key: 'genomeAsia', header: 'genome asia' },
+    { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
+    { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
+    { key: 'revel', header: 'Revel Score' },
+  ];
+
+  // Each VarSeq export can include a different set/order of annotation
+  // columns (e.g. some runs add a "ClinGen Expert Curated" group, some omit
+  // a "Variants" flag column), so columns are located by matching the
+  // dataset-group text (row 1) and column header text (row 2) together,
+  // never by a fixed position.
+  var VARSEQ_COLUMN_SPECS = {
+    geneNames: { header: 'Gene Names' },
+    hgvsC: { headerStartsWith: 'HGVS c.' },
+    hgvsP: { headerStartsWith: 'HGVS p.' },
+    zygosity: { header: 'Zygosity' },
+    vaf: { header: 'Variant Allele Freq' },
+    alleleDepths: { header: 'Allelic Depths (AD)' },
+    readDepths: { header: 'Read Depths (DP)' },
+    clinvarClass: { header: 'Classification', groupIncludes: ['ClinVar'] },
+    acmgClass: { header: 'Classification', groupIncludes: ['ACMG Sample Classifier'] },
+    omimInheritance: { header: 'Inheritance', groupIncludes: ['OMIM'] },
+    omimTitle: { header: 'Title', groupIncludes: ['OMIM'] },
+    omimPhenotypes: { header: 'Phenotypes', groupIncludes: ['OMIM'] },
+    omimDescription: { header: 'Description', groupIncludes: ['OMIM'] },
+    clingenDiseaseLabel: { header: 'Disease Label', groupIncludes: ['ClinGen Gene Disease Validity'] },
+    clingenClassification: { header: 'Classification', groupIncludes: ['ClinGen Gene Disease Validity'] },
+    gnomadGenome4Count: { header: 'Allele Count', groupIncludes: ['gnomAD Genomes', '4.1'] },
+    gnomadGenome4SA: { header: 'South Asian Allele Count', groupIncludes: ['gnomAD Genomes', '4.1'] },
+    gnomadGenome4SAHomo: { header: 'South Asian Homozygous Count', groupIncludes: ['gnomAD Genomes', '4.1'] },
+    gnomadExome4Count: { header: 'Allele Count', groupIncludes: ['gnomAD Exomes', '4.1'] },
+    gnomadExome4SA: { header: 'South Asian Allele Count', groupIncludes: ['gnomAD Exomes', '4.1'] },
+    gnomadExome4SAHomo: { header: 'South Asian Homozygous Count', groupIncludes: ['gnomAD Exomes', '4.1'] },
+    gnomadGenome3AC: { header: 'Alt Allele Count (AC)', groupIncludes: ['3.1.2'] },
+    gnomadGenome3Male: { header: 'South Asian Male Allele Count (AC_SAS_XY)', groupIncludes: ['3.1.2'] },
+    gnomadGenome3Female: { header: 'South Asian Female Allele Count (AC_SAS_XX)', groupIncludes: ['3.1.2'] },
+    genomeAsia: { header: 'South Asian Alt Allele Counts (AC_SAS)', groupIncludes: ['GenomeAsia'] },
+    gnomadExome2: { header: 'South Asian Allele Count (AC_SAS)', groupIncludes: ['gnomAD Exomes', '2.0.1'] },
+    inhouseSamples2: { header: 'Samples2' },
+    inhouseCount: { header: '# Samples' },
+    inhouseSampleNames: { header: 'Sample Names' },
+    alphaMissense: { header: 'Classification', groupIncludes: ['AlphaMissense'] },
+    revel: { header: 'REVEL' },
+  };
+
+  // Most clinically severe first. Rows whose winning entry lands on Benign
+  // or Likely Benign are dropped entirely (see isBenignClassification).
+  var SEVERITY_ORDER = [
+    'PATHOGENIC', 'LIKELY PATHOGENIC', 'VUS/WEAK PATHOGENIC', 'VUS/CONFLICTING',
+    'CONFLICTING', 'UNCERTAIN SIGNIFICANCE', 'VUS', 'VUS/WEAK BENIGN',
+    'LIKELY BENIGN', 'BENIGN',
+  ];
+  var INHERITANCE_PRIORITY = ['MF', 'AD', 'AR', 'XLR', 'XLD', 'XL'];
+
+  function findVarSeqColumn(groupRow, headerRow, colCount, spec) {
+    for (var c = 1; c <= colCount; c++) {
+      var group = String(groupRow.getCell(c).value || '');
+      var header = String(headerRow.getCell(c).value || '');
+      if (spec.header && header !== spec.header) continue;
+      if (spec.headerStartsWith && header.indexOf(spec.headerStartsWith) !== 0) continue;
+      if (spec.groupIncludes && !spec.groupIncludes.every(function (needle) { return group.indexOf(needle) !== -1; })) continue;
+      return c;
+    }
+    return null;
+  }
+
+  function splitList(value) {
+    if (value == null) return [];
+    return String(value).split(',').map(function (s) { return s.trim(); });
+  }
+
+  function stripHgvsPrefix(value) {
+    if (value == null) return '';
+    var s = String(value);
+    var idx = s.indexOf(':');
+    return idx === -1 ? s.trim() : s.slice(idx + 1).trim();
+  }
+
+  function severityRank(classification) {
+    if (!classification) return SEVERITY_ORDER.length;
+    var norm = String(classification).trim().toUpperCase();
+    var idx = SEVERITY_ORDER.indexOf(norm);
+    return idx === -1 ? SEVERITY_ORDER.length - 1 : idx;
+  }
+
+  function isBenignClassification(classification) {
+    if (!classification) return false;
+    var norm = String(classification).trim().toUpperCase();
+    return norm === 'BENIGN' || norm === 'LIKELY BENIGN';
+  }
+
+  function abbreviateInheritance(rawList) {
+    var order = [];
+    var seen = {};
+    function addCode(code) {
+      if (code && !seen[code]) { seen[code] = true; order.push(code); }
+    }
+    rawList.forEach(function (entry) {
+      var norm = entry.trim().toUpperCase();
+      if (!norm) return;
+      if (norm.indexOf('/') !== -1) {
+        abbreviateInheritance(norm.split('/')).forEach(addCode);
+        return;
+      }
+      if (norm === 'AUTOSOMAL DOMINANT') addCode('AD');
+      else if (norm === 'AUTOSOMAL RECESSIVE') addCode('AR');
+      else if (norm === 'X-LINKED DOMINANT') addCode('XLD');
+      else if (norm === 'X-LINKED RECESSIVE') addCode('XLR');
+      else if (norm === 'X-LINKED') addCode('XL');
+      else if (norm === 'MULTIFACTORIAL') addCode('MF');
+      else addCode(norm);
+    });
+    var hasSpecificXLinked = order.indexOf('XLD') !== -1 || order.indexOf('XLR') !== -1;
+    var filtered = hasSpecificXLinked ? order.filter(function (c) { return c !== 'XL'; }) : order;
+    filtered.sort(function (a, b) {
+      var ai = INHERITANCE_PRIORITY.indexOf(a), bi = INHERITANCE_PRIORITY.indexOf(b);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+    return filtered;
+  }
+
+  function abbreviateZygosity(value, inheritanceCodes) {
+    if (!value) return '';
+    var norm = String(value).trim().toUpperCase();
+    var isXLinked = inheritanceCodes.indexOf('XLD') !== -1 || inheritanceCodes.indexOf('XLR') !== -1 || inheritanceCodes.indexOf('XL') !== -1;
+    if (norm === 'HETEROZYGOUS') return 'HET';
+    if (norm === 'HOMOZYGOUS' || norm === 'HOMOZYGOUS VARIANT') return isXLinked ? 'HEMI' : 'HOM';
+    if (norm === 'HEMIZYGOUS') return 'HEMI';
+    return norm;
+  }
+
+  function extractAcmgCode(rawCalc) {
+    if (!rawCalc) return '';
+    var m = String(rawCalc).trim().match(/^([A-Za-z]+)\s*[:\-]/);
+    return m ? m[1].toUpperCase() : String(rawCalc).trim().toUpperCase();
+  }
+
+  // ---- Franklin/ACMG cross-reference (optional second upload) ----
+  var franklinEntries = [];
+  var franklinFileInput = document.getElementById('franklin-file-input');
+  var franklinProgressText = document.getElementById('franklin-progress-text');
+
+  function lookupFranklin(gene, variant) {
+    var g = gene.trim().toUpperCase();
+    var v = variant.replace(/\s+/g, '').toUpperCase();
+    for (var i = 0; i < franklinEntries.length; i++) {
+      if (franklinEntries[i].gene === g && franklinEntries[i].variant === v) return franklinEntries[i].code;
+    }
+    return '';
+  }
+
+  franklinFileInput.addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    showVariantError('');
+    franklinFileInput.disabled = true;
+    franklinProgressText.textContent = 'Reading file…';
+
+    file.arrayBuffer()
+      .then(function (buffer) {
+        var workbook = new ExcelJS.Workbook();
+        return workbook.xlsx.load(buffer).then(function () { return workbook; });
+      })
+      .then(function (workbook) {
+        var sheet = workbook.worksheets[0];
+        if (!sheet) throw new Error('No worksheet found in the reference file.');
+        var entries = [];
+        sheet.eachRow(function (row, r) {
+          if (r === 1) return;
+          var gene = String(row.getCell(1).value || '').trim().toUpperCase();
+          var variant = String(row.getCell(2).value || '').replace(/\s+/g, '').toUpperCase();
+          var calc = row.getCell(3).value;
+          if (!gene || !variant) return;
+          entries.push({ gene: gene, variant: variant, code: extractAcmgCode(calc) });
+        });
+        franklinEntries = entries;
+        franklinProgressText.textContent = file.name + ' (' + entries.length + ' entries)';
+        if (variantRows.length > 0) reapplyFranklinLookup();
+      })
+      .catch(function (err) {
+        showVariantError((err && err.message) || 'Failed to read the reference file.');
+        franklinEntries = [];
+        franklinProgressText.textContent = '';
+      })
+      .finally(function () {
+        franklinFileInput.disabled = false;
+        franklinFileInput.value = '';
+      });
+  });
+
+  function reapplyFranklinLookup() {
+    variantRows.forEach(function (row) {
+      var code = lookupFranklin(row.gene, row.variant);
+      if (code) row.franklin = code;
+    });
+    renderVariantTable();
+  }
+
+  // ---- VarSeq workbook processing ----
   var variantRows = [];
+  var variantSampleRunName = '';
   var variantTableHead = document.getElementById('variant-table-head');
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFileInput = document.getElementById('variant-file-input');
@@ -572,13 +850,100 @@
   var variantError = document.getElementById('variant-error');
   var variantClearAllBtn = document.getElementById('variant-clear-all');
   var variantDownloadBtn = document.getElementById('variant-download');
+  var variantSampleSelect = document.getElementById('variant-sample-select');
+  var variantDepartmentInput = document.getElementById('variant-department-input');
+  var variantTitleInput = document.getElementById('variant-title-input');
+
+  function processVarSeqWorkbook(workbook) {
+    var sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found in the uploaded file.');
+
+    var groupRow = sheet.getRow(1);
+    var headerRow = sheet.getRow(2);
+    var colCount = sheet.columnCount;
+
+    var cols = {};
+    Object.keys(VARSEQ_COLUMN_SPECS).forEach(function (key) {
+      cols[key] = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS[key]);
+    });
+
+    var runNameMatch = String(groupRow.getCell(1).value || '').match(/^(.*?)(?:_outfastp.*)?$/);
+    variantSampleRunName = runNameMatch ? runNameMatch[1] : String(groupRow.getCell(1).value || '');
+
+    var rows = [];
+    sheet.eachRow(function (row, r) {
+      if (r <= 2) return;
+
+      function get(key) {
+        return cols[key] ? row.getCell(cols[key]).value : null;
+      }
+
+      var genes = splitList(get('geneNames'));
+      var hgvsCList = splitList(get('hgvsC'));
+      var acmgList = splitList(get('acmgClass'));
+
+      var winnerIdx = 0, bestRank = Infinity;
+      acmgList.forEach(function (cls, i) {
+        var rank = severityRank(cls);
+        if (rank < bestRank) { bestRank = rank; winnerIdx = i; }
+      });
+
+      var winningAcmg = acmgList[winnerIdx] || acmgList[0] || '';
+      if (isBenignClassification(winningAcmg)) return; // excluded from the report
+
+      var gene = genes[winnerIdx] || genes[0] || '';
+      var variant = stripHgvsPrefix(hgvsCList[winnerIdx] || hgvsCList[0] || '');
+      var proteinPos = stripHgvsPrefix(get('hgvsP'));
+
+      var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
+
+      rows.push({
+        sNo: '',
+        gene: gene,
+        variant: variant,
+        proteinPos: proteinPos,
+        franklin: lookupFranklin(gene, variant),
+        clinvar: get('clinvarClass') || '',
+        varseq: get('acmgClass') || '',
+        zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
+        inheritance: inheritanceCodes.join('/'),
+        inhouseMerged: get('inhouseSamples2'),
+        inhouseCount: get('inhouseCount'),
+        inhouseSampleNames: get('inhouseSampleNames'),
+        vaf: get('vaf'),
+        alleleDepths: get('alleleDepths'),
+        readDepths: get('readDepths'),
+        omimTitle: get('omimTitle'),
+        omimPhenotypes: get('omimPhenotypes'),
+        omimDescription: get('omimDescription'),
+        diseaseLabel: get('clingenDiseaseLabel'),
+        clingenClass: get('clingenClassification'),
+        gnomadGenome4Count: get('gnomadGenome4Count'),
+        gnomadGenome4SA: get('gnomadGenome4SA'),
+        gnomadGenome4SAHomo: get('gnomadGenome4SAHomo'),
+        gnomadExome4Count: get('gnomadExome4Count'),
+        gnomadExome4SA: get('gnomadExome4SA'),
+        gnomadExome4SAHomo: get('gnomadExome4SAHomo'),
+        gnomadGenome3AC: get('gnomadGenome3AC'),
+        gnomadGenome3Male: get('gnomadGenome3Male'),
+        gnomadGenome3Female: get('gnomadGenome3Female'),
+        genomeAsia: get('genomeAsia'),
+        gnomadExome2: get('gnomadExome2'),
+        alphaMissense: get('alphaMissense'),
+        revel: get('revel'),
+      });
+    });
+
+    rows.forEach(function (row, i) { row.sNo = i + 1; });
+    return rows;
+  }
 
   function renderVariantTable() {
     variantTableHead.innerHTML = '';
     var headRow = document.createElement('tr');
-    variantHeaders.forEach(function (h) {
+    VARIANT_COLUMNS.forEach(function (c) {
       var th = document.createElement('th');
-      th.textContent = h;
+      th.textContent = c.header;
       headRow.appendChild(th);
     });
     variantTableHead.appendChild(headRow);
@@ -588,17 +953,21 @@
       var tr = document.createElement('tr');
       var td = document.createElement('td');
       td.className = 'empty-state';
-      td.colSpan = Math.max(variantHeaders.length, 1);
+      td.colSpan = VARIANT_COLUMNS.length;
       td.textContent = 'No data loaded yet. Upload a VarSeq Excel export to preview it here.';
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
     } else {
-      variantRows.forEach(function (row) {
+      variantRows.forEach(function (row, rowIndex) {
         var tr = document.createElement('tr');
-        variantHeaders.forEach(function (h) {
+        VARIANT_COLUMNS.forEach(function (c) {
           var td = document.createElement('td');
-          var value = row[h];
-          td.textContent = value != null ? String(value) : '';
+          var input = document.createElement('input');
+          input.value = row[c.key] != null ? row[c.key] : '';
+          input.addEventListener('input', function (e) {
+            variantRows[rowIndex][c.key] = e.target.value;
+          });
+          td.appendChild(input);
           tr.appendChild(td);
         });
         variantTableBody.appendChild(tr);
@@ -617,6 +986,46 @@
     }
   }
 
+  function genderSalutation(gender) {
+    var norm = String(gender || '').trim().toUpperCase();
+    if (norm === 'FEMALE') return 'MRS.';
+    if (norm === 'MALE') return 'MR.';
+    return '';
+  }
+
+  function buildVariantTitle() {
+    var selectedIdx = variantSampleSelect.value;
+    var department = variantDepartmentInput.value.trim();
+    if (selectedIdx === '' || !sampleRows[selectedIdx]) {
+      return '';
+    }
+    var sample = sampleRows[selectedIdx];
+    var salutation = genderSalutation(sample.gender);
+    var genderInitial = String(sample.gender || '').trim().charAt(0).toUpperCase();
+    var descriptor = 'LISTED VARIANTS FOR ' + department + '-' + salutation + sample.sampleId +
+      ' (' + sample.age + 'Y/' + genderInitial + ')';
+    return variantSampleRunName ? descriptor + '\t' + variantSampleRunName : descriptor;
+  }
+
+  function populateSampleSelect() {
+    var previousValue = variantSampleSelect.value;
+    variantSampleSelect.innerHTML = '<option value="">— None —</option>';
+    sampleRows.forEach(function (row, i) {
+      var option = document.createElement('option');
+      option.value = i;
+      option.textContent = (row.sampleId || '(no ID)') + ' — ' + row.age + 'y ' + row.gender;
+      variantSampleSelect.appendChild(option);
+    });
+    if (previousValue && sampleRows[previousValue]) variantSampleSelect.value = previousValue;
+  }
+
+  variantSampleSelect.addEventListener('change', function () {
+    variantTitleInput.value = buildVariantTitle();
+  });
+  variantDepartmentInput.addEventListener('input', function () {
+    if (variantSampleSelect.value !== '') variantTitleInput.value = buildVariantTitle();
+  });
+
   variantFileInput.addEventListener('change', function (e) {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -630,33 +1039,13 @@
         return workbook.xlsx.load(buffer).then(function () { return workbook; });
       })
       .then(function (workbook) {
-        var sheet = workbook.worksheets[0];
-        if (!sheet) throw new Error('No worksheet found in the uploaded file.');
-
-        var cols = [];
-        sheet.getRow(1).eachCell({ includeEmpty: false }, function (cell) {
-          cols.push(String(cell.value != null ? cell.value : '').trim());
-        });
-
-        var rows = [];
-        sheet.eachRow(function (row, rowNumber) {
-          if (rowNumber === 1) return;
-          var rowData = {};
-          cols.forEach(function (col, idx) {
-            var cell = row.getCell(idx + 1);
-            rowData[col] = cell.value;
-          });
-          rows.push(rowData);
-        });
-
-        variantHeaders = cols;
-        variantRows = rows;
-        variantProgressText.textContent = file.name;
+        variantRows = processVarSeqWorkbook(workbook);
+        variantProgressText.textContent = file.name + ' (' + variantRows.length + ' variants after exclusions)';
+        if (variantSampleSelect.value !== '') variantTitleInput.value = buildVariantTitle();
         renderVariantTable();
       })
       .catch(function (err) {
         showVariantError((err && err.message) || 'Failed to read the Excel file.');
-        variantHeaders = [];
         variantRows = [];
         variantProgressText.textContent = '';
         renderVariantTable();
@@ -668,7 +1057,6 @@
   });
 
   variantClearAllBtn.addEventListener('click', function () {
-    variantHeaders = [];
     variantRows = [];
     variantProgressText.textContent = '';
     showVariantError('');
@@ -676,12 +1064,37 @@
   });
 
   variantDownloadBtn.addEventListener('click', function () {
-    var columns = variantHeaders.map(function (h) { return { header: h, key: h }; });
-    exportRowsToXlsx(variantRows, columns, 'Listed Variants', 'listed-variant-list.xlsx');
+    var workbook = new ExcelJS.Workbook();
+    var sheet = workbook.addWorksheet('Listed Variants');
+
+    VARIANT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
+
+    var title = variantTitleInput.value.trim();
+    var headerRowIndex = 1;
+    if (title) {
+      sheet.getRow(1).getCell(1).value = title;
+      sheet.mergeCells(1, 1, 1, VARIANT_COLUMNS.length);
+      sheet.getRow(1).font = { bold: true };
+      headerRowIndex = 2;
+    }
+
+    var headerRow = sheet.getRow(headerRowIndex);
+    VARIANT_COLUMNS.forEach(function (c, i) { headerRow.getCell(i + 1).value = c.header; });
+    headerRow.font = { bold: true };
+
+    variantRows.forEach(function (row, i) {
+      var dataRow = sheet.getRow(headerRowIndex + 1 + i);
+      VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+    });
+
+    workbook.xlsx.writeBuffer().then(function (buffer) {
+      downloadBlob(buffer, 'listed-variant-list.xlsx');
+    });
   });
 
   renderSampleTable();
   renderVariantTable();
+  populateSampleSelect();
 })();
 </script>
 </body>

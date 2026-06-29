@@ -1,5 +1,8 @@
-# Sample images may contain real patient/sample data - never commit these.
+# Sample images and Excel files may contain real patient/genetic data - never commit these.
 *.jpg
 *.jpeg
 *.png
 *.heic
+*.xlsx
+*.xls
+desktop.ini
