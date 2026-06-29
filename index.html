@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CMC Excel Consolidator</title>
+<style>
+  :root {
+    --text: #6b6375;
+    --text-h: #08060d;
+    --bg: #fff;
+    --border: #e5e4e7;
+    --code-bg: #f4f3ec;
+    --accent: #aa3bff;
+    --accent-bg: rgba(170, 59, 255, 0.1);
+    --accent-border: rgba(170, 59, 255, 0.5);
+    --error: #c2293a;
+    --error-bg: rgba(194, 41, 58, 0.08);
+    font: 16px/145% system-ui, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  h1, h2 { font-weight: 600; color: var(--text-h); margin: 0; }
+  p { margin: 0; }
+
+  .app { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+  .app-header h1 { font-size: 28px; margin-bottom: 20px; }
+
+  .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tab-button {
+    font: inherit; font-size: 15px; padding: 10px 18px; border: none; background: none;
+    color: var(--text); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab-button:hover { color: var(--text-h); }
+  .tab-button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+  .tab-panel h2 { font-size: 20px; margin-bottom: 6px; }
+  .tab-description { margin-bottom: 18px; font-size: 14px; max-width: 720px; }
+
+  .upload-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .progress-text { font-size: 13px; color: var(--text); }
+
+  .error-banner {
+    background: var(--error-bg); color: var(--error); border: 1px solid var(--error);
+    border-radius: 6px; padding: 10px 14px; font-size: 14px; margin-bottom: 16px;
+  }
+
+  .table-wrapper { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left; background: var(--code-bg); color: var(--text-h);
+    padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  tbody td { padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td input {
+    width: 100%; min-width: 90px; font: inherit; font-size: 13px; padding: 6px 8px;
+    border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-h);
+  }
+  tbody td input:hover, tbody td input:focus { border-color: var(--border); background: var(--bg); }
+
+  .empty-state { text-align: center; color: var(--text); padding: 28px 12px; white-space: normal; }
+
+  .icon-button { border: none; background: none; color: var(--error); cursor: pointer; font-size: 14px; padding: 4px 8px; }
+
+  .action-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .action-row button, .upload-row button {
+    font: inherit; font-size: 14px; padding: 9px 16px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text-h); cursor: pointer;
+  }
+  .action-row button:hover:not(:disabled) { border-color: var(--accent-border); }
+  .action-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .action-row button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .action-row button.primary:disabled { background: var(--accent-bg); border-color: var(--border); color: var(--text); }
+
+  input[type="file"] { font: inherit; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <h1>CMC Excel Consolidator</h1>
+  </header>
+
+  <nav class="tab-bar">
+    <button class="tab-button active" data-tab="sample-list">Sample List Excel</button>
+    <button class="tab-button" data-tab="listed-variant">Listed Variant Excel</button>
+  </nav>
+
+  <main>
+    <section class="tab-panel" id="panel-sample-list">
+      <h2>Sample List Excel</h2>
+      <p class="tab-description">
+        Upload an image of a sample list. Text is extracted automatically and arranged into a
+        table below &mdash; review and correct any fields, then download as an Excel file.
+      </p>
+
+      <div class="upload-row">
+        <input type="file" id="sample-image-input" accept="image/*" multiple />
+        <span class="progress-text" id="sample-progress-text"></span>
+      </div>
+
+      <div class="error-banner" id="sample-error" hidden></div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Sample ID</th>
+              <th>Age</th>
+              <th>Gender</th>
+              <th>Date</th>
+              <th>Sample Type</th>
+              <th>Doctor</th>
+              <th>Test</th>
+              <th aria-label="actions"></th>
+            </tr>
+          </thead>
+          <tbody id="sample-table-body">
+            <tr><td colspan="8" class="empty-state">No rows yet. Upload an image to extract sample data, or add a row manually.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="action-row">
+        <button id="sample-add-row">Add Row</button>
+        <button id="sample-clear-all" disabled>Clear All</button>
+        <button class="primary" id="sample-download" disabled>Download Excel</button>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="panel-listed-variant" hidden>
+      <h2>Listed Variant Excel</h2>
+      <p class="tab-description">
+        Upload the Excel file exported from VarSeq. The data is previewed below. Column mapping
+        and filtering rules will be applied here once defined.
+      </p>
+
+      <div class="upload-row">
+        <input type="file" id="variant-file-input" accept=".xlsx,.xls" />
+        <span class="progress-text" id="variant-progress-text"></span>
+      </div>
+
+      <div class="error-banner" id="variant-error" hidden></div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead id="variant-table-head"><tr></tr></thead>
+          <tbody id="variant-table-body">
+            <tr><td class="empty-state">No data loaded yet. Upload a VarSeq Excel export to preview it here.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="action-row">
+        <button id="variant-clear-all" disabled>Clear All</button>
+        <button class="primary" id="variant-download" disabled>Download Excel</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ---------- Tab switching ----------
+  var tabButtons = document.querySelectorAll('.tab-button');
+  var panels = {
+    'sample-list': document.getElementById('panel-sample-list'),
+    'listed-variant': document.getElementById('panel-listed-variant'),
+  };
+  tabButtons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      tabButtons.forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      Object.keys(panels).forEach(function (key) {
+        panels[key].hidden = key !== btn.dataset.tab;
+      });
+    });
+  });
+
+  // ---------- Shared Excel export helper ----------
+  function downloadBlob(buffer, fileName) {
+    var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportRowsToXlsx(rows, columns, sheetName, fileName) {
+    var workbook = new ExcelJS.Workbook();
+    var sheet = workbook.addWorksheet(sheetName);
+    sheet.columns = columns.map(function (c) { return { header: c.header, key: c.key, width: 18 }; });
+    sheet.getRow(1).font = { bold: true };
+    rows.forEach(function (row) { sheet.addRow(row); });
+    return workbook.xlsx.writeBuffer().then(function (buffer) {
+      downloadBlob(buffer, fileName);
+    });
+  }
+
+  // ====================================================================
+  // Sample List Excel tab
+  // ====================================================================
+  var SAMPLE_COLUMNS = [
+    { key: 'sampleId', header: 'Sample ID' },
+    { key: 'age', header: 'Age' },
+    { key: 'gender', header: 'Gender' },
+    { key: 'date', header: 'Date' },
+    { key: 'sampleType', header: 'Sample Type' },
+    { key: 'doctor', header: 'Doctor' },
+    { key: 'test', header: 'Test' },
+  ];
+
+  var SAMPLE_ID_RE = /\b([A-Z]{1,5}\d{0,4}[-\s][A-Z]{1,3}[-\s]\d{2,6})\b/i;
+  var AGE_GENDER_RE = /\b(\d{1,3})\s*[-:]?\s*(MALE|FEMALE|M|F)\b/i;
+  var DATE_RE = /\b(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})\b/;
+  var SAMPLE_TYPE_RE = /\b([A-Z]{1,8}\s?DNA|SALIVA|BUCCAL\s?SWAB|BLOOD)\b/i;
+  var DOCTOR_RE = /\b(DR\.?\s?[A-Z][A-Z.\s]*[A-Z])\b/i;
+  var DOCTOR_HEADER_RE = /^DR\.?\s?[A-Z][A-Z.\s]*$/i;
+
+  function normalizeGender(g) {
+    var upper = g.toUpperCase();
+    if (upper === 'M') return 'MALE';
+    if (upper === 'F') return 'FEMALE';
+    return upper;
+  }
+
+  function normalizeSampleId(id) {
+    return id.toUpperCase().replace(/\s+/g, '-');
+  }
+
+  function emptySampleRow() {
+    return { sampleId: '', age: '', gender: '', date: '', sampleType: '', doctor: '', test: '' };
+  }
+
+  // Best-effort extraction of tabular sample data from raw OCR text. The
+  // reference sheets interleave doctor "section header" lines with
+  // per-sample data lines, so a doctor header is remembered and used as a
+  // fallback when a data line's own doctor field isn't recognized.
+  function parseSampleListText(rawText) {
+    var lines = rawText.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    var rows = [];
+    var currentDoctor = '';
+
+    lines.forEach(function (line) {
+      if (DOCTOR_HEADER_RE.test(line) && !SAMPLE_ID_RE.test(line)) {
+        currentDoctor = line.replace(/\s+/g, ' ').trim().toUpperCase();
+        return;
+      }
+
+      var idMatch = line.match(SAMPLE_ID_RE);
+      if (!idMatch) return;
+
+      var remainder = line.slice(idMatch.index + idMatch[0].length);
+
+      var ageGenderMatch = remainder.match(AGE_GENDER_RE);
+      var age = ageGenderMatch ? ageGenderMatch[1] : '';
+      var gender = ageGenderMatch ? normalizeGender(ageGenderMatch[2]) : '';
+      if (ageGenderMatch) remainder = remainder.slice(ageGenderMatch.index + ageGenderMatch[0].length);
+
+      var dateMatch = remainder.match(DATE_RE);
+      var date = dateMatch ? dateMatch[1] : '';
+      if (dateMatch) remainder = remainder.slice(dateMatch.index + dateMatch[0].length);
+
+      var sampleTypeMatch = remainder.match(SAMPLE_TYPE_RE);
+      var sampleType = sampleTypeMatch ? sampleTypeMatch[1].toUpperCase().replace(/\s+/g, ' ') : '';
+      if (sampleTypeMatch) remainder = remainder.slice(sampleTypeMatch.index + sampleTypeMatch[0].length);
+
+      var doctorMatch = remainder.match(DOCTOR_RE);
+      var doctor = doctorMatch ? doctorMatch[1].toUpperCase().replace(/\s+/g, ' ').trim() : currentDoctor;
+      if (doctorMatch) remainder = remainder.slice(doctorMatch.index + doctorMatch[0].length);
+
+      var test = remainder.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+
+      rows.push({
+        sampleId: normalizeSampleId(idMatch[1]),
+        age: age,
+        gender: gender,
+        date: date,
+        sampleType: sampleType,
+        doctor: doctor,
+        test: test,
+      });
+    });
+
+    return rows;
+  }
+
+  var sampleRows = [];
+  var sampleTableBody = document.getElementById('sample-table-body');
+  var sampleImageInput = document.getElementById('sample-image-input');
+  var sampleProgressText = document.getElementById('sample-progress-text');
+  var sampleError = document.getElementById('sample-error');
+  var sampleAddRowBtn = document.getElementById('sample-add-row');
+  var sampleClearAllBtn = document.getElementById('sample-clear-all');
+  var sampleDownloadBtn = document.getElementById('sample-download');
+
+  function renderSampleTable() {
+    sampleTableBody.innerHTML = '';
+    if (sampleRows.length === 0) {
+      var emptyRow = document.createElement('tr');
+      emptyRow.innerHTML = '<td colspan="8" class="empty-state">No rows yet. Upload an image to extract sample data, or add a row manually.</td>';
+      sampleTableBody.appendChild(emptyRow);
+    } else {
+      sampleRows.forEach(function (row, rowIndex) {
+        var tr = document.createElement('tr');
+        SAMPLE_COLUMNS.forEach(function (col) {
+          var td = document.createElement('td');
+          var input = document.createElement('input');
+          input.value = row[col.key];
+          input.addEventListener('input', function (e) {
+            sampleRows[rowIndex][col.key] = e.target.value;
+          });
+          td.appendChild(input);
+          tr.appendChild(td);
+        });
+        var actionTd = document.createElement('td');
+        var removeBtn = document.createElement('button');
+        removeBtn.className = 'icon-button';
+        removeBtn.title = 'Remove row';
+        removeBtn.textContent = '✕';
+        removeBtn.addEventListener('click', function () {
+          sampleRows.splice(rowIndex, 1);
+          renderSampleTable();
+        });
+        actionTd.appendChild(removeBtn);
+        tr.appendChild(actionTd);
+        sampleTableBody.appendChild(tr);
+      });
+    }
+    sampleClearAllBtn.disabled = sampleRows.length === 0;
+    sampleDownloadBtn.disabled = sampleRows.length === 0;
+  }
+
+  function showSampleError(message) {
+    if (message) {
+      sampleError.textContent = message;
+      sampleError.hidden = false;
+    } else {
+      sampleError.hidden = true;
+    }
+  }
+
+  sampleImageInput.addEventListener('change', function (e) {
+    var files = e.target.files;
+    if (!files || files.length === 0) return;
+    showSampleError('');
+    sampleImageInput.disabled = true;
+    sampleProgressText.textContent = 'Reading image… 0%';
+
+    var worker;
+    Tesseract.createWorker('eng', 1, {
+      logger: function (m) {
+        if (m.status === 'recognizing text') {
+          sampleProgressText.textContent = 'Reading image… ' + Math.round(m.progress * 100) + '%';
+        }
+      },
+    })
+      .then(function (w) {
+        worker = w;
+        var fileArray = Array.prototype.slice.call(files);
+        var newRows = [];
+        return fileArray
+          .reduce(function (chain, file) {
+            return chain.then(function () {
+              return worker.recognize(file).then(function (result) {
+                newRows = newRows.concat(parseSampleListText(result.data.text));
+              });
+            });
+          }, Promise.resolve())
+          .then(function () {
+            return worker.terminate().then(function () { return newRows; });
+          });
+      })
+      .then(function (newRows) {
+        if (newRows.length === 0) {
+          showSampleError('No sample rows could be detected in the image. You can still add rows manually below.');
+        }
+        sampleRows = sampleRows.concat(newRows);
+        renderSampleTable();
+      })
+      .catch(function (err) {
+        showSampleError((err && err.message) || 'Failed to process the image.');
+      })
+      .finally(function () {
+        sampleImageInput.disabled = false;
+        sampleProgressText.textContent = '';
+        sampleImageInput.value = '';
+      });
+  });
+
+  sampleAddRowBtn.addEventListener('click', function () {
+    sampleRows.push(emptySampleRow());
+    renderSampleTable();
+  });
+
+  sampleClearAllBtn.addEventListener('click', function () {
+    sampleRows = [];
+    renderSampleTable();
+  });
+
+  sampleDownloadBtn.addEventListener('click', function () {
+    exportRowsToXlsx(sampleRows, SAMPLE_COLUMNS, 'Sample List', 'sample-list.xlsx');
+  });
+
+  // ====================================================================
+  // Listed Variant Excel tab
+  // ====================================================================
+  var variantHeaders = [];
+  var variantRows = [];
+  var variantTableHead = document.getElementById('variant-table-head');
+  var variantTableBody = document.getElementById('variant-table-body');
+  var variantFileInput = document.getElementById('variant-file-input');
+  var variantProgressText = document.getElementById('variant-progress-text');
+  var variantError = document.getElementById('variant-error');
+  var variantClearAllBtn = document.getElementById('variant-clear-all');
+  var variantDownloadBtn = document.getElementById('variant-download');
+
+  function renderVariantTable() {
+    variantTableHead.innerHTML = '';
+    var headRow = document.createElement('tr');
+    variantHeaders.forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      headRow.appendChild(th);
+    });
+    variantTableHead.appendChild(headRow);
+
+    variantTableBody.innerHTML = '';
+    if (variantRows.length === 0) {
+      var tr = document.createElement('tr');
+      var td = document.createElement('td');
+      td.className = 'empty-state';
+      td.colSpan = Math.max(variantHeaders.length, 1);
+      td.textContent = 'No data loaded yet. Upload a VarSeq Excel export to preview it here.';
+      tr.appendChild(td);
+      variantTableBody.appendChild(tr);
+    } else {
+      variantRows.forEach(function (row) {
+        var tr = document.createElement('tr');
+        variantHeaders.forEach(function (h) {
+          var td = document.createElement('td');
+          var value = row[h];
+          td.textContent = value != null ? String(value) : '';
+          tr.appendChild(td);
+        });
+        variantTableBody.appendChild(tr);
+      });
+    }
+    variantClearAllBtn.disabled = variantRows.length === 0;
+    variantDownloadBtn.disabled = variantRows.length === 0;
+  }
+
+  function showVariantError(message) {
+    if (message) {
+      variantError.textContent = message;
+      variantError.hidden = false;
+    } else {
+      variantError.hidden = true;
+    }
+  }
+
+  variantFileInput.addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    showVariantError('');
+    variantFileInput.disabled = true;
+    variantProgressText.textContent = 'Reading file…';
+
+    file.arrayBuffer()
+      .then(function (buffer) {
+        var workbook = new ExcelJS.Workbook();
+        return workbook.xlsx.load(buffer).then(function () { return workbook; });
+      })
+      .then(function (workbook) {
+        var sheet = workbook.worksheets[0];
+        if (!sheet) throw new Error('No worksheet found in the uploaded file.');
+
+        var cols = [];
+        sheet.getRow(1).eachCell({ includeEmpty: false }, function (cell) {
+          cols.push(String(cell.value != null ? cell.value : '').trim());
+        });
+
+        var rows = [];
+        sheet.eachRow(function (row, rowNumber) {
+          if (rowNumber === 1) return;
+          var rowData = {};
+          cols.forEach(function (col, idx) {
+            var cell = row.getCell(idx + 1);
+            rowData[col] = cell.value;
+          });
+          rows.push(rowData);
+        });
+
+        variantHeaders = cols;
+        variantRows = rows;
+        variantProgressText.textContent = file.name;
+        renderVariantTable();
+      })
+      .catch(function (err) {
+        showVariantError((err && err.message) || 'Failed to read the Excel file.');
+        variantHeaders = [];
+        variantRows = [];
+        variantProgressText.textContent = '';
+        renderVariantTable();
+      })
+      .finally(function () {
+        variantFileInput.disabled = false;
+        variantFileInput.value = '';
+      });
+  });
+
+  variantClearAllBtn.addEventListener('click', function () {
+    variantHeaders = [];
+    variantRows = [];
+    variantProgressText.textContent = '';
+    showVariantError('');
+    renderVariantTable();
+  });
+
+  variantDownloadBtn.addEventListener('click', function () {
+    var columns = variantHeaders.map(function (h) { return { header: h, key: h }; });
+    exportRowsToXlsx(variantRows, columns, 'Listed Variants', 'listed-variant-list.xlsx');
+  });
+
+  renderSampleTable();
+  renderVariantTable();
+})();
+</script>
+</body>
+</html>
