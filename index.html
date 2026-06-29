@@ -63,6 +63,28 @@
 
   .empty-state { text-align: center; color: var(--text); padding: 28px 12px; white-space: normal; }
 
+  /* Excel-style grid: column letters, row numbers, full cell gridlines. */
+  .excel-grid-wrapper { background: #fff; }
+  .excel-grid { font-size: 12px; }
+  .excel-grid th, .excel-grid td {
+    border: 1px solid #d4d4d4; padding: 0; white-space: nowrap;
+  }
+  .excel-grid .grid-corner, .excel-grid .grid-col-letter, .excel-grid .grid-row-number {
+    background: #f3f3f3; color: #616161; font-weight: 600; text-align: center;
+    padding: 4px 6px; min-width: 32px;
+  }
+  .excel-grid .grid-row-number { position: sticky; left: 0; }
+  .excel-grid .grid-corner { position: sticky; left: 0; z-index: 2; }
+  .excel-grid thead th:not(.grid-corner):not(.grid-col-letter) {
+    background: #f3f3f3; color: #1f1f1f; text-align: left; padding: 6px 8px;
+  }
+  .excel-grid tbody td:not(.grid-row-number) { background: #fff; }
+  .excel-grid tbody td input {
+    width: 100%; min-width: 90px; font: inherit; font-size: 12px; padding: 5px 8px;
+    border: none; border-radius: 0; background: transparent; color: #1f1f1f;
+  }
+  .excel-grid tbody td input:focus { outline: 2px solid #1a73e8; outline-offset: -2px; background: #fff; }
+
   .icon-button { border: none; background: none; color: var(--error); cursor: pointer; font-size: 14px; padding: 4px 8px; }
 
   .action-row { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -202,8 +224,8 @@
         </label>
       </div>
 
-      <div class="table-wrapper">
-        <table>
+      <div class="table-wrapper excel-grid-wrapper">
+        <table class="excel-grid">
           <thead id="variant-table-head"><tr></tr></thead>
           <tbody id="variant-table-body">
             <tr><td class="empty-state">No data loaded yet. Upload a VarSeq Excel export to preview it here.</td></tr>
@@ -955,9 +977,34 @@
     return rows;
   }
 
+  function columnLetter(n) {
+    var letters = '';
+    while (n > 0) {
+      var rem = (n - 1) % 26;
+      letters = String.fromCharCode(65 + rem) + letters;
+      n = Math.floor((n - 1) / 26);
+    }
+    return letters;
+  }
+
   function renderVariantTable() {
     variantTableHead.innerHTML = '';
+
+    var letterRow = document.createElement('tr');
+    letterRow.appendChild(document.createElement('th'));
+    letterRow.firstChild.className = 'grid-corner';
+    VARIANT_COLUMNS.forEach(function (c, i) {
+      var th = document.createElement('th');
+      th.className = 'grid-col-letter';
+      th.textContent = columnLetter(i + 1);
+      letterRow.appendChild(th);
+    });
+    variantTableHead.appendChild(letterRow);
+
     var headRow = document.createElement('tr');
+    var cornerTh = document.createElement('th');
+    cornerTh.className = 'grid-corner';
+    headRow.appendChild(cornerTh);
     VARIANT_COLUMNS.forEach(function (c) {
       var th = document.createElement('th');
       th.textContent = c.header;
@@ -970,7 +1017,7 @@
       var tr = document.createElement('tr');
       var td = document.createElement('td');
       td.className = 'empty-state';
-      td.colSpan = VARIANT_COLUMNS.length;
+      td.colSpan = VARIANT_COLUMNS.length + 1;
       td.textContent = 'No data loaded yet. Upload a VarSeq Excel export to preview it here.';
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
@@ -982,6 +1029,11 @@
         function updateInheritanceColor() {
           if (inheritanceInput) inheritanceInput.style.color = isHetWithPureAR(variantRows[rowIndex]) ? '#c2293a' : '';
         }
+
+        var rowNumTd = document.createElement('td');
+        rowNumTd.className = 'grid-row-number';
+        rowNumTd.textContent = rowIndex + 1;
+        tr.appendChild(rowNumTd);
 
         VARIANT_COLUMNS.forEach(function (c) {
           var td = document.createElement('td');
