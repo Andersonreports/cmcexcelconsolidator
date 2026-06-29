@@ -710,6 +710,13 @@
     return String(value).split(',').map(function (s) { return s.trim(); });
   }
 
+  function formatVafPercent(value) {
+    if (value == null || value === '') return '';
+    var num = parseFloat(value);
+    if (isNaN(num)) return value;
+    return (Math.round(num * 10000) / 100) + '%';
+  }
+
   function stripHgvsPrefix(value) {
     if (value == null) return '';
     var s = String(value);
@@ -910,7 +917,7 @@
         inhouseMerged: get('inhouseSamples2'),
         inhouseCount: get('inhouseCount'),
         inhouseSampleNames: get('inhouseSampleNames'),
-        vaf: get('vaf'),
+        vaf: formatVafPercent(get('vaf')),
         alleleDepths: get('alleleDepths'),
         readDepths: get('readDepths'),
         omimTitle: get('omimTitle'),
