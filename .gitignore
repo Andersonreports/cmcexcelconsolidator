@@ -1,0 +1,5 @@
+# Sample images may contain real patient/sample data - never commit these.
+*.jpg
+*.jpeg
+*.png
+*.heic
