@@ -76,6 +76,13 @@
   .action-row button.primary:disabled { background: var(--accent-bg); border-color: var(--border); color: var(--text); }
 
   input[type="file"] { font: inherit; font-size: 13px; }
+
+  .raw-text-debug { margin-top: 18px; font-size: 13px; }
+  .raw-text-debug summary { cursor: pointer; color: var(--text); }
+  .raw-text-debug pre {
+    margin-top: 10px; padding: 12px; background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 6px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto;
+  }
 </style>
 </head>
 <body>
@@ -129,6 +136,11 @@
         <button id="sample-clear-all" disabled>Clear All</button>
         <button class="primary" id="sample-download" disabled>Download Excel</button>
       </div>
+
+      <details class="raw-text-debug" id="sample-raw-debug" hidden>
+        <summary>Raw OCR text (use this to diagnose misread fields)</summary>
+        <pre id="sample-raw-debug-content"></pre>
+      </details>
     </section>
 
     <section class="tab-panel" id="panel-listed-variant" hidden>
@@ -223,10 +235,8 @@
 
   var SAMPLE_ID_RE = /\b([A-Z]{1,5}\d{0,4}[-\s][A-Z]{1,3}[-\s]\d{2,6})\b/i;
   var AGE_GENDER_RE = /\b(\d{1,3})\s*[-:]?\s*(MALE|FEMALE|M|F)\b/i;
-  var DATE_RE = /\b(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})\b/;
-  var SAMPLE_TYPE_RE = /\b([A-Z]{1,8}\s?DNA|SALIVA|BUCCAL\s?SWAB|BLOOD)\b/i;
-  var DOCTOR_RE = /\b(DR\.?\s?[A-Z][A-Z.\s]*[A-Z])\b/i;
-  var DOCTOR_HEADER_RE = /^DR\.?\s?[A-Z][A-Z.\s]*$/i;
+  // Tolerate OCR confusing the digit 0 with the letter O inside date tokens.
+  var DATE_RE = /\b([\dOo]{1,2}[.\/-][\dOo]{1,2}[.\/-][\dOo]{2,4})\b/;
 
   function normalizeGender(g) {
     var upper = g.toUpperCase();
@@ -239,25 +249,24 @@
     return id.toUpperCase().replace(/\s+/g, '-');
   }
 
+  function normalizeDate(d) {
+    return d.replace(/[Oo]/g, '0');
+  }
+
   function emptySampleRow() {
     return { sampleId: '', age: '', gender: '', date: '', sampleType: '', doctor: '', test: '' };
   }
 
-  // Best-effort extraction of tabular sample data from raw OCR text. The
-  // reference sheets interleave doctor "section header" lines with
-  // per-sample data lines, so a doctor header is remembered and used as a
-  // fallback when a data line's own doctor field isn't recognized.
+  // Best-effort extraction of tabular sample data from raw OCR text. Each
+  // data row reliably ends with "...<sample type tokens> <doctor> <test>",
+  // so doctor/test are taken positionally from the end of the line rather
+  // than matched with an open-ended regex (which previously let "doctor"
+  // swallow the trailing test code whenever both were all-caps words).
   function parseSampleListText(rawText) {
     var lines = rawText.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
     var rows = [];
-    var currentDoctor = '';
 
     lines.forEach(function (line) {
-      if (DOCTOR_HEADER_RE.test(line) && !SAMPLE_ID_RE.test(line)) {
-        currentDoctor = line.replace(/\s+/g, ' ').trim().toUpperCase();
-        return;
-      }
-
       var idMatch = line.match(SAMPLE_ID_RE);
       if (!idMatch) return;
 
@@ -269,18 +278,20 @@
       if (ageGenderMatch) remainder = remainder.slice(ageGenderMatch.index + ageGenderMatch[0].length);
 
       var dateMatch = remainder.match(DATE_RE);
-      var date = dateMatch ? dateMatch[1] : '';
+      var date = dateMatch ? normalizeDate(dateMatch[1]) : '';
       if (dateMatch) remainder = remainder.slice(dateMatch.index + dateMatch[0].length);
 
-      var sampleTypeMatch = remainder.match(SAMPLE_TYPE_RE);
-      var sampleType = sampleTypeMatch ? sampleTypeMatch[1].toUpperCase().replace(/\s+/g, ' ') : '';
-      if (sampleTypeMatch) remainder = remainder.slice(sampleTypeMatch.index + sampleTypeMatch[0].length);
-
-      var doctorMatch = remainder.match(DOCTOR_RE);
-      var doctor = doctorMatch ? doctorMatch[1].toUpperCase().replace(/\s+/g, ' ').trim() : currentDoctor;
-      if (doctorMatch) remainder = remainder.slice(doctorMatch.index + doctorMatch[0].length);
-
-      var test = remainder.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      var tailTokens = remainder.trim().split(/\s+/).filter(Boolean);
+      var test = '';
+      var doctor = '';
+      var sampleType = '';
+      if (tailTokens.length >= 2) {
+        test = tailTokens[tailTokens.length - 1].toUpperCase();
+        doctor = tailTokens[tailTokens.length - 2].toUpperCase();
+        sampleType = tailTokens.slice(0, tailTokens.length - 2).join(' ').toUpperCase();
+      } else if (tailTokens.length === 1) {
+        sampleType = tailTokens[0].toUpperCase();
+      }
 
       rows.push({
         sampleId: normalizeSampleId(idMatch[1]),
@@ -297,6 +308,7 @@
   }
 
   var sampleRows = [];
+  var sampleRawTextEntries = [];
   var sampleTableBody = document.getElementById('sample-table-body');
   var sampleImageInput = document.getElementById('sample-image-input');
   var sampleProgressText = document.getElementById('sample-progress-text');
@@ -304,6 +316,20 @@
   var sampleAddRowBtn = document.getElementById('sample-add-row');
   var sampleClearAllBtn = document.getElementById('sample-clear-all');
   var sampleDownloadBtn = document.getElementById('sample-download');
+  var sampleRawDebug = document.getElementById('sample-raw-debug');
+  var sampleRawDebugContent = document.getElementById('sample-raw-debug-content');
+
+  function renderSampleRawDebug() {
+    if (sampleRawTextEntries.length === 0) {
+      sampleRawDebug.hidden = true;
+      sampleRawDebugContent.textContent = '';
+      return;
+    }
+    sampleRawDebugContent.textContent = sampleRawTextEntries
+      .map(function (entry) { return '--- ' + entry.fileName + ' ---\n' + entry.text; })
+      .join('\n\n');
+    sampleRawDebug.hidden = false;
+  }
 
   function renderSampleTable() {
     sampleTableBody.innerHTML = '';
@@ -370,24 +396,30 @@
         worker = w;
         var fileArray = Array.prototype.slice.call(files);
         var newRows = [];
+        var newRawEntries = [];
         return fileArray
           .reduce(function (chain, file) {
             return chain.then(function () {
               return worker.recognize(file).then(function (result) {
+                newRawEntries.push({ fileName: file.name, text: result.data.text });
                 newRows = newRows.concat(parseSampleListText(result.data.text));
               });
             });
           }, Promise.resolve())
           .then(function () {
-            return worker.terminate().then(function () { return newRows; });
+            return worker.terminate().then(function () {
+              return { newRows: newRows, newRawEntries: newRawEntries };
+            });
           });
       })
-      .then(function (newRows) {
-        if (newRows.length === 0) {
+      .then(function (result) {
+        if (result.newRows.length === 0) {
           showSampleError('No sample rows could be detected in the image. You can still add rows manually below.');
         }
-        sampleRows = sampleRows.concat(newRows);
+        sampleRows = sampleRows.concat(result.newRows);
+        sampleRawTextEntries = sampleRawTextEntries.concat(result.newRawEntries);
         renderSampleTable();
+        renderSampleRawDebug();
       })
       .catch(function (err) {
         showSampleError((err && err.message) || 'Failed to process the image.');
@@ -406,7 +438,9 @@
 
   sampleClearAllBtn.addEventListener('click', function () {
     sampleRows = [];
+    sampleRawTextEntries = [];
     renderSampleTable();
+    renderSampleRawDebug();
   });
 
   sampleDownloadBtn.addEventListener('click', function () {
