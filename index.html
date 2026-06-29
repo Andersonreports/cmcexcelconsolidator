@@ -220,6 +220,87 @@
     });
   }
 
+  // ---------- Shared OCR image preprocessing ----------
+  // Validated directly in a real browser (Chromium canvas, not just a Node
+  // prototype) against real sample-list photos: plain grayscale plus EXIF
+  // auto-orientation is a safe, measurable accuracy win - especially for the
+  // Test code column. Upscaling via canvas drawImage was also tried, but the
+  // browser's resampling (even at imageSmoothingQuality "high") consistently
+  // introduced *new* misreads that weren't there at native resolution, so it
+  // is deliberately left out: this is a case where a technique that helped
+  // in a Node+sharp prototype did not hold up once tested in the real
+  // execution environment, and the in-browser result is what was kept.
+  function preprocessImageForOcr(file) {
+    var orientationOptions = { imageOrientation: 'from-image' };
+    var bitmapPromise = (window.createImageBitmap
+      ? createImageBitmap(file, orientationOptions).catch(function () {
+          return createImageBitmap(file);
+        })
+      : Promise.reject(new Error('createImageBitmap unsupported')));
+
+    return bitmapPromise
+      .catch(function () {
+        return new Promise(function (resolve, reject) {
+          var img = new Image();
+          img.onload = function () { resolve(img); };
+          img.onerror = reject;
+          img.src = URL.createObjectURL(file);
+        });
+      })
+      .then(function (sourceImage) {
+        var canvas = document.createElement('canvas');
+        canvas.width = sourceImage.width;
+        canvas.height = sourceImage.height;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(sourceImage, 0, 0, canvas.width, canvas.height);
+
+        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        var data = imageData.data;
+        for (var i = 0; i < data.length; i += 4) {
+          var gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          data[i] = gray;
+          data[i + 1] = gray;
+          data[i + 2] = gray;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        return canvas;
+      });
+  }
+
+  // ---------- Known test/panel code correction (Sample List tab only) ----------
+  // A small, conservative reference list of standard clinical-genetics test
+  // panel abbreviations. Used only to fix near-miss OCR garbling (distance 1
+  // from exactly one known code) - an exact match is never touched, so this
+  // can only ever correct, never override, a value OCR already got right.
+  var KNOWN_TEST_CODES = [
+    'WES', 'WGS', 'CES', 'IBMFS', 'RHD', 'HA', 'HB', 'CF', 'DMD', 'SMA',
+    'SCID', 'CMT', 'PKD', 'SCA', 'HSP', 'CMA', 'NIPT', 'FA', 'VWD',
+  ];
+
+  function levenshtein(a, b) {
+    var m = a.length, n = b.length;
+    var dp = [];
+    for (var i = 0; i <= m; i++) { dp.push(new Array(n + 1).fill(0)); dp[i][0] = i; }
+    for (var j = 0; j <= n; j++) dp[0][j] = j;
+    for (i = 1; i <= m; i++) {
+      for (j = 1; j <= n; j++) {
+        dp[i][j] = a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+    return dp[m][n];
+  }
+
+  function correctKnownTestCode(raw) {
+    if (!raw) return raw;
+    if (KNOWN_TEST_CODES.indexOf(raw) !== -1) return raw;
+    var candidates = KNOWN_TEST_CODES
+      .map(function (code) { return { code: code, dist: levenshtein(raw, code) }; })
+      .filter(function (c) { return c.dist <= 1; });
+    return candidates.length === 1 ? candidates[0].code : raw;
+  }
+
   // ====================================================================
   // Sample List Excel tab
   // ====================================================================
@@ -303,7 +384,7 @@
     var doctor = '';
     var sampleType = '';
     if (tailTokens.length >= 2) {
-      test = tailTokens[tailTokens.length - 1].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      test = correctKnownTestCode(tailTokens[tailTokens.length - 1].replace(/[^A-Z0-9]/gi, '').toUpperCase());
       doctor = tailTokens[tailTokens.length - 2].replace(/[^A-Z0-9.]/gi, '').toUpperCase();
       sampleType = normalizeSampleType(tailTokens.slice(0, tailTokens.length - 2).join(' ').toUpperCase());
     } else if (tailTokens.length === 1) {
@@ -428,10 +509,14 @@
         return fileArray
           .reduce(function (chain, file) {
             return chain.then(function () {
-              return worker.recognize(file).then(function (result) {
-                newRawEntries.push({ fileName: file.name, text: result.data.text });
-                newRows = newRows.concat(parseSampleListText(result.data.text));
-              });
+              return preprocessImageForOcr(file)
+                .catch(function () { return file; })
+                .then(function (image) {
+                  return worker.recognize(image).then(function (result) {
+                    newRawEntries.push({ fileName: file.name, text: result.data.text });
+                    newRows = newRows.concat(parseSampleListText(result.data.text));
+                  });
+                });
             });
           }, Promise.resolve())
           .then(function () {
