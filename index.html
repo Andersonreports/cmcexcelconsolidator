@@ -7,61 +7,111 @@
 <style>
   :root {
     --text: #6b6375;
-    --text-h: #08060d;
+    --text-h: #14111a;
     --bg: #fff;
+    --bg-page: #f5f4f8;
     --border: #e5e4e7;
+    --border-strong: #d8d6dc;
     --code-bg: #f4f3ec;
     --accent: #aa3bff;
+    --accent-dark: #8c1fe0;
     --accent-bg: rgba(170, 59, 255, 0.1);
     --accent-border: rgba(170, 59, 255, 0.5);
     --error: #c2293a;
     --error-bg: rgba(194, 41, 58, 0.08);
+    --shadow: 0 1px 2px rgba(20, 15, 35, 0.05), 0 1px 1px rgba(20, 15, 35, 0.03);
     font: 16px/145% system-ui, "Segoe UI", Roboto, sans-serif;
     color: var(--text);
-    background: var(--bg);
+    background: var(--bg-page);
   }
   * { box-sizing: border-box; }
   body { margin: 0; }
   h1, h2 { font-weight: 600; color: var(--text-h); margin: 0; }
   p { margin: 0; }
 
-  .app { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
-  .app-header h1 { font-size: 28px; margin-bottom: 20px; }
+  /* ---------- App shell: sidebar + dashboard content ---------- */
+  .app-shell { display: flex; min-height: 100vh; }
 
-  .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
-  .tab-button {
-    font: inherit; font-size: 15px; padding: 10px 18px; border: none; background: none;
-    color: var(--text); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  .sidebar {
+    width: 248px; flex: 0 0 248px; border-right: 1px solid var(--border);
+    background: linear-gradient(180deg, #fff 0%, var(--accent-bg) 100%);
+    padding: 28px 18px; display: flex; flex-direction: column; gap: 32px;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
   }
-  .tab-button:hover { color: var(--text-h); }
-  .tab-button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 6px; }
+  .brand-mark {
+    width: 38px; height: 38px; flex-shrink: 0; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px; letter-spacing: 0.02em;
+  }
+  .brand-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .brand-text strong { font-size: 14.5px; color: var(--text-h); line-height: 1.25; }
+  .brand-text span { font-size: 11px; color: var(--text); letter-spacing: 0.04em; text-transform: uppercase; }
 
-  .tab-panel h2 { font-size: 20px; margin-bottom: 6px; }
-  .tab-description { margin-bottom: 18px; font-size: 14px; max-width: 720px; }
+  .sidebar-nav { display: flex; flex-direction: column; gap: 4px; }
+  .sidebar-nav-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text);
+    padding: 0 12px; margin-bottom: 6px; font-weight: 600;
+  }
+  .nav-item {
+    all: unset; box-sizing: border-box; display: block; cursor: pointer;
+    padding: 10px 12px; border-radius: 8px; font: inherit; font-size: 14px; color: var(--text);
+    border-left: 3px solid transparent; transition: background 0.12s ease, color 0.12s ease;
+  }
+  .nav-item:hover { background: var(--accent-bg); color: var(--text-h); }
+  .nav-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; border-left-color: var(--accent); }
 
-  .upload-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .main-content { flex: 1; min-width: 0; padding: 36px 44px 64px; max-width: 1180px; }
+
+  .panel-header {
+    margin-bottom: 26px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
+  }
+  .panel-eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); font-weight: 600; margin-bottom: 6px; }
+  .panel-header h2 { font-size: 22px; }
+
+  /* ---------- Cards ---------- */
+  .card {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px 26px; margin-bottom: 22px; box-shadow: var(--shadow);
+  }
+  .card-title {
+    font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .card-title::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+  .upload-row {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 14px 16px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--bg-page);
+    margin-bottom: 14px;
+  }
+  .upload-row:last-of-type { margin-bottom: 0; }
   .progress-text { font-size: 13px; color: var(--text); }
 
   .error-banner {
     background: var(--error-bg); color: var(--error); border: 1px solid var(--error);
-    border-radius: 6px; padding: 10px 14px; font-size: 14px; margin-bottom: 16px;
+    border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-top: 14px;
   }
 
-  .table-wrapper { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px; }
+  .table-wrapper { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
-    text-align: left; background: var(--code-bg); color: var(--text-h);
+    text-align: left; background: var(--bg-page); color: var(--text-h);
     padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;
   }
-  tbody td { padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tbody td { padding: 5px 7px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   tbody tr:last-child td { border-bottom: none; }
   tbody td input {
-    width: 100%; min-width: 90px; font: inherit; font-size: 13px; padding: 6px 8px;
-    border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-h);
+    width: 100%; min-width: 90px; font: inherit; font-size: 13px; padding: 7px 9px;
+    border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-h);
+    transition: border-color 0.12s ease, background 0.12s ease;
   }
-  tbody td input:hover, tbody td input:focus { border-color: var(--border); background: var(--bg); }
+  tbody td input:hover, tbody td input:focus { border-color: var(--accent-border); background: var(--bg); }
+  tbody td input:focus { outline: none; box-shadow: 0 0 0 3px var(--accent-bg); }
 
-  .empty-state { text-align: center; color: var(--text); padding: 28px 12px; white-space: normal; }
+  .empty-state { text-align: center; color: var(--text); padding: 32px 12px; white-space: normal; }
 
   /* Excel-style grid: column letters, row numbers, full cell gridlines. */
   .excel-grid-wrapper { background: #fff; }
@@ -85,157 +135,266 @@
   }
   .excel-grid tbody td input:focus { outline: 2px solid #1a73e8; outline-offset: -2px; background: #fff; }
 
-  .icon-button { border: none; background: none; color: var(--error); cursor: pointer; font-size: 14px; padding: 4px 8px; }
+  .icon-button { border: none; background: none; color: var(--error); cursor: pointer; font-size: 14px; padding: 6px 10px; border-radius: 6px; transition: background 0.12s ease; }
+  .icon-button:hover { background: var(--error-bg); }
 
-  .action-row { display: flex; gap: 10px; flex-wrap: wrap; }
-  .action-row button, .upload-row button {
-    font: inherit; font-size: 14px; padding: 9px 16px; border-radius: 6px;
+  .action-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+  .action-row button {
+    font: inherit; font-size: 14px; padding: 10px 18px; border-radius: 8px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text-h); cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease;
   }
-  .action-row button:hover:not(:disabled) { border-color: var(--accent-border); }
+  .action-row button:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-bg); }
   .action-row button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .action-row button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .action-row button.primary:disabled { background: var(--accent-bg); border-color: var(--border); color: var(--text); }
+  .action-row button.primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 1px 2px rgba(170, 59, 255, 0.25); }
+  .action-row button.primary:hover:not(:disabled) { background: var(--accent-dark); border-color: var(--accent-dark); }
+  .action-row button.primary:disabled { background: var(--accent-bg); border-color: var(--border); color: var(--text); box-shadow: none; }
 
-  input[type="file"] { font: inherit; font-size: 13px; }
+  input[type="file"] { font: inherit; font-size: 13px; color: var(--text); }
+  input[type="file"]::file-selector-button {
+    font: inherit; font-size: 13px; padding: 8px 14px; margin-right: 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text-h); cursor: pointer;
+    transition: border-color 0.12s ease;
+  }
+  input[type="file"]::file-selector-button:hover { border-color: var(--accent-border); }
 
   .upload-label {
-    display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text);
+    display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text); font-weight: 500;
   }
 
   .title-builder {
-    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; align-items: flex-end;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end;
   }
   .title-builder label {
-    display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text);
+    display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text); font-weight: 500;
   }
   .title-builder-title { flex: 1 1 320px; }
   .title-builder input, .title-builder select {
-    font: inherit; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border);
-    border-radius: 6px; background: var(--bg); color: var(--text-h);
+    font: inherit; font-size: 13px; padding: 9px 11px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--bg); color: var(--text-h); transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .title-builder input:focus, .title-builder select:focus { outline: none; border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-bg); }
+
+  .raw-text-debug { margin-top: 16px; font-size: 13px; }
+  .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
+  .raw-text-debug pre {
+    margin-top: 10px; padding: 14px; background: var(--bg-page); border: 1px solid var(--border);
+    border-radius: 8px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto;
   }
 
-  .raw-text-debug { margin-top: 18px; font-size: 13px; }
-  .raw-text-debug summary { cursor: pointer; color: var(--text); }
-  .raw-text-debug pre {
-    margin-top: 10px; padding: 12px; background: var(--code-bg); border: 1px solid var(--border);
-    border-radius: 6px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto;
+  .mapping-toggle {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg-page);
+    margin-bottom: 18px; overflow: hidden;
+  }
+  .mapping-toggle summary {
+    list-style: none; cursor: pointer; padding: 10px 14px; font-size: 13px; font-weight: 600;
+    color: var(--text-h); display: flex; align-items: center; justify-content: space-between;
+  }
+  .mapping-toggle summary::-webkit-details-marker { display: none; }
+  .mapping-toggle summary::after { content: '▾'; color: var(--text); font-size: 11px; transition: transform 0.15s ease; }
+  .mapping-toggle[open] summary::after { transform: rotate(180deg); }
+  .mapping-toggle summary:hover { background: var(--accent-bg); }
+
+  .mapping-list {
+    border-top: 1px solid var(--border); background: var(--bg);
+    max-height: 260px; overflow-y: auto; font-size: 13px;
+  }
+  .mapping-list-row { display: flex; gap: 14px; padding: 7px 14px; border-bottom: 1px solid var(--border); }
+  .mapping-list-row:last-child { border-bottom: none; }
+  .mapping-list-col { flex: 0 0 220px; font-weight: 600; color: var(--text-h); }
+  .mapping-list-source { color: var(--text); }
+
+  @media (max-width: 860px) {
+    .app-shell { flex-direction: column; }
+    .sidebar {
+      width: 100%; flex: 0 0 auto; height: auto; position: static; overflow-y: visible;
+      border-right: none; border-bottom: 1px solid var(--border);
+      flex-direction: row; align-items: center; justify-content: space-between; gap: 16px;
+    }
+    .sidebar-nav { flex-direction: row; }
+    .sidebar-nav-label { display: none; }
+    .main-content { padding: 24px 20px 48px; }
   }
 </style>
 </head>
 <body>
-<div class="app">
-  <header class="app-header">
-    <h1>CMC Excel Consolidator</h1>
-  </header>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-mark">CMC</div>
+      <div class="brand-text">
+        <strong>Excel Consolidator</strong>
+        <span>CMC Hematology</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <span class="sidebar-nav-label">Tools</span>
+      <button class="nav-item tab-button active" data-tab="sample-list">Sample List Excel</button>
+      <button class="nav-item tab-button" data-tab="listed-variant">Listed Variant Excel</button>
+      <button class="nav-item tab-button" data-tab="final-consolidate">Sample Final Consolidate</button>
+    </nav>
+  </aside>
 
-  <nav class="tab-bar">
-    <button class="tab-button active" data-tab="sample-list">Sample List Excel</button>
-    <button class="tab-button" data-tab="listed-variant">Listed Variant Excel</button>
-  </nav>
-
-  <main>
+  <main class="main-content">
     <section class="tab-panel" id="panel-sample-list">
-      <h2>Sample List Excel</h2>
-      <p class="tab-description">
-        Upload an image of a sample list. Text is extracted automatically and arranged into a
-        table below &mdash; review and correct any fields, then download as an Excel file.
-      </p>
-
-      <div class="upload-row">
-        <input type="file" id="sample-image-input" accept="image/*" multiple />
-        <span class="progress-text" id="sample-progress-text"></span>
+      <div class="panel-header">
+        <div class="panel-eyebrow">Sample List Excel</div>
+        <h2>Build a sample list</h2>
       </div>
 
-      <div class="error-banner" id="sample-error" hidden></div>
-
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Sample ID</th>
-              <th>Age</th>
-              <th>Gender</th>
-              <th>Date</th>
-              <th>Sample Type</th>
-              <th>Doctor</th>
-              <th>Test</th>
-              <th aria-label="actions"></th>
-            </tr>
-          </thead>
-          <tbody id="sample-table-body">
-            <tr><td colspan="8" class="empty-state">No rows yet. Upload an image to extract sample data, or add a row manually.</td></tr>
-          </tbody>
-        </table>
+      <div class="card">
+        <div class="card-title">Upload</div>
+        <div class="upload-row">
+          <input type="file" id="sample-image-input" accept="image/*" multiple />
+          <span class="progress-text" id="sample-progress-text"></span>
+        </div>
+        <div class="error-banner" id="sample-error" hidden></div>
       </div>
 
-      <div class="action-row">
-        <button id="sample-add-row">Add Row</button>
-        <button id="sample-clear-all" disabled>Clear All</button>
-        <button class="primary" id="sample-download" disabled>Download Excel</button>
-      </div>
+      <div class="card">
+        <div class="card-title">Extracted rows</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Sample ID</th>
+                <th>Age</th>
+                <th>Gender</th>
+                <th>Date</th>
+                <th>Sample Type</th>
+                <th>Doctor</th>
+                <th>Phenotype</th>
+                <th aria-label="actions"></th>
+              </tr>
+            </thead>
+            <tbody id="sample-table-body">
+              <tr><td colspan="8" class="empty-state">No rows yet. Upload an image to extract sample data, or add a row manually.</td></tr>
+            </tbody>
+          </table>
+        </div>
 
-      <details class="raw-text-debug" id="sample-raw-debug" hidden>
-        <summary>Raw OCR text (use this to diagnose misread fields)</summary>
-        <pre id="sample-raw-debug-content"></pre>
-      </details>
+        <div class="action-row">
+          <button id="sample-add-row">Add Row</button>
+          <button id="sample-clear-all" disabled>Clear All</button>
+          <button class="primary" id="sample-download" disabled>Download Excel</button>
+        </div>
+
+        <details class="raw-text-debug" id="sample-raw-debug" hidden>
+          <summary>Raw OCR text (use this to diagnose misread fields)</summary>
+          <pre id="sample-raw-debug-content"></pre>
+        </details>
+      </div>
     </section>
 
     <section class="tab-panel" id="panel-listed-variant" hidden>
-      <h2>Listed Variant Excel</h2>
-      <p class="tab-description">
-        Upload the Excel file exported from VarSeq. Variants classified Benign or Likely Benign by
-        VarSeq's ACMG classifier are dropped automatically; everything else is mapped into the
-        consolidated layout below for review before download.
-      </p>
-
-      <div class="upload-row">
-        <label class="upload-label">
-          VarSeq Excel
-          <input type="file" id="variant-file-input" accept=".xlsx,.xls" />
-        </label>
-        <span class="progress-text" id="variant-progress-text"></span>
+      <div class="panel-header">
+        <div class="panel-eyebrow">Listed Variant Excel</div>
+        <h2>Consolidate listed variants</h2>
       </div>
 
-      <div class="upload-row">
-        <label class="upload-label">
-          ACMG/Franklin reference Excel (optional)
-          <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
-        </label>
-        <span class="progress-text" id="franklin-progress-text"></span>
+      <div class="card">
+        <div class="card-title">Upload</div>
+        <div class="upload-row">
+          <label class="upload-label">
+            VarSeq Excel
+            <input type="file" id="variant-file-input" accept=".xlsx,.xls" />
+          </label>
+          <span class="progress-text" id="variant-progress-text"></span>
+        </div>
+        <div class="upload-row">
+          <label class="upload-label">
+            ACMG/Franklin reference Excel (optional)
+            <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
+          </label>
+          <span class="progress-text" id="franklin-progress-text"></span>
+        </div>
+        <div class="error-banner" id="variant-error" hidden></div>
       </div>
 
-      <div class="error-banner" id="variant-error" hidden></div>
-
-      <div class="title-builder">
-        <label>
-          Link to sample
-          <select id="variant-sample-select">
-            <option value="">— None —</option>
-          </select>
-        </label>
-        <label>
-          Department
-          <input type="text" id="variant-department-input" value="CMC HEMATOLOGY" />
-        </label>
-        <label class="title-builder-title">
-          Report title (editable)
-          <input type="text" id="variant-title-input" placeholder="Pick a sample above, or type a title manually" />
-        </label>
+      <div class="card">
+        <div class="card-title">Report settings</div>
+        <div class="title-builder">
+          <label>
+            Link to sample
+            <select id="variant-sample-select">
+              <option value="">— None —</option>
+            </select>
+          </label>
+          <label>
+            Department
+            <input type="text" id="variant-department-input" value="CMC HEMATOLOGY" />
+          </label>
+          <label class="title-builder-title">
+            Report title (editable)
+            <input type="text" id="variant-title-input" placeholder="Pick a sample above, or type a title manually" />
+          </label>
+        </div>
       </div>
 
-      <div class="table-wrapper excel-grid-wrapper">
-        <table class="excel-grid">
-          <thead id="variant-table-head"><tr></tr></thead>
-          <tbody id="variant-table-body">
-            <tr><td class="empty-state">No data loaded yet. Upload a VarSeq Excel export to preview it here.</td></tr>
-          </tbody>
-        </table>
+      <div class="card">
+        <div class="card-title">Consolidated preview</div>
+        <details class="mapping-toggle" id="variant-mapping-toggle">
+          <summary>Check column mapping</summary>
+          <div class="mapping-list" id="variant-mapping-list"></div>
+        </details>
+
+        <div class="table-wrapper excel-grid-wrapper">
+          <table class="excel-grid">
+            <thead id="variant-table-head"><tr></tr></thead>
+            <tbody id="variant-table-body">
+              <tr><td class="empty-state">No data loaded yet. Upload a VarSeq Excel export to preview it here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="action-row">
+          <button id="variant-clear-all" disabled>Clear All</button>
+          <button class="primary" id="variant-download" disabled>Download Excel</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="panel-final-consolidate" hidden>
+      <div class="panel-header">
+        <div class="panel-eyebrow">Sample Final Consolidate</div>
+        <h2>Build the final consolidated report</h2>
       </div>
 
-      <div class="action-row">
-        <button id="variant-clear-all" disabled>Clear All</button>
-        <button class="primary" id="variant-download" disabled>Download Excel</button>
+      <div class="card">
+        <div class="card-title">Upload</div>
+        <div class="upload-row">
+          <label class="upload-label">
+            Summary Excel (picked variants per patient)
+            <input type="file" id="final-summary-input" accept=".xlsx,.xls" />
+          </label>
+          <span class="progress-text" id="final-summary-progress"></span>
+        </div>
+        <div class="upload-row">
+          <label class="upload-label">
+            Listed Variant Excel reports (one per patient, select all at once)
+            <input type="file" id="final-listed-input" accept=".xlsx,.xls" multiple />
+          </label>
+          <span class="progress-text" id="final-listed-progress"></span>
+        </div>
+        <div class="error-banner" id="final-error" hidden></div>
+        <div class="error-banner" id="final-warning" hidden></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Consolidated preview</div>
+        <div class="table-wrapper excel-grid-wrapper">
+          <table class="excel-grid">
+            <thead id="final-table-head"><tr></tr></thead>
+            <tbody id="final-table-body">
+              <tr><td class="empty-state">No data yet. Upload the summary file and matching Listed Variant Excel reports to preview the consolidated report here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="action-row">
+          <button id="final-clear-all" disabled>Clear All</button>
+          <button class="primary" id="final-download" disabled>Download Excel</button>
+        </div>
       </div>
     </section>
   </main>
@@ -252,6 +411,7 @@
   var panels = {
     'sample-list': document.getElementById('panel-sample-list'),
     'listed-variant': document.getElementById('panel-listed-variant'),
+    'final-consolidate': document.getElementById('panel-final-consolidate'),
   };
   tabButtons.forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -379,7 +539,7 @@
     { key: 'date', header: 'Date' },
     { key: 'sampleType', header: 'Sample Type' },
     { key: 'doctor', header: 'Doctor' },
-    { key: 'test', header: 'Test' },
+    { key: 'test', header: 'Phenotype' },
   ];
 
   var SAMPLE_ID_RE = /\b([A-Z]{1,5}\d{0,4}[-\s][A-Z]{1,3}[-\s]\d{2,6})\b/i;
@@ -667,6 +827,65 @@
     { key: 'revel', header: 'Revel Score' },
   ];
 
+  // Reference only - shown in the "Check column mapping" bar so it's easy to
+  // check what feeds each consolidated column. Not used by the actual
+  // mapping logic below; safe to delete along with that bar without
+  // affecting behavior.
+  var VARIANT_COLUMN_SOURCES = {
+    sNo: 'Generated row number (1, 2, 3…)',
+    gene: 'Gene Names (entry matching the most severe ACMG classification)',
+    variant: 'HGVS c. (prefix before ":" stripped)',
+    proteinPos: 'HGVS p. (prefix before ":" stripped)',
+    franklin: 'Optional Franklin/ACMG reference upload, matched by Gene + HGVS c.',
+    clinvar: 'Classification, under the "ClinVar" group',
+    varseq: 'Classification, under the "ACMG Sample Classifier" group',
+    zygosity: 'Zygosity (abbreviated: Heterozygous→HET, Homozygous→HOM/HEMI, Hemizygous→HEMI)',
+    inheritance: 'Inheritance, under the "OMIM" group (abbreviated: AD/AR/XLD/XLR/XL/MF)',
+    inhouseMerged: 'Samples2',
+    inhouseCount: '# Samples',
+    inhouseSampleNames: 'Sample Names',
+    vaf: 'Variant Allele Freq (formatted as a percentage)',
+    alleleDepths: 'Allelic Depths (AD)',
+    readDepths: 'Read Depths (DP)',
+    omimTitle: 'Title, under the "OMIM" group',
+    omimPhenotypes: 'Phenotypes, under the "OMIM" group',
+    omimDescription: 'Description, under the "OMIM" group',
+    diseaseLabel: 'Disease Label, under the "ClinGen Gene Disease Validity" group',
+    clingenClass: 'Classification, under the "ClinGen Gene Disease Validity" group',
+    gnomadGenome4Count: 'Allele Count, under "gnomAD Genomes" / "4.1"',
+    gnomadGenome4SA: 'South Asian Allele Count, under "gnomAD Genomes" / "4.1"',
+    gnomadGenome4SAHomo: 'South Asian Homozygous Count, under "gnomAD Genomes" / "4.1"',
+    gnomadExome4Count: 'Allele Count, under "gnomAD Exomes" / "4.1"',
+    gnomadExome4SA: 'South Asian Allele Count, under "gnomAD Exomes" / "4.1"',
+    gnomadExome4SAHomo: 'South Asian Homozygous Count, under "gnomAD Exomes" / "4.1"',
+    gnomadGenome3AC: 'Alt Allele Count (AC), under "3.1.2"',
+    gnomadGenome3Male: 'South Asian Male Allele Count (AC_SAS_XY), under "3.1.2"',
+    gnomadGenome3Female: 'South Asian Female Allele Count (AC_SAS_XX), under "3.1.2"',
+    genomeAsia: 'South Asian Alt Allele Counts (AC_SAS), under "GenomeAsia"',
+    gnomadExome2: 'South Asian Allele Count (AC_SAS), under "gnomAD Exomes" / "2.0.1"',
+    alphaMissense: 'Classification, under the "AlphaMissense" group',
+    revel: 'REVEL',
+  };
+
+  var variantMappingList = document.getElementById('variant-mapping-list');
+
+  function renderVariantMappingList() {
+    variantMappingList.innerHTML = '';
+    VARIANT_COLUMNS.forEach(function (c, i) {
+      var row = document.createElement('div');
+      row.className = 'mapping-list-row';
+      var colSpan = document.createElement('span');
+      colSpan.className = 'mapping-list-col';
+      colSpan.textContent = columnLetter(i + 1) + ' — ' + c.header;
+      var sourceSpan = document.createElement('span');
+      sourceSpan.className = 'mapping-list-source';
+      sourceSpan.textContent = VARIANT_COLUMN_SOURCES[c.key] || '—';
+      row.appendChild(colSpan);
+      row.appendChild(sourceSpan);
+      variantMappingList.appendChild(row);
+    });
+  }
+
   // Each VarSeq export can include a different set/order of annotation
   // columns (e.g. some runs add a "ClinGen Expert Curated" group, some omit
   // a "Variants" flag column), so columns are located by matching the
@@ -736,7 +955,7 @@
     if (value == null || value === '') return '';
     var num = parseFloat(value);
     if (isNaN(num)) return value;
-    return (Math.round(num * 10000) / 100) + '%';
+    return (num * 100).toFixed(2) + '%';
   }
 
   function stripHgvsPrefix(value) {
@@ -1175,8 +1394,397 @@
     });
   });
 
+  // ====================================================================
+  // Sample Final Consolidate tab
+  // ====================================================================
+  // Detail columns (protein pos, zygosity, inheritance, VAF, depths, OMIM
+  // title, ClinVar, ACMG classification) are not in the summary file at all
+  // - they're looked up from the Listed Variant Excel report(s) produced by
+  // the tab above, matched by GENE + VARIANT. Those reports already carry
+  // whatever the user finalized in each cell (e.g. FRANKLIN may have been
+  // hand-edited to a full criteria string), so values are passed through
+  // verbatim rather than recomputed.
+  var FINAL_COLUMNS = [
+    { key: 'slNo', header: 'SL. NO' },
+    { key: 'genId', header: 'GEN_ID' },
+    { key: 'name', header: 'NAME' },
+    { key: 'ageGender', header: 'AGE/GENDER' },
+    { key: 'condition', header: 'CONDITION' },
+    { key: 'gene', header: 'GENE NAME' },
+    { key: 'variant', header: 'VARIANT' },
+    { key: 'proteinPos', header: 'PROTEIN POS' },
+    { key: 'zygosity', header: 'Zygosity' },
+    { key: 'inheritance', header: 'Inheritance' },
+    { key: 'vaf', header: 'VAF(%)' },
+    { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
+    { key: 'readDepths', header: 'DEPTH(X)' },
+    { key: 'omimTitle', header: 'OMIM TITLE' },
+    { key: 'clinvar', header: 'CLINVAR' },
+    { key: 'acmgClassification', header: 'ACMG Classification; (Abbravetion: Supp-Supporting)' },
+    { key: 'literatureEvidence', header: 'Literature evidence' },
+    { key: 'cnvFinding', header: 'CNV Finding\nNote: Alternative test is strongly recommended to rule out the deletion/duplication.' },
+    { key: 'remark', header: 'Remark' },
+  ];
+
+  function normalizeGeneVariantKey(gene, variant) {
+    return String(gene || '').trim().toUpperCase() + '|' + String(variant || '').replace(/\s+/g, '').toUpperCase();
+  }
+
+  // "GENE:VARIANT" or "GENE:VARIANT:REMARK" - the summary file's compact
+  // encoding for a single picked variant. Text with no colon at all (e.g.
+  // "No pathogenic variant") means the patient has no reportable finding.
+  function parsePrimaryVariant(raw) {
+    var trimmed = String(raw || '').trim();
+    if (!trimmed || trimmed.indexOf(':') === -1) return { gene: '', variant: '' };
+    var parts = trimmed.split(':');
+    return { gene: parts[0].trim(), variant: (parts[1] || '').trim() };
+  }
+
+  // Same encoding as parsePrimaryVariant, comma-separated for multiple
+  // additional variants.
+  function parseAdditionalVariants(raw) {
+    var trimmed = String(raw || '').trim();
+    if (!trimmed) return [];
+    return trimmed.split(',').map(function (chunk) { return chunk.trim(); }).filter(Boolean).map(function (chunk) {
+      var parts = chunk.split(':');
+      return {
+        gene: (parts[0] || '').trim(),
+        variant: (parts[1] || '').trim(),
+        remark: parts.slice(2).join(':').trim(),
+      };
+    });
+  }
+
+  function processFinalSummaryWorkbook(workbook) {
+    var sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found in the uploaded summary file.');
+    var patients = [];
+    sheet.eachRow(function (row, r) {
+      if (r === 1) return;
+      var genId = String(row.getCell(2).value || '').trim();
+      if (!genId) return;
+      patients.push({
+        slNo: row.getCell(1).value,
+        genId: genId,
+        name: String(row.getCell(3).value || ''),
+        ageGender: String(row.getCell(4).value || ''),
+        condition: String(row.getCell(5).value || ''),
+        snvResult: row.getCell(6).value,
+        literatureEvidence: row.getCell(7).value,
+        additionalVariants: parseAdditionalVariants(row.getCell(10).value),
+        additionalVariantLiteratureEvidence: splitList(row.getCell(8).value),
+        cnvResult: row.getCell(9).value,
+      });
+    });
+    return patients;
+  }
+
+  // Reads back the app's own Listed Variant Excel export. Row 1 is either
+  // the literal header ("S.NO") or an optional title row (only present if a
+  // sample/title was picked before downloading), so the header row is
+  // detected rather than assumed - everything below it is GENE/VARIANT keyed
+  // detail data. Matching a file to a specific patient isn't required: every
+  // uploaded file's entries are pooled into one shared lookup, so any file
+  // that contains a picked Gene+Variant resolves it as soon as it's
+  // uploaded, with no dependency on titles or upload order.
+  function readListedVariantEntries(workbook) {
+    var sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found in one of the Listed Variant Excel files.');
+    var cellA1 = String(sheet.getRow(1).getCell(1).value || '').trim();
+    var headerRowIndex = cellA1.toUpperCase() === 'S.NO' ? 1 : 2;
+
+    var entries = [];
+    sheet.eachRow(function (row, r) {
+      if (r <= headerRowIndex) return;
+      var gene = String(row.getCell(2).value || '').trim();
+      var variant = String(row.getCell(3).value || '').trim();
+      if (!gene || !variant) return;
+      entries.push({
+        key: normalizeGeneVariantKey(gene, variant),
+        proteinPos: row.getCell(4).value,
+        franklin: row.getCell(5).value,
+        clinvar: row.getCell(6).value,
+        zygosity: row.getCell(8).value,
+        inheritance: row.getCell(9).value,
+        vaf: row.getCell(13).value,
+        alleleDepths: row.getCell(14).value,
+        readDepths: row.getCell(15).value,
+        omimTitle: row.getCell(16).value,
+      });
+    });
+    return entries;
+  }
+
+  var finalSummaryPatients = [];
+  var finalListedVariantEntries = new Map();
+  var finalListedFileCount = 0;
+  var finalConsolidateRows = [];
+  var finalSummaryInput = document.getElementById('final-summary-input');
+  var finalSummaryProgress = document.getElementById('final-summary-progress');
+  var finalListedInput = document.getElementById('final-listed-input');
+  var finalListedProgress = document.getElementById('final-listed-progress');
+  var finalError = document.getElementById('final-error');
+  var finalWarning = document.getElementById('final-warning');
+  var finalTableHead = document.getElementById('final-table-head');
+  var finalTableBody = document.getElementById('final-table-body');
+  var finalClearAllBtn = document.getElementById('final-clear-all');
+  var finalDownloadBtn = document.getElementById('final-download');
+
+  function showFinalError(message) {
+    if (message) {
+      finalError.textContent = message;
+      finalError.hidden = false;
+    } else {
+      finalError.hidden = true;
+    }
+  }
+
+  function showFinalWarning(message) {
+    if (message) {
+      finalWarning.textContent = message;
+      finalWarning.hidden = false;
+    } else {
+      finalWarning.hidden = true;
+    }
+  }
+
+  // Builds one output row per picked variant (the primary SNV Result plus
+  // every additional variant), carrying patient identity columns only on
+  // the first row of each patient's block - later rows leave them blank,
+  // mirroring the merged-cell look of the canonical report template.
+  function buildFinalConsolidateRows() {
+    var rows = [];
+    var unmatchedPicks = [];
+
+    finalSummaryPatients.forEach(function (patient) {
+      function buildVariantRow(gene, variant, remark, literatureEvidence) {
+        var details = (gene && variant) ? finalListedVariantEntries.get(normalizeGeneVariantKey(gene, variant)) : null;
+        var unmatched = !!(gene && variant && !details);
+        if (unmatched) unmatchedPicks.push(gene + ' ' + variant);
+        return {
+          gene: gene || '',
+          variant: variant || '',
+          proteinPos: details ? details.proteinPos : '',
+          zygosity: details ? details.zygosity : '',
+          inheritance: details ? details.inheritance : '',
+          vaf: details ? details.vaf : '',
+          alleleDepths: details ? details.alleleDepths : '',
+          readDepths: details ? details.readDepths : '',
+          omimTitle: details ? details.omimTitle : '',
+          clinvar: details ? details.clinvar : '',
+          acmgClassification: details ? details.franklin : '',
+          literatureEvidence: literatureEvidence || '',
+          remark: remark || '',
+          unmatched: unmatched,
+        };
+      }
+
+      var primary = parsePrimaryVariant(patient.snvResult);
+      var variantRows = [
+        primary.gene
+          ? buildVariantRow(primary.gene, primary.variant, '', patient.literatureEvidence)
+          : buildVariantRow('No Pathogenic Variant', '', '', patient.literatureEvidence),
+      ];
+
+      patient.additionalVariants.forEach(function (av, i) {
+        variantRows.push(buildVariantRow(av.gene, av.variant, av.remark, patient.additionalVariantLiteratureEvidence[i] || ''));
+      });
+
+      variantRows.forEach(function (vr, i) {
+        rows.push({
+          slNo: i === 0 ? patient.slNo : '',
+          genId: i === 0 ? patient.genId : '',
+          name: i === 0 ? patient.name : '',
+          ageGender: i === 0 ? patient.ageGender : '',
+          condition: i === 0 ? patient.condition : '',
+          cnvFinding: i === 0 ? patient.cnvResult : '',
+          gene: vr.gene,
+          variant: vr.variant,
+          proteinPos: vr.proteinPos,
+          zygosity: vr.zygosity,
+          inheritance: vr.inheritance,
+          vaf: vr.vaf,
+          alleleDepths: vr.alleleDepths,
+          readDepths: vr.readDepths,
+          omimTitle: vr.omimTitle,
+          clinvar: vr.clinvar,
+          acmgClassification: vr.acmgClassification,
+          literatureEvidence: vr.literatureEvidence,
+          remark: vr.remark,
+          unmatched: vr.unmatched,
+        });
+      });
+    });
+
+    finalConsolidateRows = rows;
+    renderFinalTable();
+    showFinalWarning(unmatchedPicks.length
+      ? unmatchedPicks.length + ' picked variant(s) not found in the uploaded Listed Variant Excel files (flagged red below): ' + unmatchedPicks.join(', ')
+      : '');
+  }
+
+  function renderFinalTable() {
+    finalTableHead.innerHTML = '';
+
+    var letterRow = document.createElement('tr');
+    letterRow.appendChild(document.createElement('th'));
+    letterRow.firstChild.className = 'grid-corner';
+    FINAL_COLUMNS.forEach(function (c, i) {
+      var th = document.createElement('th');
+      th.className = 'grid-col-letter';
+      th.textContent = columnLetter(i + 1);
+      letterRow.appendChild(th);
+    });
+    finalTableHead.appendChild(letterRow);
+
+    var headRow = document.createElement('tr');
+    var cornerTh = document.createElement('th');
+    cornerTh.className = 'grid-corner';
+    headRow.appendChild(cornerTh);
+    FINAL_COLUMNS.forEach(function (c) {
+      var th = document.createElement('th');
+      th.textContent = c.header;
+      headRow.appendChild(th);
+    });
+    finalTableHead.appendChild(headRow);
+
+    finalTableBody.innerHTML = '';
+    if (finalConsolidateRows.length === 0) {
+      var tr = document.createElement('tr');
+      var td = document.createElement('td');
+      td.className = 'empty-state';
+      td.colSpan = FINAL_COLUMNS.length + 1;
+      td.textContent = 'No data yet. Upload the summary file and matching Listed Variant Excel reports to preview the consolidated report here.';
+      tr.appendChild(td);
+      finalTableBody.appendChild(tr);
+    } else {
+      finalConsolidateRows.forEach(function (row, rowIndex) {
+        var tr = document.createElement('tr');
+
+        var rowNumTd = document.createElement('td');
+        rowNumTd.className = 'grid-row-number';
+        rowNumTd.textContent = rowIndex + 1;
+        tr.appendChild(rowNumTd);
+
+        FINAL_COLUMNS.forEach(function (c) {
+          var td = document.createElement('td');
+          var input = document.createElement('input');
+          input.value = row[c.key] != null ? row[c.key] : '';
+          if (row.unmatched && (c.key === 'gene' || c.key === 'variant')) {
+            input.style.color = '#c2293a';
+          }
+          input.addEventListener('input', function (e) {
+            finalConsolidateRows[rowIndex][c.key] = e.target.value;
+          });
+          td.appendChild(input);
+          tr.appendChild(td);
+        });
+
+        finalTableBody.appendChild(tr);
+      });
+    }
+    finalClearAllBtn.disabled = finalConsolidateRows.length === 0;
+    finalDownloadBtn.disabled = finalConsolidateRows.length === 0;
+  }
+
+  finalSummaryInput.addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    showFinalError('');
+    finalSummaryInput.disabled = true;
+    finalSummaryProgress.textContent = 'Reading file…';
+
+    file.arrayBuffer()
+      .then(function (buffer) {
+        var workbook = new ExcelJS.Workbook();
+        return workbook.xlsx.load(buffer).then(function () { return workbook; });
+      })
+      .then(function (workbook) {
+        finalSummaryPatients = processFinalSummaryWorkbook(workbook);
+        finalSummaryProgress.textContent = file.name + ' (' + finalSummaryPatients.length + ' patients)';
+        buildFinalConsolidateRows();
+      })
+      .catch(function (err) {
+        showFinalError((err && err.message) || 'Failed to read the summary file.');
+        finalSummaryPatients = [];
+        finalSummaryProgress.textContent = '';
+        buildFinalConsolidateRows();
+      })
+      .finally(function () {
+        finalSummaryInput.disabled = false;
+        finalSummaryInput.value = '';
+      });
+  });
+
+  finalListedInput.addEventListener('change', function (e) {
+    var files = e.target.files;
+    if (!files || files.length === 0) return;
+    showFinalError('');
+    finalListedInput.disabled = true;
+    finalListedProgress.textContent = 'Reading files…';
+
+    var fileArray = Array.prototype.slice.call(files);
+    Promise.all(fileArray.map(function (file) {
+      return file.arrayBuffer().then(function (buffer) {
+        var workbook = new ExcelJS.Workbook();
+        return workbook.xlsx.load(buffer).then(function () { return readListedVariantEntries(workbook); });
+      });
+    }))
+      .then(function (entryLists) {
+        entryLists.forEach(function (entries) {
+          entries.forEach(function (entry) {
+            if (!finalListedVariantEntries.has(entry.key)) finalListedVariantEntries.set(entry.key, entry);
+          });
+        });
+        finalListedFileCount += fileArray.length;
+        finalListedProgress.textContent = finalListedFileCount + ' file(s) loaded (' + finalListedVariantEntries.size + ' variant entries indexed)';
+        buildFinalConsolidateRows();
+      })
+      .catch(function (err) {
+        showFinalError((err && err.message) || 'Failed to read one of the Listed Variant Excel files.');
+      })
+      .finally(function () {
+        finalListedInput.disabled = false;
+        finalListedInput.value = '';
+      });
+  });
+
+  finalClearAllBtn.addEventListener('click', function () {
+    finalSummaryPatients = [];
+    finalListedVariantEntries = new Map();
+    finalListedFileCount = 0;
+    finalConsolidateRows = [];
+    finalSummaryProgress.textContent = '';
+    finalListedProgress.textContent = '';
+    showFinalError('');
+    showFinalWarning('');
+    renderFinalTable();
+  });
+
+  finalDownloadBtn.addEventListener('click', function () {
+    var workbook = new ExcelJS.Workbook();
+    var sheet = workbook.addWorksheet('Final Consolidated');
+
+    FINAL_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 20; });
+
+    var headerRow = sheet.getRow(1);
+    FINAL_COLUMNS.forEach(function (c, i) { headerRow.getCell(i + 1).value = c.header; });
+    headerRow.font = { bold: true };
+
+    finalConsolidateRows.forEach(function (row, i) {
+      var dataRow = sheet.getRow(i + 2);
+      FINAL_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+    });
+
+    workbook.xlsx.writeBuffer().then(function (buffer) {
+      downloadBlob(buffer, 'final-consolidated-report.xlsx');
+    });
+  });
+
   renderSampleTable();
   renderVariantTable();
+  renderVariantMappingList();
+  renderFinalTable();
   populateSampleSelect();
 })();
 </script>
