@@ -4,64 +4,101 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>CMC Excel Consolidator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23aa3bff'/%3E%3Ctext x='32' y='44' font-size='32' font-family='system-ui,sans-serif' font-weight='700' fill='white' text-anchor='middle'%3ECX%3C/text%3E%3C/svg%3E" />
 <style>
   :root {
     --text: #6b6375;
     --text-h: #08060d;
     --bg: #fff;
+    --bg-page: #f4f2fa;
     --border: #e5e4e7;
     --code-bg: #f4f3ec;
     --accent: #aa3bff;
+    --accent-hover: #9526ef;
     --accent-bg: rgba(170, 59, 255, 0.1);
     --accent-border: rgba(170, 59, 255, 0.5);
     --error: #c2293a;
     --error-bg: rgba(194, 41, 58, 0.08);
+    --shadow-sm: 0 1px 2px rgba(8, 6, 13, 0.06);
+    --shadow-md: 0 12px 32px rgba(34, 14, 71, 0.1);
+    --radius: 14px;
     font: 16px/145% system-ui, "Segoe UI", Roboto, sans-serif;
     color: var(--text);
-    background: var(--bg);
+    background: var(--bg-page);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(1100px 520px at 50% -120px, #f1e7ff 0%, var(--bg-page) 55%);
+  }
   h1, h2 { font-weight: 600; color: var(--text-h); margin: 0; }
   p { margin: 0; }
 
-  .app { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
-  .app-header h1 { font-size: 28px; margin-bottom: 20px; }
-
-  .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
-  .tab-button {
-    font: inherit; font-size: 15px; padding: 10px 18px; border: none; background: none;
-    color: var(--text); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  .app {
+    max-width: 1100px; margin: 40px auto; padding: 32px 36px 48px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow-md);
   }
-  .tab-button:hover { color: var(--text-h); }
-  .tab-button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .app-header { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+  .app-logo {
+    flex: none; width: 42px; height: 42px; border-radius: 11px; display: flex;
+    align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 17px;
+    background: linear-gradient(135deg, var(--accent), #6f17c4); box-shadow: var(--shadow-sm);
+  }
+  .app-header h1 { font-size: 26px; }
+  .app-subtitle { font-size: 13.5px; color: var(--text); margin-top: 2px; }
+
+  .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 26px 0 28px; }
+  .tab-button {
+    font: inherit; font-size: 14.5px; font-weight: 500; padding: 10px 20px 12px; border: none;
+    background: none; color: var(--text); cursor: pointer; border-bottom: 2px solid transparent;
+    margin-bottom: -1px; border-radius: 8px 8px 0 0; transition: color .15s ease, background-color .15s ease;
+  }
+  .tab-button:hover { color: var(--text-h); background: var(--accent-bg); }
+  .tab-button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; background: var(--accent-bg); }
 
   .tab-panel h2 { font-size: 20px; margin-bottom: 6px; }
-  .tab-description { margin-bottom: 18px; font-size: 14px; max-width: 720px; }
+  .tab-description { margin-bottom: 20px; font-size: 14px; max-width: 720px; }
 
-  .upload-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-  .progress-text { font-size: 13px; color: var(--text); }
+  .upload-row {
+    display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap;
+    padding: 14px 16px; border: 1px dashed var(--border); border-radius: 10px; background: #fcfbff;
+    transition: border-color .15s ease, background-color .15s ease;
+  }
+  .upload-row:hover { border-color: var(--accent-border); background: var(--accent-bg); }
+  .upload-row:has(input:disabled) { opacity: .7; }
+  .progress-text { font-size: 13px; color: var(--accent); font-weight: 500; }
 
   .error-banner {
+    display: flex; align-items: flex-start; gap: 9px;
     background: var(--error-bg); color: var(--error); border: 1px solid var(--error);
-    border-radius: 6px; padding: 10px 14px; font-size: 14px; margin-bottom: 16px;
+    border-radius: 8px; padding: 11px 15px; font-size: 14px; margin-bottom: 18px;
   }
+  .error-banner::before { content: "\26A0"; line-height: 1.4; }
 
-  .table-wrapper { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px; }
+  .table-wrapper {
+    overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 18px; box-shadow: var(--shadow-sm);
+  }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table:not(.excel-grid) thead th { position: sticky; top: 0; z-index: 1; }
   thead th {
-    text-align: left; background: var(--code-bg); color: var(--text-h);
-    padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
+    text-align: left; background: var(--code-bg); color: var(--text-h); font-weight: 600;
+    padding: 11px 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
   }
   tbody td { padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   tbody tr:last-child td { border-bottom: none; }
+  table:not(.excel-grid) tbody tr:hover td { background: var(--accent-bg); }
   tbody td input {
-    width: 100%; min-width: 90px; font: inherit; font-size: 13px; padding: 6px 8px;
-    border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-h);
+    width: 100%; min-width: 90px; font: inherit; font-size: 13px; padding: 7px 9px;
+    border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-h);
+    transition: border-color .12s ease, background-color .12s ease;
   }
-  tbody td input:hover, tbody td input:focus { border-color: var(--border); background: var(--bg); }
+  tbody td input:hover { border-color: var(--border); background: var(--bg); }
+  tbody td input:focus { border-color: var(--accent); background: var(--bg); outline: none; box-shadow: 0 0 0 3px var(--accent-bg); }
 
-  .empty-state { text-align: center; color: var(--text); padding: 28px 12px; white-space: normal; }
+  .empty-state { text-align: center; color: var(--text); padding: 40px 12px; white-space: normal; font-size: 13.5px; }
 
   /* Excel-style grid: column letters, row numbers, full cell gridlines. */
   .excel-grid-wrapper { background: #fff; }
@@ -79,54 +116,83 @@
     background: #f3f3f3; color: #1f1f1f; text-align: left; padding: 6px 8px;
   }
   .excel-grid tbody td:not(.grid-row-number) { background: #fff; }
+  .excel-grid tbody tr:hover td:not(.grid-row-number) { background: #f5f9ff; }
   .excel-grid tbody td input {
     width: 100%; min-width: 90px; font: inherit; font-size: 12px; padding: 5px 8px;
     border: none; border-radius: 0; background: transparent; color: #1f1f1f;
   }
   .excel-grid tbody td input:focus { outline: 2px solid #1a73e8; outline-offset: -2px; background: #fff; }
 
-  .icon-button { border: none; background: none; color: var(--error); cursor: pointer; font-size: 14px; padding: 4px 8px; }
+  .icon-button {
+    border: none; background: none; color: var(--error); cursor: pointer; font-size: 14px;
+    padding: 4px 8px; border-radius: 6px; transition: background-color .12s ease;
+  }
+  .icon-button:hover { background: var(--error-bg); }
 
   .action-row { display: flex; gap: 10px; flex-wrap: wrap; }
   .action-row button, .upload-row button {
-    font: inherit; font-size: 14px; padding: 9px 16px; border-radius: 6px;
+    font: inherit; font-size: 14px; font-weight: 500; padding: 10px 18px; border-radius: 8px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text-h); cursor: pointer;
+    box-shadow: var(--shadow-sm); transition: border-color .15s ease, background-color .15s ease, transform .1s ease;
   }
-  .action-row button:hover:not(:disabled) { border-color: var(--accent-border); }
-  .action-row button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .action-row button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .action-row button.primary:disabled { background: var(--accent-bg); border-color: var(--border); color: var(--text); }
+  .action-row button:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-bg); transform: translateY(-1px); }
+  .action-row button:active:not(:disabled) { transform: translateY(0); }
+  .action-row button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+  .action-row button.primary { background: linear-gradient(135deg, var(--accent), #8d22e8); border-color: transparent; color: #fff; }
+  .action-row button.primary:hover:not(:disabled) { filter: brightness(1.06); background: linear-gradient(135deg, var(--accent), #8d22e8); }
+  .action-row button.primary:disabled { background: var(--accent-bg); border-color: var(--border); color: var(--text); filter: none; }
 
-  input[type="file"] { font: inherit; font-size: 13px; }
+  input[type="file"] { font: inherit; font-size: 13px; color: var(--text); }
+  input[type="file"]::file-selector-button {
+    font: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 16px; margin-right: 12px;
+    border-radius: 7px; border: 1px solid transparent; background: var(--accent); color: #fff; cursor: pointer;
+    transition: background-color .15s ease, transform .1s ease;
+  }
+  input[type="file"]::file-selector-button:hover { background: var(--accent-hover); }
+  input[type="file"]::file-selector-button:active { transform: scale(0.97); }
 
   .upload-label {
-    display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text);
+    display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text);
   }
 
   .title-builder {
-    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; align-items: flex-end;
+    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; align-items: flex-end;
+    padding: 16px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
   }
   .title-builder label {
-    display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text);
+    display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; color: var(--text);
   }
   .title-builder-title { flex: 1 1 320px; }
   .title-builder input, .title-builder select {
-    font: inherit; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border);
-    border-radius: 6px; background: var(--bg); color: var(--text-h);
+    font: inherit; font-size: 13px; padding: 9px 11px; border: 1px solid var(--border);
+    border-radius: 7px; background: var(--bg); color: var(--text-h); transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .title-builder input:focus, .title-builder select:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg);
   }
 
   .raw-text-debug { margin-top: 18px; font-size: 13px; }
-  .raw-text-debug summary { cursor: pointer; color: var(--text); }
+  .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; padding: 6px 0; }
+  .raw-text-debug summary:hover { color: var(--text-h); }
   .raw-text-debug pre {
     margin-top: 10px; padding: 12px; background: var(--code-bg); border: 1px solid var(--border);
-    border-radius: 6px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto;
+    border-radius: 8px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto;
+  }
+
+  @media (max-width: 640px) {
+    .app { margin: 0; padding: 22px 18px 40px; border-radius: 0; border-width: 0 0 1px; }
+    .title-builder { flex-direction: column; align-items: stretch; }
   }
 </style>
 </head>
 <body>
 <div class="app">
   <header class="app-header">
-    <h1>CMC Excel Consolidator</h1>
+    <div class="app-logo" aria-hidden="true">CX</div>
+    <div>
+      <h1>CMC Excel Consolidator</h1>
+      <p class="app-subtitle">Turn sample-list photos and VarSeq exports into ready-to-send Excel reports.</p>
+    </div>
   </header>
 
   <nav class="tab-bar">
@@ -170,9 +236,9 @@
       </div>
 
       <div class="action-row">
-        <button id="sample-add-row">Add Row</button>
+        <button id="sample-add-row">+ Add Row</button>
         <button id="sample-clear-all" disabled>Clear All</button>
-        <button class="primary" id="sample-download" disabled>Download Excel</button>
+        <button class="primary" id="sample-download" disabled>&#8595; Download Excel</button>
       </div>
 
       <details class="raw-text-debug" id="sample-raw-debug" hidden>
@@ -235,7 +301,7 @@
 
       <div class="action-row">
         <button id="variant-clear-all" disabled>Clear All</button>
-        <button class="primary" id="variant-download" disabled>Download Excel</button>
+        <button class="primary" id="variant-download" disabled>&#8595; Download Excel</button>
       </div>
     </section>
   </main>
