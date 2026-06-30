@@ -4,183 +4,204 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>CMC Excel Consolidator</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23aa3bff'/%3E%3Ctext x='32' y='44' font-size='32' font-family='system-ui,sans-serif' font-weight='700' fill='white' text-anchor='middle'%3ECX%3C/text%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23faf2e2' stroke='%231c1812' stroke-width='2'/%3E%3Ctext x='32' y='43' font-size='30' font-family='Georgia,serif' font-weight='600' fill='%231c1812' text-anchor='middle'%3EC%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --text: #6b6375;
-    --text-h: #08060d;
-    --bg: #fff;
-    --bg-page: #f4f2fa;
-    --border: #e5e4e7;
-    --code-bg: #f4f3ec;
-    --accent: #aa3bff;
-    --accent-hover: #9526ef;
-    --accent-bg: rgba(170, 59, 255, 0.1);
-    --accent-border: rgba(170, 59, 255, 0.5);
-    --error: #c2293a;
-    --error-bg: rgba(194, 41, 58, 0.08);
-    --shadow-sm: 0 1px 2px rgba(8, 6, 13, 0.06);
-    --shadow-md: 0 12px 32px rgba(34, 14, 71, 0.1);
-    --radius: 14px;
-    font: 16px/145% system-ui, "Segoe UI", Roboto, sans-serif;
+    --ink: #1c1812;
+    --text: #6f6557;
+    --bg: #fffdf9;
+    --bg-page: #f7f2e7;
+    --border: #e6ddc8;
+    --code-bg: #f1ead9;
+    --accent: #3c2f63;
+    --accent-soft: rgba(60, 47, 99, 0.08);
+    --accent-2: #ab8a4d;
+    --error: #8a2420;
+    --error-bg: #fbeceb;
+    --error-border: #e3b9b6;
+    --radius: 6px;
+    --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --sans: 'Inter', system-ui, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font: 16px/145% var(--sans);
     color: var(--text);
     background: var(--bg-page);
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    background: radial-gradient(1100px 520px at 50% -120px, #f1e7ff 0%, var(--bg-page) 55%);
-  }
-  h1, h2 { font-weight: 600; color: var(--text-h); margin: 0; }
+  body { margin: 0; min-height: 100vh; background: var(--bg-page); }
+  h1, h2 { font-weight: 600; color: var(--ink); margin: 0; }
   p { margin: 0; }
 
   .app {
-    max-width: 1100px; margin: 40px auto; padding: 32px 36px 48px;
+    position: relative; max-width: 1120px; margin: 48px auto; padding: 40px 44px 56px;
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 1px 3px rgba(28, 24, 18, 0.05);
   }
-  .app-header { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+  .app::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+
+  .app-header {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;
+    padding-bottom: 24px; border-bottom: 1px solid var(--border);
+  }
+  .eyebrow {
+    font: 600 11px/1.4 var(--sans); letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent-2); margin: 0 0 10px;
+  }
+  .app-header h1 { font-family: var(--serif); font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
+  .app-subtitle { font-family: var(--serif); font-style: italic; font-size: 15px; color: var(--text); margin-top: 9px; }
   .app-logo {
-    flex: none; width: 42px; height: 42px; border-radius: 11px; display: flex;
-    align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 17px;
-    background: linear-gradient(135deg, var(--accent), #6f17c4); box-shadow: var(--shadow-sm);
+    flex: none; width: 54px; height: 54px; border-radius: 50%; border: 1.5px solid var(--ink);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-size: 23px; font-weight: 600; color: var(--ink); background: var(--bg);
   }
-  .app-header h1 { font-size: 26px; }
-  .app-subtitle { font-size: 13.5px; color: var(--text); margin-top: 2px; }
 
-  .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 26px 0 28px; }
+  .tab-bar { display: flex; gap: 30px; border-bottom: 1px solid var(--border); margin: 0 0 32px; padding-top: 20px; }
   .tab-button {
-    font: inherit; font-size: 14.5px; font-weight: 500; padding: 10px 20px 12px; border: none;
-    background: none; color: var(--text); cursor: pointer; border-bottom: 2px solid transparent;
-    margin-bottom: -1px; border-radius: 8px 8px 0 0; transition: color .15s ease, background-color .15s ease;
+    font: 600 12.5px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase;
+    padding: 0 0 16px; border: none; background: none; color: var(--text); cursor: pointer;
+    position: relative; margin-bottom: -1px; transition: color .15s ease;
   }
-  .tab-button:hover { color: var(--text-h); background: var(--accent-bg); }
-  .tab-button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; background: var(--accent-bg); }
+  .tab-button::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent-2);
+    transform: scaleX(0); transform-origin: left; transition: transform .2s ease;
+  }
+  .tab-button:hover { color: var(--ink); }
+  .tab-button.active { color: var(--ink); }
+  .tab-button.active::after { transform: scaleX(1); }
 
-  .tab-panel h2 { font-size: 20px; margin-bottom: 6px; }
-  .tab-description { margin-bottom: 20px; font-size: 14px; max-width: 720px; }
+  .tab-panel h2 { font-family: var(--serif); font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+  .tab-description { margin-bottom: 22px; font-size: 14px; max-width: 720px; }
 
   .upload-row {
     display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap;
-    padding: 14px 16px; border: 1px dashed var(--border); border-radius: 10px; background: #fcfbff;
+    padding: 14px 16px; border: 1px dashed var(--border); border-radius: 4px; background: var(--bg-page);
     transition: border-color .15s ease, background-color .15s ease;
   }
-  .upload-row:hover { border-color: var(--accent-border); background: var(--accent-bg); }
+  .upload-row:hover { border-color: var(--accent-2); background: #f3ecd9; }
   .upload-row:has(input:disabled) { opacity: .7; }
   .progress-text { font-size: 13px; color: var(--accent); font-weight: 500; }
 
   .error-banner {
     display: flex; align-items: flex-start; gap: 9px;
-    background: var(--error-bg); color: var(--error); border: 1px solid var(--error);
-    border-radius: 8px; padding: 11px 15px; font-size: 14px; margin-bottom: 18px;
+    background: var(--error-bg); color: var(--error); border: 1px solid var(--error-border); border-left: 3px solid var(--error);
+    border-radius: 2px; padding: 12px 16px; font-size: 14px; margin-bottom: 18px;
   }
   .error-banner::before { content: "\26A0"; line-height: 1.4; }
 
   .table-wrapper {
-    overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 10px;
-    margin-bottom: 18px; box-shadow: var(--shadow-sm);
+    overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 4px;
+    margin-bottom: 18px;
   }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   table:not(.excel-grid) thead th { position: sticky; top: 0; z-index: 1; }
   thead th {
-    text-align: left; background: var(--code-bg); color: var(--text-h); font-weight: 600;
-    padding: 11px 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
+    text-align: left; background: var(--bg-page); color: var(--text); font: 600 11px/1.4 var(--sans);
+    letter-spacing: .07em; text-transform: uppercase;
+    padding: 13px 12px; border-bottom: 2px solid var(--ink); white-space: nowrap;
   }
   tbody td { padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   tbody tr:last-child td { border-bottom: none; }
-  table:not(.excel-grid) tbody tr:hover td { background: var(--accent-bg); }
+  table:not(.excel-grid) tbody tr:hover td { background: var(--code-bg); }
   tbody td input {
     width: 100%; min-width: 90px; font: inherit; font-size: 13px; padding: 7px 9px;
-    border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-h);
+    border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--ink);
     transition: border-color .12s ease, background-color .12s ease;
   }
   tbody td input:hover { border-color: var(--border); background: var(--bg); }
-  tbody td input:focus { border-color: var(--accent); background: var(--bg); outline: none; box-shadow: 0 0 0 3px var(--accent-bg); }
+  tbody td input:focus { border-color: var(--accent); background: var(--bg); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 
-  .empty-state { text-align: center; color: var(--text); padding: 40px 12px; white-space: normal; font-size: 13.5px; }
+  .empty-state { text-align: center; color: var(--text); padding: 40px 12px; white-space: normal; font: italic 15px/1.5 var(--serif); }
 
   /* Excel-style grid: column letters, row numbers, full cell gridlines. */
   .excel-grid-wrapper { background: #fff; }
   .excel-grid { font-size: 12px; }
   .excel-grid th, .excel-grid td {
-    border: 1px solid #d4d4d4; padding: 0; white-space: nowrap;
+    border: 1px solid #d8d2c2; padding: 0; white-space: nowrap;
   }
   .excel-grid .grid-corner, .excel-grid .grid-col-letter, .excel-grid .grid-row-number {
-    background: #f3f3f3; color: #616161; font-weight: 600; text-align: center;
+    background: var(--bg-page); color: var(--text); font-weight: 600; text-align: center;
     padding: 4px 6px; min-width: 32px;
   }
   .excel-grid .grid-row-number { position: sticky; left: 0; }
   .excel-grid .grid-corner { position: sticky; left: 0; z-index: 2; }
   .excel-grid thead th:not(.grid-corner):not(.grid-col-letter) {
-    background: #f3f3f3; color: #1f1f1f; text-align: left; padding: 6px 8px;
+    background: var(--bg-page); color: var(--ink); text-align: left; padding: 6px 8px;
   }
   .excel-grid tbody td:not(.grid-row-number) { background: #fff; }
-  .excel-grid tbody tr:hover td:not(.grid-row-number) { background: #f5f9ff; }
+  .excel-grid tbody tr:hover td:not(.grid-row-number) { background: #faf6ec; }
   .excel-grid tbody td input {
-    width: 100%; min-width: 90px; font: inherit; font-size: 12px; padding: 5px 8px;
-    border: none; border-radius: 0; background: transparent; color: #1f1f1f;
+    width: 100%; min-width: 90px; font: 12px/1.4 var(--mono); padding: 5px 8px;
+    border: none; border-radius: 0; background: transparent; color: var(--ink);
   }
-  .excel-grid tbody td input:focus { outline: 2px solid #1a73e8; outline-offset: -2px; background: #fff; }
+  .excel-grid tbody td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: #fff; }
 
   .icon-button {
     border: none; background: none; color: var(--error); cursor: pointer; font-size: 14px;
-    padding: 4px 8px; border-radius: 6px; transition: background-color .12s ease;
+    padding: 4px 8px; border-radius: 3px; transition: background-color .12s ease;
   }
   .icon-button:hover { background: var(--error-bg); }
 
   .action-row { display: flex; gap: 10px; flex-wrap: wrap; }
   .action-row button, .upload-row button {
-    font: inherit; font-size: 14px; font-weight: 500; padding: 10px 18px; border-radius: 8px;
-    border: 1px solid var(--border); background: var(--bg); color: var(--text-h); cursor: pointer;
-    box-shadow: var(--shadow-sm); transition: border-color .15s ease, background-color .15s ease, transform .1s ease;
+    font: 600 13px/1 var(--sans); letter-spacing: .02em; padding: 11px 20px; border-radius: 2px;
+    border: 1px solid var(--ink); background: var(--bg); color: var(--ink); cursor: pointer;
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease;
   }
-  .action-row button:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-bg); transform: translateY(-1px); }
-  .action-row button:active:not(:disabled) { transform: translateY(0); }
-  .action-row button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
-  .action-row button.primary { background: linear-gradient(135deg, var(--accent), #8d22e8); border-color: transparent; color: #fff; }
-  .action-row button.primary:hover:not(:disabled) { filter: brightness(1.06); background: linear-gradient(135deg, var(--accent), #8d22e8); }
-  .action-row button.primary:disabled { background: var(--accent-bg); border-color: var(--border); color: var(--text); filter: none; }
+  .action-row button:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+  .action-row button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--border); color: var(--text); background: var(--bg); }
+  .action-row button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .action-row button.primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+  .action-row button.primary:disabled { background: var(--border); border-color: var(--border); color: var(--text); }
 
   input[type="file"] { font: inherit; font-size: 13px; color: var(--text); }
   input[type="file"]::file-selector-button {
-    font: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 16px; margin-right: 12px;
-    border-radius: 7px; border: 1px solid transparent; background: var(--accent); color: #fff; cursor: pointer;
-    transition: background-color .15s ease, transform .1s ease;
+    font: 600 13px/1 var(--sans); padding: 10px 18px; margin-right: 14px;
+    border-radius: 2px; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); cursor: pointer;
+    transition: background-color .15s ease, color .15s ease;
   }
-  input[type="file"]::file-selector-button:hover { background: var(--accent-hover); }
-  input[type="file"]::file-selector-button:active { transform: scale(0.97); }
+  input[type="file"]::file-selector-button:hover { background: var(--ink); color: var(--bg); }
 
   .upload-label {
-    display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text);
+    display: flex; flex-direction: column; gap: 6px; font: 600 11px/1.4 var(--sans);
+    letter-spacing: .06em; text-transform: uppercase; color: var(--text);
   }
 
   .title-builder {
     display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; align-items: flex-end;
-    padding: 16px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px; background: var(--bg-page); border: 1px solid var(--border); border-radius: 4px;
   }
   .title-builder label {
-    display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; color: var(--text);
+    display: flex; flex-direction: column; gap: 6px; font: 600 11px/1.4 var(--sans);
+    letter-spacing: .06em; text-transform: uppercase; color: var(--text);
   }
   .title-builder-title { flex: 1 1 320px; }
   .title-builder input, .title-builder select {
-    font: inherit; font-size: 13px; padding: 9px 11px; border: 1px solid var(--border);
-    border-radius: 7px; background: var(--bg); color: var(--text-h); transition: border-color .12s ease, box-shadow .12s ease;
+    font: 14px/1.4 var(--sans); padding: 9px 11px; border: 1px solid var(--border);
+    border-radius: 2px; background: var(--bg); color: var(--ink); transition: border-color .12s ease, box-shadow .12s ease;
   }
   .title-builder input:focus, .title-builder select:focus {
-    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg);
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
   .raw-text-debug { margin-top: 18px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; padding: 6px 0; }
-  .raw-text-debug summary:hover { color: var(--text-h); }
+  .raw-text-debug summary:hover { color: var(--ink); }
   .raw-text-debug pre {
     margin-top: 10px; padding: 12px; background: var(--code-bg); border: 1px solid var(--border);
-    border-radius: 8px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto;
+    border-radius: 4px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto;
+    font-family: var(--mono);
   }
 
   @media (max-width: 640px) {
-    .app { margin: 0; padding: 22px 18px 40px; border-radius: 0; border-width: 0 0 1px; }
+    .app { margin: 0; padding: 26px 18px 40px; border-radius: 0; border-width: 0 0 1px; }
+    .app-header { flex-direction: column; }
     .title-builder { flex-direction: column; align-items: stretch; }
   }
 </style>
@@ -188,11 +209,12 @@
 <body>
 <div class="app">
   <header class="app-header">
-    <div class="app-logo" aria-hidden="true">CX</div>
     <div>
+      <p class="eyebrow">Diagnostic Reporting</p>
       <h1>CMC Excel Consolidator</h1>
       <p class="app-subtitle">Turn sample-list photos and VarSeq exports into ready-to-send Excel reports.</p>
     </div>
+    <div class="app-logo" aria-hidden="true">C</div>
   </header>
 
   <nav class="tab-bar">
