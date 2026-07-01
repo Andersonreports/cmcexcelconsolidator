@@ -1359,32 +1359,115 @@
             var inputEl = document.getElementById(inputId);
             if (inputEl) inputEl.value = abbr;
           } else {
-            // VEP has no ClinVar entry — search NCBI ClinVar directly by gene+variant
-            fetchClinVarClass(row, rowIdx, batchIdx);
+            // VEP has no ClinVar data — fetch Franklin's page directly via proxy
+            fetchFranklinPageClass(row, rowIdx, batchIdx);
           }
         }
       })
       .catch(function () {
         var linkEl3 = document.getElementById(linkId);
         if (linkEl3) linkEl3.textContent = '↗';
-        // VEP call failed entirely — fall back to NCBI ClinVar search
-        if (!row.franklin) fetchClinVarClass(row, rowIdx, batchIdx);
+        if (!row.franklin) fetchFranklinPageClass(row, rowIdx, batchIdx);
       });
   }
 
-  // Search NCBI ClinVar by gene name + c. variant notation.
-  // This catches variants where Ensembl VEP has no colocated ClinVar entry.
+  // Fetch Franklin's page via CORS proxy using gene+variant search.
+  // Franklin is a public site; allorigins.win relays the page so we can parse it.
+  function fetchFranklinPageClass(row, rowIdx, batchIdx) {
+    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
+    if (row.franklin) return;
+
+    // Prefer direct variant URL (coordinate-based); fall back to gene+variant search
+    var franklinFetch;
+    if (row._franklinUrl && row._franklinUrl.indexOf('/variant/snp/') !== -1) {
+      franklinFetch = row._franklinUrl;
+    } else {
+      var q = [String(row.gene || '').trim(), String(row.variant || '').trim()]
+               .filter(Boolean).join(' ');
+      if (!q) { fetchClinVarClass(row, rowIdx, batchIdx); return; }
+      franklinFetch = 'https://franklin.genoox.com/clinical-db/search?q=' + encodeURIComponent(q);
+    }
+
+    fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(franklinFetch))
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var cls = parseFranklinHtml(html);
+        if (cls && !row.franklin) {
+          row.franklin = cls;
+          var inputEl = document.getElementById(inputId);
+          if (inputEl) inputEl.value = cls;
+        } else {
+          // Franklin page parse failed — fall back to ClinVar eutils
+          fetchClinVarClass(row, rowIdx, batchIdx);
+        }
+      })
+      .catch(function () { fetchClinVarClass(row, rowIdx, batchIdx); });
+  }
+
+  // Parse "Suggested Classification" from Franklin's server-rendered HTML.
+  function parseFranklinHtml(html) {
+    // 1. __NEXT_DATA__ JSON embedded by Next.js SSR
+    var nm = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+    if (nm) {
+      try { var cls = deepFindClassification(JSON.parse(nm[1]), 0); if (cls) return cls; }
+      catch (e) {}
+    }
+    // 2. "Suggested Classification" followed within 400 chars by the classification word
+    var sm = html.match(/[Ss]uggested\s+[Cc]lassification[\s\S]{0,400}?(Pathogenic|Likely\s+pathogenic|Uncertain\s+significance|Likely\s+benign|Benign)\b/i);
+    if (sm && sm[1]) return abbreviateClinSigText(sm[1].replace(/\s+/g, ' ').trim());
+    // 3. Any JSON key named "classification" / "acmg_classification" etc. in the page source
+    var jm = html.match(/"(?:classification|suggestedClassification|suggested_classification|acmg_classification|pathogenicity)"\s*:\s*"([^"]{2,40})"/i);
+    if (jm && jm[1]) return abbreviateClinSigText(jm[1]);
+    return null;
+  }
+
+  // Recursively search a Next.js page-props object for a classification value.
+  function deepFindClassification(obj, depth) {
+    if (depth > 10 || !obj || typeof obj !== 'object') return null;
+    var keys = ['classification', 'suggestedClassification', 'suggested_classification',
+                'acmg_classification', 'clinicalSignificance', 'pathogenicity',
+                'suggested_pathogenicity', 'variant_classification', 'acmg_class'];
+    for (var i = 0; i < keys.length; i++) {
+      var val = obj[keys[i]];
+      if (!val && val !== 0) continue;
+      if (typeof val === 'string') { var a = abbreviateClinSigText(val); if (a) return a; }
+      if (typeof val === 'object') {
+        var inner = String(val.label || val.name || val.description || val.value || val.text || '');
+        if (inner) { var a2 = abbreviateClinSigText(inner); if (a2) return a2; }
+      }
+    }
+    for (var k in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, k) && typeof obj[k] === 'object') {
+        var r = deepFindClassification(obj[k], depth + 1);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+
+  // Last-resort: search NCBI ClinVar eutils by gene + variant text.
+  // Also tries canonical deletion form (c.649delC → c.649del) to handle notation mismatches.
   function fetchClinVarClass(row, rowIdx, batchIdx) {
     var inputId = 'finput-' + batchIdx + '-' + rowIdx;
     if (row.franklin) return;
 
     var gene    = String(row.gene    || '').trim();
-    var variant = String(row.variant || '').trim(); // e.g. "c.649delC"
+    var variant = String(row.variant || '').trim();
     if (!gene && !variant) return;
 
-    var term = (gene ? gene + '[gene] AND ' : '') + variant;
+    // Try original notation + canonical deletion form
+    var varForms = [variant];
+    var dm = variant.match(/^(c\.[0-9_+\-*]+)del[ACGT]+$/i);
+    if (dm) varForms.push(dm[1] + 'del');
+    var dupm = variant.match(/^(c\.[0-9_+\-*]+)dup[ACGT]+$/i);
+    if (dupm) varForms.push(dupm[1] + 'dup');
+
+    var parts = varForms.map(function (v) {
+      return '(' + (gene ? gene + '[gene] AND ' : '') + '"' + v + '"[All Fields])';
+    });
+
     fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
-          '?db=clinvar&term=' + encodeURIComponent(term) + '&retmax=5&retmode=json')
+          '?db=clinvar&term=' + encodeURIComponent(parts.join(' OR ')) + '&retmax=5&retmode=json')
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var ids = (data.esearchresult && data.esearchresult.idlist) || [];
@@ -1395,9 +1478,9 @@
           .then(function (data) {
             var result = data.result || {};
             for (var i = 0; i < ids.length; i++) {
-              var entry = result[ids[i]];
-              if (!entry) continue;
-              var desc = (entry.clinical_significance && entry.clinical_significance.description) || '';
+              var e = result[ids[i]];
+              if (!e) continue;
+              var desc = (e.clinical_significance && e.clinical_significance.description) || '';
               var abbr = abbreviateClinSigText(desc);
               if (abbr) return abbr;
             }
