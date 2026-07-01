@@ -1490,7 +1490,12 @@
   ];
 
   function normalizeGeneVariantKey(gene, variant) {
-    return String(gene || '').trim().toUpperCase() + '|' + String(variant || '').replace(/\s+/g, '').toUpperCase();
+    var g = String(gene || '').trim().toUpperCase();
+    var v = String(variant || '');
+    // Strip any transcript prefix (e.g. "NM_000135.4:c.2981+1G>C" → "c.2981+1G>C")
+    var ci = v.indexOf(':');
+    if (ci !== -1) v = v.slice(ci + 1);
+    return g + '|' + v.replace(/\s+/g, '').toUpperCase();
   }
 
   // "GENE:VARIANT" or "GENE:VARIANT:REMARK" - the summary file's compact
@@ -1499,8 +1504,12 @@
   function parsePrimaryVariant(raw) {
     var trimmed = String(raw || '').trim();
     if (!trimmed || trimmed.indexOf(':') === -1) return { gene: '', variant: '' };
-    var parts = trimmed.split(':');
-    return { gene: parts[0].trim(), variant: (parts[1] || '').trim() };
+    var firstColon = trimmed.indexOf(':');
+    var gene = trimmed.slice(0, firstColon).trim();
+    // Everything after the first colon is the variant; normalizeGeneVariantKey
+    // will strip any leading transcript prefix (e.g. "NM_000135.4:c.xxx").
+    var variant = trimmed.slice(firstColon + 1).trim();
+    return { gene: gene, variant: variant };
   }
 
   // Same encoding as parsePrimaryVariant, comma-separated for multiple
@@ -1542,37 +1551,58 @@
     return patients;
   }
 
-  // Reads back the app's own Listed Variant Excel export. Row 1 is either
-  // the literal header ("S.NO") or an optional title row (only present if a
-  // sample/title was picked before downloading), so the header row is
-  // detected rather than assumed - everything below it is GENE/VARIANT keyed
-  // detail data. Matching a file to a specific patient isn't required: every
-  // uploaded file's entries are pooled into one shared lookup, so any file
-  // that contains a picked Gene+Variant resolves it as soon as it's
-  // uploaded, with no dependency on titles or upload order.
+  // Reads back the app's own Listed Variant Excel export. Columns are located
+  // by their header name rather than hardcoded position so the reader is
+  // robust to title rows, new columns being inserted, or any reordering.
+  // Row 1 is scanned: if its first cell is "S.NO" the header is on row 1;
+  // otherwise a title row is assumed and the header is on row 2.
   function readListedVariantEntries(workbook) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in one of the Listed Variant Excel files.');
+
     var cellA1 = String(sheet.getRow(1).getCell(1).value || '').trim();
     var headerRowIndex = cellA1.toUpperCase() === 'S.NO' ? 1 : 2;
+
+    // Build a map of header-text → column-number from the header row.
+    var colMap = {};
+    var headerRow = sheet.getRow(headerRowIndex);
+    var scanCount = Math.max(sheet.columnCount || 0, 40);
+    for (var ci = 1; ci <= scanCount; ci++) {
+      var h = String(headerRow.getCell(ci).value || '').trim().toUpperCase();
+      if (h && !colMap[h]) colMap[h] = ci;
+    }
+    function col(name, fallback) { return colMap[name.toUpperCase()] || fallback; }
+
+    var geneCol       = col('GENE', 2);
+    var variantCol    = col('VARIANT', 3);
+    var proteinCol    = col('PROTEIN POS', 4);
+    var franklinCol   = col('FRANKLIN', 5);
+    var clinvarCol    = col('CLINVAR', 6);
+    var zygosityCol   = col('ZYGOSITY', 8);
+    // tolerate the long-standing typo "INHERTIANCE" in the header
+    var inheritCol    = col('INHERTIANCE', col('INHERITANCE', 9));
+    var vafCol        = col('VAF(%)', 13);
+    var allelicCol    = col('ALLELIC DEPTH', 14);
+    var readDepthCol  = col('READ DEPTH', 15);
+    var omimTitleCol  = col('OMIM TITLE', 16);
 
     var entries = [];
     sheet.eachRow(function (row, r) {
       if (r <= headerRowIndex) return;
-      var gene = String(row.getCell(2).value || '').trim();
-      var variant = String(row.getCell(3).value || '').trim();
+      var gene    = String(row.getCell(geneCol).value || '').trim();
+      var variant = String(row.getCell(variantCol).value || '').trim();
       if (!gene || !variant) return;
       entries.push({
-        key: normalizeGeneVariantKey(gene, variant),
-        proteinPos: row.getCell(4).value,
-        franklin: row.getCell(5).value,
-        clinvar: row.getCell(6).value,
-        zygosity: row.getCell(8).value,
-        inheritance: row.getCell(9).value,
-        vaf: row.getCell(13).value,
-        alleleDepths: row.getCell(14).value,
-        readDepths: row.getCell(15).value,
-        omimTitle: row.getCell(16).value,
+        key:          normalizeGeneVariantKey(gene, variant),
+        proteinPos:   row.getCell(proteinCol).value,
+        franklin:     row.getCell(franklinCol).value,
+        clinvar:      row.getCell(clinvarCol).value,
+        zygosity:     row.getCell(zygosityCol).value,
+        inheritance:  row.getCell(inheritCol).value,
+        vaf:          row.getCell(vafCol).value,
+        alleleDepths: row.getCell(allelicCol).value,
+        readDepths:   row.getCell(readDepthCol).value,
+        omimTitle:    row.getCell(omimTitleCol).value,
       });
     });
     return entries;
