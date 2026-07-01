@@ -1343,27 +1343,93 @@
         var linkEl2 = document.getElementById(linkId);
         if (linkEl2) linkEl2.textContent = '↗';
 
-        // --- Auto-fill Franklin column using ClinVar significance (abbreviated) ---
+        // --- Try ClinVar significance from VEP colocated_variants ---
         if (!row.franklin) {
           var colocated = entry.colocated_variants || [];
+          var abbr = null;
           for (var i = 0; i < colocated.length; i++) {
             var cv = colocated[i];
             if (cv.clin_sig && cv.clin_sig.length) {
-              var abbr = abbreviateClinSig(cv.clin_sig);
-              if (abbr) {
-                row.franklin = abbr;
-                var inputEl = document.getElementById(inputId);
-                if (inputEl) inputEl.value = abbr;
-              }
+              abbr = abbreviateClinSig(cv.clin_sig);
               break;
             }
+          }
+          if (abbr) {
+            row.franklin = abbr;
+            var inputEl = document.getElementById(inputId);
+            if (inputEl) inputEl.value = abbr;
+          } else {
+            // VEP has no ClinVar entry — search NCBI ClinVar directly by gene+variant
+            fetchClinVarClass(row, rowIdx, batchIdx);
           }
         }
       })
       .catch(function () {
         var linkEl3 = document.getElementById(linkId);
         if (linkEl3) linkEl3.textContent = '↗';
+        // VEP call failed entirely — fall back to NCBI ClinVar search
+        if (!row.franklin) fetchClinVarClass(row, rowIdx, batchIdx);
       });
+  }
+
+  // Search NCBI ClinVar by gene name + c. variant notation.
+  // This catches variants where Ensembl VEP has no colocated ClinVar entry.
+  function fetchClinVarClass(row, rowIdx, batchIdx) {
+    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
+    if (row.franklin) return;
+
+    var gene    = String(row.gene    || '').trim();
+    var variant = String(row.variant || '').trim(); // e.g. "c.649delC"
+    if (!gene && !variant) return;
+
+    var term = (gene ? gene + '[gene] AND ' : '') + variant;
+    fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
+          '?db=clinvar&term=' + encodeURIComponent(term) + '&retmax=5&retmode=json')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var ids = (data.esearchresult && data.esearchresult.idlist) || [];
+        if (!ids.length) return null;
+        return fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi' +
+                     '?db=clinvar&id=' + ids.slice(0, 3).join(',') + '&retmode=json')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            var result = data.result || {};
+            for (var i = 0; i < ids.length; i++) {
+              var entry = result[ids[i]];
+              if (!entry) continue;
+              var desc = (entry.clinical_significance && entry.clinical_significance.description) || '';
+              var abbr = abbreviateClinSigText(desc);
+              if (abbr) return abbr;
+            }
+            return null;
+          });
+      })
+      .then(function (abbr) {
+        if (abbr && !row.franklin) {
+          row.franklin = abbr;
+          var inputEl = document.getElementById(inputId);
+          if (inputEl) inputEl.value = abbr;
+        }
+      })
+      .catch(function () {});
+  }
+
+  // Map ClinVar summary text descriptions to Franklin-style abbreviations.
+  function abbreviateClinSigText(text) {
+    var t = String(text || '').toLowerCase().trim();
+    if (!t) return null;
+    if (t === 'pathogenic') return 'P';
+    if (t === 'likely pathogenic' || t === 'pathogenic/likely pathogenic') return 'LP';
+    if (t === 'uncertain significance') return 'VUS';
+    if (t === 'likely benign' || t === 'benign/likely benign') return 'LB';
+    if (t === 'benign') return 'B';
+    if (t.indexOf('conflicting') !== -1) return 'Conflicting';
+    if (t.indexOf('pathogenic') !== -1 && t.indexOf('likely') !== -1) return 'LP';
+    if (t.indexOf('pathogenic') !== -1) return 'P';
+    if (t.indexOf('benign') !== -1 && t.indexOf('likely') !== -1) return 'LB';
+    if (t.indexOf('benign') !== -1) return 'B';
+    if (t.indexOf('uncertain') !== -1) return 'VUS';
+    return null;
   }
 
   // Genes that consistently produce false-positive calls — always excluded.
