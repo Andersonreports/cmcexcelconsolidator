@@ -1751,27 +1751,46 @@
       tr.appendChild(td);
       finalTableBody.appendChild(tr);
     } else {
+      var noPathStart = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
+      var noPathEnd   = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
+
       finalConsolidateRows.forEach(function (row, rowIndex) {
         var tr = document.createElement('tr');
+        var isNoPath = row.gene === 'No Pathogenic Variant' && !row.variant;
 
         var rowNumTd = document.createElement('td');
         rowNumTd.className = 'grid-row-number';
         rowNumTd.textContent = rowIndex + 1;
         tr.appendChild(rowNumTd);
 
-        FINAL_COLUMNS.forEach(function (c) {
+        for (var colI = 0; colI < FINAL_COLUMNS.length; colI++) {
+          // Skip individual cells that are folded into the merged "No Pathogenic Variant" cell
+          if (isNoPath && colI > noPathStart && colI <= noPathEnd) continue;
+
+          var c = FINAL_COLUMNS[colI];
           var td = document.createElement('td');
           var input = document.createElement('input');
-          input.value = row[c.key] != null ? row[c.key] : '';
-          if (row.unmatched && (c.key === 'gene' || c.key === 'variant')) {
-            input.style.color = '#c2293a';
+
+          if (isNoPath && colI === noPathStart) {
+            td.colSpan = noPathEnd - noPathStart + 1;
+            input.value = 'No Pathogenic Variant';
+            input.style.textAlign = 'center';
+            input.addEventListener('input', (function (ri) {
+              return function (e) { finalConsolidateRows[ri].gene = e.target.value; };
+            })(rowIndex));
+          } else {
+            input.value = row[c.key] != null ? row[c.key] : '';
+            if (row.unmatched && (c.key === 'gene' || c.key === 'variant')) {
+              input.style.color = '#c2293a';
+            }
+            input.addEventListener('input', (function (key, ri) {
+              return function (e) { finalConsolidateRows[ri][key] = e.target.value; };
+            })(c.key, rowIndex));
           }
-          input.addEventListener('input', function (e) {
-            finalConsolidateRows[rowIndex][c.key] = e.target.value;
-          });
+
           td.appendChild(input);
           tr.appendChild(td);
-        });
+        }
 
         finalTableBody.appendChild(tr);
       });
@@ -1864,9 +1883,26 @@
     FINAL_COLUMNS.forEach(function (c, i) { headerRow.getCell(i + 1).value = c.header; });
     headerRow.font = { bold: true };
 
+    var noPathStart = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
+    var noPathEnd   = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
+
     finalConsolidateRows.forEach(function (row, i) {
       var dataRow = sheet.getRow(i + 2);
-      FINAL_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+      var isNoPath = row.gene === 'No Pathogenic Variant' && !row.variant;
+
+      FINAL_COLUMNS.forEach(function (c, colIdx) {
+        if (isNoPath && colIdx > noPathStart && colIdx <= noPathEnd) return; // covered by merge
+        dataRow.getCell(colIdx + 1).value = row[c.key];
+      });
+
+      if (isNoPath) {
+        var startCol = noPathStart + 1; // 1-based
+        var endCol   = noPathEnd + 1;
+        sheet.mergeCells(i + 2, startCol, i + 2, endCol);
+        var mergedCell = dataRow.getCell(startCol);
+        mergedCell.value = 'No Pathogenic Variant';
+        mergedCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      }
     });
 
     workbook.xlsx.writeBuffer().then(function (buffer) {
