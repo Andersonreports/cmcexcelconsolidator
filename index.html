@@ -651,6 +651,47 @@
     };
   }
 
+  // Reconstruct text lines from Tesseract word bounding boxes.
+  // Tesseract's default page segmentation treats each visual column as a
+  // separate block and outputs them top-to-bottom, which destroys the row
+  // structure of multi-column documents like these sample lists. Instead,
+  // we cluster words by Y-midpoint proximity and sort each cluster by X,
+  // restoring the true left-to-right, row-by-row reading order.
+  function reconstructLinesFromWords(words) {
+    if (!words || !words.length) return '';
+    var confident = words.filter(function (w) {
+      return w.confidence > 20 && w.text && w.text.trim();
+    });
+    if (!confident.length) return '';
+
+    confident.sort(function (a, b) { return a.bbox.y0 - b.bbox.y0; });
+
+    var rows = []; // each entry: { words, midY, lineH }
+    confident.forEach(function (word) {
+      var wMid = (word.bbox.y0 + word.bbox.y1) / 2;
+      var wH = word.bbox.y1 - word.bbox.y0;
+      var placed = false;
+      for (var r = 0; r < rows.length; r++) {
+        var dist = Math.abs(wMid - rows[r].midY);
+        if (dist < Math.max(rows[r].lineH, wH, 14) * 0.75) {
+          rows[r].words.push(word);
+          var n = rows[r].words.length;
+          rows[r].midY = ((n - 1) * rows[r].midY + wMid) / n;
+          rows[r].lineH = ((n - 1) * rows[r].lineH + wH) / n;
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) rows.push({ words: [word], midY: wMid, lineH: wH });
+    });
+
+    rows.sort(function (a, b) { return a.midY - b.midY; });
+    return rows.map(function (row) {
+      row.words.sort(function (a, b) { return a.bbox.x0 - b.bbox.x0; });
+      return row.words.map(function (w) { return w.text.trim(); }).filter(Boolean).join(' ');
+    }).join('\n');
+  }
+
   // Runs parseDataLine() over every line of raw OCR text. Lines that don't
   // look like a data row at all (doctor "section header" lines, blank OCR
   // noise) return null from parseDataLine and are skipped; the source sheet
@@ -762,8 +803,9 @@
                 .catch(function () { return file; })
                 .then(function (image) {
                   return worker.recognize(image).then(function (result) {
-                    newRawEntries.push({ fileName: file.name, text: result.data.text });
-                    newRows = newRows.concat(parseSampleListText(result.data.text));
+                    var text = reconstructLinesFromWords(result.data.words) || result.data.text;
+                    newRawEntries.push({ fileName: file.name, text: text });
+                    newRows = newRows.concat(parseSampleListText(text));
                   });
                 });
             });
