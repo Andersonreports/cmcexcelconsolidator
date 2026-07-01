@@ -1213,10 +1213,10 @@
   var variantDepartmentInput = document.getElementById('variant-department-input');
   var variantTitleInput = document.getElementById('variant-title-input');
 
-  // Build a direct Franklin variant URL from genomic coordinates.
+  // Build a direct Franklin variant URL from VCF-style coordinates.
   // URL format: https://franklin.genoox.com/clinical-db/variant/snp/chr{N}-{pos}-{ref}-{alt}
-  // Falls back to a gene+HGVS search URL when coordinates are not available.
-  function buildFranklinUrl(chr, pos, ref, alt, gene, variant) {
+  // Returns null when coordinates are not available (caller will fetch from Ensembl instead).
+  function buildFranklinUrl(chr, pos, ref, alt) {
     var c = String(chr || '').trim().replace(/^chr/i, '');
     var p = String(pos || '').trim();
     var r = String(ref || '').trim();
@@ -1224,8 +1224,50 @@
     if (c && p && r && a) {
       return 'https://franklin.genoox.com/clinical-db/variant/snp/chr' + c + '-' + p + '-' + r + '-' + a;
     }
-    var q = [gene, variant].filter(Boolean).join(' ');
-    return 'https://franklin.genoox.com/clinical-db/home' + (q ? '?search=' + encodeURIComponent(q) : '');
+    return null; // no direct URL — caller will resolve via Ensembl
+  }
+
+  // Resolve missing Franklin URLs via Ensembl variant_recoder (public, CORS-enabled).
+  // Updates row._franklinUrl and the DOM link in place when each response arrives.
+  function resolveVariantCoordsAsync(rows, batchIdx) {
+    rows.forEach(function (row, rowIdx) {
+      if (row._franklinUrl) return; // already have a direct URL
+      var hgvs = String(row._rawHgvs || '').trim();
+      if (!hgvs) return;
+
+      var linkId = 'flink-' + batchIdx + '-' + rowIdx;
+      var el = document.getElementById(linkId);
+      if (el) el.textContent = '…';
+
+      fetch('https://rest.ensembl.org/variant_recoder/human/' +
+            encodeURIComponent(hgvs) + '?content-type=application/json')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          // Response: [{"{hgvs}": {vcf_string: ["13-77581682-TA-T"], ...}}]
+          var vcf = null;
+          if (Array.isArray(data) && data[0]) {
+            var obj = data[0];
+            Object.keys(obj).forEach(function (k) {
+              if (!vcf && obj[k] && Array.isArray(obj[k].vcf_string) && obj[k].vcf_string[0]) {
+                vcf = obj[k].vcf_string[0]; // e.g. "13-77581682-TA-T"
+              }
+            });
+          }
+          if (vcf) {
+            var url = 'https://franklin.genoox.com/clinical-db/variant/snp/chr' + vcf;
+            row._franklinUrl = url;
+            var linkEl = document.getElementById(linkId);
+            if (linkEl) { linkEl.href = url; linkEl.textContent = '↗'; }
+          } else {
+            var linkEl2 = document.getElementById(linkId);
+            if (linkEl2) linkEl2.textContent = '↗';
+          }
+        })
+        .catch(function () {
+          var linkEl3 = document.getElementById(linkId);
+          if (linkEl3) linkEl3.textContent = '↗';
+        });
+    });
   }
 
   // Genes that consistently produce false-positive calls — always excluded.
@@ -1303,7 +1345,8 @@
         variant: variant,
         proteinPos: proteinPos,
         franklin: lookupFranklin(gene, variant),
-        _franklinUrl: buildFranklinUrl(get('variantChr'), get('variantPos'), get('variantRef'), get('variantAlt'), gene, variant),
+        _rawHgvs: hgvsCList[winnerIdx] || hgvsCList[0] || '',
+        _franklinUrl: buildFranklinUrl(get('variantChr'), get('variantPos'), get('variantRef'), get('variantAlt')),
         clinvar: get('clinvarClass') || '',
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
@@ -1349,7 +1392,7 @@
     return letters;
   }
 
-  function renderVariantTable() {
+  function renderVariantTable(batchIdx) {
     variantTableHead.innerHTML = '';
 
     var letterRow = document.createElement('tr');
@@ -1407,14 +1450,17 @@
           });
           if (c.key === 'inheritance') inheritanceInput = input;
           td.appendChild(input);
-          // Franklin: add a direct link to the variant page on Franklin by QIAGEN
+          // Franklin: direct link to the variant page on Franklin by QIAGEN
           if (c.key === 'franklin') {
             var fLink = document.createElement('a');
-            fLink.href = row._franklinUrl || buildFranklinUrl(null, null, null, null, row.gene, row.variant);
+            var fUrl = row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home';
+            fLink.href = fUrl;
+            fLink.id = 'flink-' + (batchIdx != null ? batchIdx : 'x') + '-' + rowIndex;
             fLink.target = '_blank';
             fLink.rel = 'noopener noreferrer';
             fLink.className = 'franklin-link';
-            fLink.textContent = '↗';
+            // Show "…" if we still need to resolve coordinates via Ensembl
+            fLink.textContent = row._franklinUrl ? '↗' : '…';
             fLink.title = 'Open on Franklin by QIAGEN';
             td.appendChild(fLink);
           }
@@ -1551,7 +1597,8 @@
         ' (' + item.rows.length + ' variant' + (item.rows.length !== 1 ? 's' : '') + ')';
       variantPreviewLabel.hidden = false;
     }
-    renderVariantTable();
+    renderVariantTable(idx);
+    resolveVariantCoordsAsync(variantRows, idx);
     renderBatchList();
   }
 
