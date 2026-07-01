@@ -220,6 +220,12 @@
   .batch-item-btn:disabled { opacity: .45; cursor: not-allowed; }
   .batch-item-btn.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .batch-preview-label { padding: 10px 0 4px; font: 600 11px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--text); }
+  .franklin-link {
+    display: inline-block; margin-left: 4px; font: 600 11px/1 var(--sans);
+    color: var(--accent); text-decoration: none; vertical-align: middle;
+    opacity: .7; transition: opacity .12s;
+  }
+  .franklin-link:hover { opacity: 1; text-decoration: underline; }
 
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
@@ -1008,6 +1014,11 @@
     inhouseSampleNames: { header: 'Sample Names' },
     alphaMissense: { header: 'Classification', groupIncludes: ['AlphaMissense'] },
     revel: { header: 'REVEL' },
+    // Genomic coordinates — used to build direct Franklin links
+    variantChr: { header: 'Chr' },
+    variantPos: { header: 'Pos' },
+    variantRef: { header: 'Ref' },
+    variantAlt: { header: 'Alt' },
   };
 
   // Most clinically severe first. Rows whose winning entry lands on Benign
@@ -1202,6 +1213,21 @@
   var variantDepartmentInput = document.getElementById('variant-department-input');
   var variantTitleInput = document.getElementById('variant-title-input');
 
+  // Build a direct Franklin variant URL from genomic coordinates.
+  // URL format: https://franklin.genoox.com/clinical-db/variant/snp/chr{N}-{pos}-{ref}-{alt}
+  // Falls back to a gene+HGVS search URL when coordinates are not available.
+  function buildFranklinUrl(chr, pos, ref, alt, gene, variant) {
+    var c = String(chr || '').trim().replace(/^chr/i, '');
+    var p = String(pos || '').trim();
+    var r = String(ref || '').trim();
+    var a = String(alt || '').trim();
+    if (c && p && r && a) {
+      return 'https://franklin.genoox.com/clinical-db/variant/snp/chr' + c + '-' + p + '-' + r + '-' + a;
+    }
+    var q = [gene, variant].filter(Boolean).join(' ');
+    return 'https://franklin.genoox.com/clinical-db/home' + (q ? '?search=' + encodeURIComponent(q) : '');
+  }
+
   // Genes that consistently produce false-positive calls — always excluded.
   // For gene-specific variant exceptions (CNN2), only that variant is excluded.
   // Interpretations from handwritten list: ZNF717 ("2N F17"), TCHH ("TCH #"), FBXL3 ("FB YL3").
@@ -1277,6 +1303,7 @@
         variant: variant,
         proteinPos: proteinPos,
         franklin: lookupFranklin(gene, variant),
+        _franklinUrl: buildFranklinUrl(get('variantChr'), get('variantPos'), get('variantRef'), get('variantAlt'), gene, variant),
         clinvar: get('clinvarClass') || '',
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
@@ -1380,6 +1407,17 @@
           });
           if (c.key === 'inheritance') inheritanceInput = input;
           td.appendChild(input);
+          // Franklin: add a direct link to the variant page on Franklin by QIAGEN
+          if (c.key === 'franklin') {
+            var fLink = document.createElement('a');
+            fLink.href = row._franklinUrl || buildFranklinUrl(null, null, null, null, row.gene, row.variant);
+            fLink.target = '_blank';
+            fLink.rel = 'noopener noreferrer';
+            fLink.className = 'franklin-link';
+            fLink.textContent = '↗';
+            fLink.title = 'Open on Franklin by QIAGEN';
+            td.appendChild(fLink);
+          }
           tr.appendChild(td);
         });
 
