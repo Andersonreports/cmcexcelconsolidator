@@ -1264,7 +1264,55 @@
     });
   }
 
+  // Map ClinVar significance terms to the same abbreviated labels Franklin uses.
+  function abbreviateClinSig(sigs) {
+    var norm = sigs.map(function (s) {
+      return s.toLowerCase().replace(/\s+/g, '_');
+    });
+    function has(term) {
+      return norm.some(function (n) { return n === term; });
+    }
+    // Exact-match in priority order so "pathogenic" wins over "likely_pathogenic"
+    if (has('pathogenic'))           return 'P';
+    if (has('likely_pathogenic'))    return 'LP';
+    if (has('uncertain_significance')) return 'VUS';
+    if (has('likely_benign'))        return 'LB';
+    if (has('benign'))               return 'B';
+    if (norm.some(function (n) { return n.indexOf('conflicting') !== -1; })) return 'Conflicting';
+    return null;
+  }
+
   function fetchVepForRow(row, rowIdx, hgvs, batchIdx) {
+    var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
+    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
+
+    // Step 1: try Franklin's own search API (may succeed if they allow CORS)
+    var franklinSearchUrl = 'https://franklin.genoox.com/api/search?term=' +
+                            encodeURIComponent(hgvs) + '&type=variant';
+
+    fetch(franklinSearchUrl, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) {
+        if (!r.ok) throw new Error('franklin-api-not-available');
+        return r.json();
+      })
+      .then(function (data) {
+        // Parse Franklin's classification from whatever they return
+        var cls = (data && (data.classification || (data.result && data.result.classification))) || null;
+        if (cls) {
+          row.franklin = cls;
+          var inputEl = document.getElementById(inputId);
+          if (inputEl) inputEl.value = cls;
+        }
+        var linkEl = document.getElementById(linkId);
+        if (linkEl) linkEl.textContent = '↗';
+      })
+      .catch(function () {
+        // Franklin API not accessible (expected due to CORS) — fall back to Ensembl VEP
+        fetchVepFallback(row, rowIdx, hgvs, batchIdx);
+      });
+  }
+
+  function fetchVepFallback(row, rowIdx, hgvs, batchIdx) {
     var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
     var inputId = 'finput-' + batchIdx + '-' + rowIdx;
 
@@ -1295,19 +1343,18 @@
         var linkEl2 = document.getElementById(linkId);
         if (linkEl2) linkEl2.textContent = '↗';
 
-        // --- Auto-fill Franklin column with ClinVar significance from VEP ---
+        // --- Auto-fill Franklin column using ClinVar significance (abbreviated) ---
         if (!row.franklin) {
           var colocated = entry.colocated_variants || [];
           for (var i = 0; i < colocated.length; i++) {
             var cv = colocated[i];
             if (cv.clin_sig && cv.clin_sig.length) {
-              var sig = cv.clin_sig.map(function (s) {
-                return s.replace(/_/g, ' ')
-                        .replace(/\b\w/g, function (l) { return l.toUpperCase(); });
-              }).join(' / ');
-              row.franklin = sig;
-              var inputEl = document.getElementById(inputId);
-              if (inputEl) inputEl.value = sig;
+              var abbr = abbreviateClinSig(cv.clin_sig);
+              if (abbr) {
+                row.franklin = abbr;
+                var inputEl = document.getElementById(inputId);
+                if (inputEl) inputEl.value = abbr;
+              }
               break;
             }
           }
