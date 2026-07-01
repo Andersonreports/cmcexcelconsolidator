@@ -194,6 +194,33 @@
   }
   .title-builder input:focus, .title-builder select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
+  .batch-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .batch-item {
+    display: grid; grid-template-columns: 28px 1fr auto auto auto;
+    gap: 10px; align-items: center; padding: 10px 14px;
+    background: var(--bg-page); border: 1px solid var(--border); border-radius: 4px; transition: border-color .15s;
+  }
+  .batch-item.batch-item-active { border-color: var(--accent-2); background: #f3ecd9; }
+  .batch-item-num { font: 600 11px/1 var(--sans); color: var(--text); text-align: center; }
+  .batch-item-info { min-width: 0; }
+  .batch-item-name { font: 600 13px/1.3 var(--sans); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+  .batch-item-count { font: 12px/1 var(--sans); color: var(--text); margin-top: 3px; display: block; }
+  .batch-item-count.error-text { color: #c2293a; }
+  .batch-item-title {
+    font: 13px/1 var(--sans); padding: 6px 10px; border: 1px solid var(--border);
+    border-radius: 2px; background: var(--bg); color: var(--ink); width: 260px; transition: border-color .12s;
+  }
+  .batch-item-title:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .batch-item-btn {
+    font: 600 12px/1 var(--sans); padding: 6px 12px; border: 1px solid var(--border);
+    border-radius: 2px; background: var(--bg); color: var(--ink); cursor: pointer; white-space: nowrap;
+    transition: background-color .12s, color .12s, border-color .12s;
+  }
+  .batch-item-btn:hover:not(:disabled) { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .batch-item-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .batch-item-btn.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .batch-preview-label { padding: 10px 0 4px; font: 600 11px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--text); }
+
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
   .raw-text-debug summary:hover { color: var(--ink); }
@@ -317,12 +344,12 @@
         <div class="card-title">Upload</div>
         <div class="upload-row">
           <label class="upload-label">
-            VarSeq Excel
-            <input type="file" id="variant-file-input" accept=".xlsx,.xls" />
+            VarSeq Excel (select one or more files)
+            <input type="file" id="variant-file-input" accept=".xlsx,.xls" multiple />
           </label>
-          <span class="progress-text" id="variant-progress-text"></span>
         </div>
-        <div class="upload-row">
+        <div id="variant-batch-list" class="batch-list" hidden></div>
+        <div class="upload-row" style="margin-top:14px">
           <label class="upload-label">
             ACMG/Franklin reference Excel (optional)
             <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
@@ -330,24 +357,17 @@
           <span class="progress-text" id="franklin-progress-text"></span>
         </div>
         <div class="error-banner" id="variant-error" hidden></div>
+        <!-- Keep hidden for legacy JS compatibility -->
+        <select id="variant-sample-select" hidden></select>
+        <input type="text" id="variant-title-input" hidden />
       </div>
 
       <div class="card">
         <div class="card-title">Report settings</div>
         <div class="title-builder">
           <label>
-            Link to sample
-            <select id="variant-sample-select">
-              <option value="">— None —</option>
-            </select>
-          </label>
-          <label>
             Department
             <input type="text" id="variant-department-input" value="CMC HEMATOLOGY" />
-          </label>
-          <label class="title-builder-title">
-            Report title (editable)
-            <input type="text" id="variant-title-input" placeholder="Pick a sample above, or type a title manually" />
           </label>
         </div>
       </div>
@@ -358,19 +378,20 @@
           <summary>Check column mapping</summary>
           <div class="mapping-list" id="variant-mapping-list"></div>
         </details>
+        <div id="variant-preview-label" class="batch-preview-label" hidden></div>
 
         <div class="table-wrapper excel-grid-wrapper">
           <table class="excel-grid">
             <thead id="variant-table-head"><tr></tr></thead>
             <tbody id="variant-table-body">
-              <tr><td class="empty-state">No data loaded yet. Upload a VarSeq Excel export to preview it here.</td></tr>
+              <tr><td class="empty-state">No data loaded yet. Upload VarSeq Excel files to preview them here.</td></tr>
             </tbody>
           </table>
         </div>
 
         <div class="action-row">
           <button id="variant-clear-all" disabled>Clear All</button>
-          <button class="primary" id="variant-download" disabled>Download Excel</button>
+          <button class="primary" id="variant-download-all" disabled>Download All (ZIP)</button>
         </div>
       </div>
     </section>
@@ -423,6 +444,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 (function () {
   'use strict';
@@ -1161,16 +1183,21 @@
     renderVariantTable();
   }
 
-  // ---- VarSeq workbook processing ----
+  // ---- VarSeq workbook processing (batch mode) ----
+  // variantBatch: array of {fileName, rows, runName, title, error}
+  // variantPreviewIdx: which batch item is shown in the table (-1 = none)
+  // variantRows: convenience alias = variantBatch[variantPreviewIdx]?.rows || []
+  var variantBatch = [];
+  var variantPreviewIdx = -1;
   var variantRows = [];
-  var variantSampleRunName = '';
   var variantTableHead = document.getElementById('variant-table-head');
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFileInput = document.getElementById('variant-file-input');
-  var variantProgressText = document.getElementById('variant-progress-text');
+  var variantBatchList = document.getElementById('variant-batch-list');
+  var variantPreviewLabel = document.getElementById('variant-preview-label');
   var variantError = document.getElementById('variant-error');
   var variantClearAllBtn = document.getElementById('variant-clear-all');
-  var variantDownloadBtn = document.getElementById('variant-download');
+  var variantDownloadAllBtn = document.getElementById('variant-download-all');
   var variantSampleSelect = document.getElementById('variant-sample-select');
   var variantDepartmentInput = document.getElementById('variant-department-input');
   var variantTitleInput = document.getElementById('variant-title-input');
@@ -1189,7 +1216,7 @@
     });
 
     var runNameMatch = String(groupRow.getCell(1).value || '').match(/^(.*?)(?:_outfastp.*)?$/);
-    variantSampleRunName = runNameMatch ? runNameMatch[1] : String(groupRow.getCell(1).value || '');
+    var runName = runNameMatch ? runNameMatch[1] : String(groupRow.getCell(1).value || '');
 
     var rows = [];
     sheet.eachRow(function (row, r) {
@@ -1256,7 +1283,7 @@
     });
 
     rows.forEach(function (row, i) { row.sNo = i + 1; });
-    return rows;
+    return { rows: rows, runName: runName };
   }
 
   function columnLetter(n) {
@@ -1334,8 +1361,8 @@
         variantTableBody.appendChild(tr);
       });
     }
-    variantClearAllBtn.disabled = variantRows.length === 0;
-    variantDownloadBtn.disabled = variantRows.length === 0;
+    variantClearAllBtn.disabled = variantBatch.length === 0;
+    variantDownloadAllBtn.disabled = variantBatch.length === 0;
   }
 
   function showVariantError(message) {
@@ -1354,21 +1381,8 @@
     return '';
   }
 
-  function buildVariantTitle() {
-    var selectedIdx = variantSampleSelect.value;
-    var department = variantDepartmentInput.value.trim();
-    if (selectedIdx === '' || !sampleRows[selectedIdx]) {
-      return '';
-    }
-    var sample = sampleRows[selectedIdx];
-    var salutation = genderSalutation(sample.gender);
-    var genderInitial = String(sample.gender || '').trim().charAt(0).toUpperCase();
-    var descriptor = 'LISTED VARIANTS FOR ' + department + '-' + salutation + sample.sampleId +
-      ' (' + sample.age + 'Y/' + genderInitial + ')';
-    return variantSampleRunName ? descriptor + '\t' + variantSampleRunName : descriptor;
-  }
-
   function populateSampleSelect() {
+    if (!variantSampleSelect) return;
     var previousValue = variantSampleSelect.value;
     variantSampleSelect.innerHTML = '<option value="">— None —</option>';
     sampleRows.forEach(function (row, i) {
@@ -1380,57 +1394,11 @@
     if (previousValue && sampleRows[previousValue]) variantSampleSelect.value = previousValue;
   }
 
-  variantSampleSelect.addEventListener('change', function () {
-    variantTitleInput.value = buildVariantTitle();
-  });
-  variantDepartmentInput.addEventListener('input', function () {
-    if (variantSampleSelect.value !== '') variantTitleInput.value = buildVariantTitle();
-  });
-
-  variantFileInput.addEventListener('change', function (e) {
-    var file = e.target.files && e.target.files[0];
-    if (!file) return;
-    showVariantError('');
-    variantFileInput.disabled = true;
-    variantProgressText.textContent = 'Reading file…';
-
-    file.arrayBuffer()
-      .then(function (buffer) {
-        var workbook = new ExcelJS.Workbook();
-        return workbook.xlsx.load(buffer).then(function () { return workbook; });
-      })
-      .then(function (workbook) {
-        variantRows = processVarSeqWorkbook(workbook);
-        variantProgressText.textContent = file.name + ' (' + variantRows.length + ' variants after exclusions)';
-        if (variantSampleSelect.value !== '') variantTitleInput.value = buildVariantTitle();
-        renderVariantTable();
-      })
-      .catch(function (err) {
-        showVariantError((err && err.message) || 'Failed to read the Excel file.');
-        variantRows = [];
-        variantProgressText.textContent = '';
-        renderVariantTable();
-      })
-      .finally(function () {
-        variantFileInput.disabled = false;
-        variantFileInput.value = '';
-      });
-  });
-
-  variantClearAllBtn.addEventListener('click', function () {
-    variantRows = [];
-    variantProgressText.textContent = '';
-    showVariantError('');
-    renderVariantTable();
-  });
-
-  variantDownloadBtn.addEventListener('click', function () {
+  // Build an Excel workbook for one batch item and return the ArrayBuffer.
+  function buildVariantExcel(rows, title) {
     var workbook = new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
-
     VARIANT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
-
-    var title = variantTitleInput.value.trim();
     var headerRowIndex = 1;
     if (title) {
       sheet.getRow(1).getCell(1).value = title;
@@ -1438,22 +1406,185 @@
       sheet.getRow(1).font = { bold: true };
       headerRowIndex = 2;
     }
-
     var headerRow = sheet.getRow(headerRowIndex);
     VARIANT_COLUMNS.forEach(function (c, i) { headerRow.getCell(i + 1).value = c.header; });
     headerRow.font = { bold: true };
-
     var inheritanceColIdx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'inheritance'; });
-    variantRows.forEach(function (row, i) {
+    rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
       if (isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { color: { argb: 'FFC2293A' } };
       }
     });
+    return workbook.xlsx.writeBuffer();
+  }
 
-    workbook.xlsx.writeBuffer().then(function (buffer) {
-      downloadBlob(buffer, 'listed-variant-list.xlsx');
+  function renderBatchList() {
+    var hasItems = variantBatch.length > 0;
+    variantBatchList.hidden = !hasItems;
+    variantClearAllBtn.disabled = !hasItems;
+    variantDownloadAllBtn.disabled = !hasItems;
+
+    variantBatchList.innerHTML = '';
+    variantBatch.forEach(function (item, idx) {
+      var div = document.createElement('div');
+      div.className = 'batch-item' + (idx === variantPreviewIdx ? ' batch-item-active' : '');
+
+      var numSpan = document.createElement('span');
+      numSpan.className = 'batch-item-num';
+      numSpan.textContent = idx + 1;
+      div.appendChild(numSpan);
+
+      var infoDiv = document.createElement('div');
+      infoDiv.className = 'batch-item-info';
+      var nameSpan = document.createElement('span');
+      nameSpan.className = 'batch-item-name';
+      nameSpan.textContent = item.fileName;
+      nameSpan.title = item.fileName;
+      infoDiv.appendChild(nameSpan);
+      var countSpan = document.createElement('span');
+      countSpan.className = 'batch-item-count' + (item.error ? ' error-text' : '');
+      countSpan.textContent = item.error
+        ? item.error
+        : item.rows.length + ' variant' + (item.rows.length !== 1 ? 's' : '') + ' after exclusions';
+      infoDiv.appendChild(countSpan);
+      div.appendChild(infoDiv);
+
+      var titleInput = document.createElement('input');
+      titleInput.type = 'text';
+      titleInput.className = 'batch-item-title';
+      titleInput.value = item.title;
+      titleInput.placeholder = 'Report title';
+      titleInput.addEventListener('input', function (e) { variantBatch[idx].title = e.target.value; });
+      div.appendChild(titleInput);
+
+      var previewBtn = document.createElement('button');
+      previewBtn.className = 'batch-item-btn' + (idx === variantPreviewIdx ? ' active' : '');
+      previewBtn.textContent = idx === variantPreviewIdx ? 'Previewing' : 'Preview';
+      previewBtn.disabled = !!item.error;
+      previewBtn.addEventListener('click', function () { selectBatchPreview(idx); });
+      div.appendChild(previewBtn);
+
+      var dlBtn = document.createElement('button');
+      dlBtn.className = 'batch-item-btn';
+      dlBtn.textContent = '↓ Excel';
+      dlBtn.disabled = !!item.error;
+      dlBtn.addEventListener('click', function () { downloadBatchItem(idx); });
+      div.appendChild(dlBtn);
+
+      variantBatchList.appendChild(div);
+    });
+  }
+
+  function selectBatchPreview(idx) {
+    variantPreviewIdx = idx;
+    variantRows = (variantBatch[idx] && variantBatch[idx].rows) || [];
+    var item = variantBatch[idx];
+    if (item) {
+      variantPreviewLabel.textContent =
+        'Previewing file ' + (idx + 1) + ' of ' + variantBatch.length + ': ' + item.fileName +
+        ' (' + item.rows.length + ' variant' + (item.rows.length !== 1 ? 's' : '') + ')';
+      variantPreviewLabel.hidden = false;
+    }
+    renderVariantTable();
+    renderBatchList();
+  }
+
+  function downloadBatchItem(idx) {
+    var item = variantBatch[idx];
+    if (!item || item.error) return;
+    buildVariantExcel(item.rows, item.title).then(function (buffer) {
+      var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
+      downloadBlob(buffer, safeName);
+    });
+  }
+
+  variantFileInput.addEventListener('change', function (e) {
+    var files = e.target.files;
+    if (!files || !files.length) return;
+    showVariantError('');
+    variantFileInput.disabled = true;
+
+    var department = variantDepartmentInput.value.trim();
+    var promises = Array.from(files).map(function (file) {
+      return file.arrayBuffer()
+        .then(function (buffer) {
+          var workbook = new ExcelJS.Workbook();
+          return workbook.xlsx.load(buffer).then(function () { return workbook; });
+        })
+        .then(function (workbook) {
+          var result = processVarSeqWorkbook(workbook);
+          var autoTitle = result.runName || file.name.replace(/\.[^.]+$/, '');
+          return {
+            fileName: file.name,
+            rows: result.rows,
+            runName: result.runName,
+            title: autoTitle,
+            error: null
+          };
+        })
+        .catch(function (err) {
+          return {
+            fileName: file.name,
+            rows: [],
+            runName: '',
+            title: file.name.replace(/\.[^.]+$/, ''),
+            error: (err && err.message) || 'Failed to read file'
+          };
+        });
+    });
+
+    Promise.all(promises).then(function (newItems) {
+      var prevLen = variantBatch.length;
+      newItems.forEach(function (item) { variantBatch.push(item); });
+      // Auto-preview the first successfully loaded file if nothing is previewed yet.
+      if (variantPreviewIdx === -1) {
+        var firstOk = variantBatch.findIndex(function (it) { return !it.error; });
+        if (firstOk !== -1) {
+          selectBatchPreview(firstOk);
+          return;
+        }
+      }
+      renderBatchList();
+    }).finally(function () {
+      variantFileInput.disabled = false;
+      variantFileInput.value = '';
+    });
+  });
+
+  variantClearAllBtn.addEventListener('click', function () {
+    variantBatch = [];
+    variantPreviewIdx = -1;
+    variantRows = [];
+    showVariantError('');
+    variantPreviewLabel.hidden = true;
+    renderBatchList();
+    renderVariantTable();
+  });
+
+  variantDownloadAllBtn.addEventListener('click', function () {
+    var validItems = variantBatch.filter(function (item) { return !item.error && item.rows.length > 0; });
+    if (!validItems.length) return;
+
+    variantDownloadAllBtn.disabled = true;
+    variantDownloadAllBtn.textContent = 'Generating ZIP…';
+
+    var zip = new JSZip();
+    Promise.all(validItems.map(function (item) {
+      return buildVariantExcel(item.rows, item.title).then(function (buffer) {
+        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
+        zip.file(safeName, buffer);
+      });
+    })).then(function () {
+      return zip.generateAsync({ type: 'arraybuffer' });
+    }).then(function (zipBuffer) {
+      downloadBlob(zipBuffer, 'listed-variants-batch.zip');
+    }).catch(function (err) {
+      showVariantError((err && err.message) || 'Failed to generate ZIP.');
+    }).finally(function () {
+      variantDownloadAllBtn.disabled = variantBatch.length === 0;
+      variantDownloadAllBtn.textContent = 'Download All (ZIP)';
     });
   });
 
