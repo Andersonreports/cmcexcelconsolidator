@@ -1551,41 +1551,80 @@
     return patients;
   }
 
-  // Reads back the app's own Listed Variant Excel export.
-  // Column positions are derived from VARIANT_COLUMNS (the same definition
-  // used when writing), so reader and writer always agree regardless of how
-  // ExcelJS reports sheet.columnCount during parsing.
-  // Row 1 is checked: if its first cell is "S.NO" the header is on row 1
-  // (no title); otherwise a title row is assumed and the header is on row 2.
+  // Reads Listed Variant data from either the app's own export (headers:
+  // "GENE", "VARIANT", …) or a raw VarSeq file (headers: "Gene Names",
+  // "HGVS c.", …). Gene/variant columns are found by name so the lookup
+  // works regardless of where those columns happen to land. Detail columns
+  // (zygosity, VAF, etc.) are looked up by a priority list of known names.
   function readListedVariantEntries(workbook) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in one of the Listed Variant Excel files.');
 
+    // 1-based position of a VARIANT_COLUMNS key (ground-truth for app exports).
+    function vcol(key) {
+      var idx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === key; });
+      return idx + 1;
+    }
+
+    // Scan rows 1–3 to build a header→column map. VarSeq files use a
+    // two-row header block (group row 1, column row 2) so we union both.
+    var colMap = {};
+    for (var scanR = 1; scanR <= 3; scanR++) {
+      var scanRow = sheet.getRow(scanR);
+      for (var ci = 1; ci <= 60; ci++) {
+        var cv = scanRow.getCell(ci).value;
+        var h = (cv !== null && cv !== undefined && typeof cv !== 'object')
+          ? String(cv).trim().toUpperCase() : '';
+        if (h && !colMap[h]) colMap[h] = ci;
+      }
+    }
+
+    // Pick the first matching header from a priority list; last arg is fallback.
+    function col(/* header, header, …, fallback */) {
+      for (var i = 0; i < arguments.length - 1; i++) {
+        var v = colMap[String(arguments[i]).toUpperCase()];
+        if (v) return v;
+      }
+      return arguments[arguments.length - 1];
+    }
+
+    // Also scan for "HGVS c.*" prefix (VarSeq variant column).
+    var hgvsCCol = 0;
+    for (var ci2 = 1; ci2 <= 60; ci2++) {
+      for (var r2 = 1; r2 <= 3; r2++) {
+        var h2 = String(sheet.getRow(r2).getCell(ci2).value || '').trim().toUpperCase();
+        if (h2.indexOf('HGVS C') === 0) { hgvsCCol = ci2; break; }
+      }
+      if (hgvsCCol) break;
+    }
+
+    // Header row index: "S.NO" at A1 → no title (header on row 1);
+    // anything else → title on row 1, header on row 2.
     var cellA1 = String(sheet.getRow(1).getCell(1).value || '').trim();
     var headerRowIndex = cellA1.toUpperCase() === 'S.NO' ? 1 : 2;
 
-    // 1-based column number for a given key in VARIANT_COLUMNS.
-    function vcol(key) {
-      var idx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === key; });
-      return idx + 1; // all expected keys exist; idx+1 is always >= 1
-    }
+    // Gene: app export = "GENE"; VarSeq = "GENE NAMES"
+    var geneCol    = col('GENE', 'GENE NAMES', vcol('gene'));
+    // Variant: app export = "VARIANT"; VarSeq = "HGVS c.*" column
+    var variantCol = col('VARIANT', vcol('variant'));
+    if (colMap['VARIANT'] === undefined && hgvsCCol) variantCol = hgvsCCol;
 
-    var geneCol      = vcol('gene');         // 2
-    var variantCol   = vcol('variant');      // 3
-    var proteinCol   = vcol('proteinPos');   // 4
-    var franklinCol  = vcol('franklin');     // 5
-    var clinvarCol   = vcol('clinvar');      // 6
-    var zygosityCol  = vcol('zygosity');     // 8
-    var inheritCol   = vcol('inheritance');  // 9
-    var vafCol       = vcol('vaf');          // 13
-    var allelicCol   = vcol('alleleDepths'); // 14
-    var readDepthCol = vcol('readDepths');   // 15
-    var omimTitleCol = vcol('omimTitle');    // 16
+    // Detail columns: known names for both app export and VarSeq formats.
+    var proteinCol   = col('PROTEIN POS', 'HGVS P.', vcol('proteinPos'));
+    var franklinCol  = col('FRANKLIN',                vcol('franklin'));
+    var clinvarCol   = col('CLINVAR',                 vcol('clinvar'));
+    var zygosityCol  = col('ZYGOSITY', 'ZYGOSITY',   vcol('zygosity'));
+    var inheritCol   = col('INHERTIANCE', 'INHERITANCE', 'INHERTIANCE', vcol('inheritance'));
+    var vafCol       = col('VAF(%)', 'VARIANT ALLELE FREQ',    vcol('vaf'));
+    var allelicCol   = col('ALLELIC DEPTH', 'ALLELIC DEPTHS (AD)', vcol('alleleDepths'));
+    var readDepthCol = col('READ DEPTH',    'READ DEPTHS (DP)',     vcol('readDepths'));
+    var omimTitleCol = col('OMIM TITLE',    'TITLE',               vcol('omimTitle'));
 
     var entries = [];
     sheet.eachRow(function (row, r) {
       if (r <= headerRowIndex) return;
-      var gene    = String(row.getCell(geneCol).value || '').trim();
+      // VarSeq "Gene Names" can be "GENE1;GENE2" — take only the first.
+      var gene    = String(row.getCell(geneCol).value || '').trim().split(';')[0].trim();
       var variant = String(row.getCell(variantCol).value || '').trim();
       if (!gene || !variant) return;
       entries.push({
@@ -1595,9 +1634,8 @@
         clinvar:      row.getCell(clinvarCol).value,
         zygosity:     row.getCell(zygosityCol).value,
         inheritance:  row.getCell(inheritCol).value,
-        // Excel auto-converts a "100.00%" string to the numeric value 1.0
-        // with a percentage display format; re-apply formatVafPercent so
-        // we always get a "XX.XX%" string regardless.
+        // Excel auto-converts "100.00%" strings to the numeric 1.0 —
+        // reapply formatVafPercent so we always get a "XX.XX%" string.
         vaf:          formatVafPercent(row.getCell(vafCol).value),
         alleleDepths: row.getCell(allelicCol).value,
         readDepths:   row.getCell(readDepthCol).value,
