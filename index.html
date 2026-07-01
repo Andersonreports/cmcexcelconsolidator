@@ -1617,8 +1617,16 @@
     var inheritCol   = col('INHERTIANCE', 'INHERITANCE', 'INHERTIANCE', vcol('inheritance'));
     var vafCol       = col('VAF(%)', 'VARIANT ALLELE FREQ',    vcol('vaf'));
     var allelicCol   = col('ALLELIC DEPTH', 'ALLELIC DEPTHS (AD)', vcol('alleleDepths'));
-    var readDepthCol = col('READ DEPTH',    'READ DEPTHS (DP)',     vcol('readDepths'));
-    var omimTitleCol = col('OMIM TITLE',    'TITLE',               vcol('omimTitle'));
+    // Smart read-depth fallback: if allelic resolved at the app-export position, the read-depth
+    // column is also at its app-export position. If allelic was found by header in a VarSeq file
+    // (different position), read depth is the very next column (VarSeq always places it right after).
+    var readDepthFallback = allelicCol === vcol('alleleDepths') ? vcol('readDepths') : allelicCol + 1;
+    var readDepthCol = col('READ DEPTH', 'READ DEPTHS (DP)', 'DEPTH', 'TOTAL DEPTH', readDepthFallback);
+    // Conflict guard: if header scan still gave us the same column as allelic, shift one right.
+    if (readDepthCol === allelicCol) readDepthCol = allelicCol + 1;
+    // OMIM title: only use a named header — no positional fallback, since a random column number
+    // would show unrelated data (e.g. read depth) when the file has no OMIM column.
+    var omimTitleCol = col('OMIM TITLE', 'TITLE', 'DISEASE NAME', 'OMIM DISEASE NAME', null);
 
     var entries = [];
     sheet.eachRow(function (row, r) {
@@ -1639,7 +1647,7 @@
         vaf:          formatVafPercent(row.getCell(vafCol).value),
         alleleDepths: row.getCell(allelicCol).value,
         readDepths:   row.getCell(readDepthCol).value,
-        omimTitle:    row.getCell(omimTitleCol).value,
+        omimTitle:    omimTitleCol ? row.getCell(omimTitleCol).value : null,
       });
     });
     return entries;
