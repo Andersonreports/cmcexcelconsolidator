@@ -1202,6 +1202,30 @@
   var variantDepartmentInput = document.getElementById('variant-department-input');
   var variantTitleInput = document.getElementById('variant-title-input');
 
+  // Genes that consistently produce false-positive calls — always excluded.
+  // For gene-specific variant exceptions (CNN2), only that variant is excluded.
+  // Interpretations from handwritten list: ZNF717 ("2N F17"), TCHH ("TCH #"), FBXL3 ("FB YL3").
+  var FALSE_CALL_GENES = [
+    'CDKN2B', 'CDKN2B-AS1', 'ZNF717', 'HLA-B', 'AR',
+    'SLC9B1', 'TCHH', 'PRSS1', 'FBXL3', 'PRB3'
+  ];
+  var FALSE_CALL_VARIANTS = [
+    { gene: 'CNN2', variantContains: '787G>A' }
+  ];
+
+  function isFalseCall(gene, variant) {
+    var g = String(gene || '').trim().toUpperCase();
+    for (var i = 0; i < FALSE_CALL_GENES.length; i++) {
+      if (g === FALSE_CALL_GENES[i].toUpperCase()) return true;
+    }
+    var v = String(variant || '').trim();
+    for (var j = 0; j < FALSE_CALL_VARIANTS.length; j++) {
+      var fc = FALSE_CALL_VARIANTS[j];
+      if (g === fc.gene.toUpperCase() && v.indexOf(fc.variantContains) !== -1) return true;
+    }
+    return false;
+  }
+
   function processVarSeqWorkbook(workbook) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in the uploaded file.');
@@ -1241,6 +1265,8 @@
 
       var gene = genes[winnerIdx] || genes[0] || '';
       var variant = stripHgvsPrefix(hgvsCList[winnerIdx] || hgvsCList[0] || '');
+      if (isFalseCall(gene, variant)) return; // skip known false-call genes/variants
+
       var proteinPos = stripHgvsPrefix(get('hgvsP'));
 
       var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
