@@ -413,8 +413,8 @@
         </div>
         <div class="upload-row">
           <label class="upload-label">
-            Listed Variant Excel reports (one per patient, select all at once)
-            <input type="file" id="final-listed-input" accept=".xlsx,.xls" multiple />
+            Listed Variant Excel reports (one per patient — select individual files or a ZIP)
+            <input type="file" id="final-listed-input" accept=".xlsx,.xls,.zip" multiple />
           </label>
           <span class="progress-text" id="final-listed-progress"></span>
         </div>
@@ -2011,25 +2011,53 @@
     finalListedInput.disabled = true;
     finalListedProgress.textContent = 'Reading files…';
 
-    var fileArray = Array.prototype.slice.call(files);
-    Promise.all(fileArray.map(function (file) {
-      return file.arrayBuffer().then(function (buffer) {
-        var workbook = new ExcelJS.Workbook();
-        return workbook.xlsx.load(buffer).then(function () { return readListedVariantEntries(workbook); });
-      });
-    }))
-      .then(function (entryLists) {
-        entryLists.forEach(function (entries) {
-          entries.forEach(function (entry) {
-            if (!finalListedVariantEntries.has(entry.key)) finalListedVariantEntries.set(entry.key, entry);
+    // Expand ZIPs into {name, buffer} objects alongside plain Excel files.
+    function expandToExcelBuffers(fileArray) {
+      return Promise.all(fileArray.map(function (file) {
+        if (/\.zip$/i.test(file.name)) {
+          return file.arrayBuffer().then(function (buf) {
+            return JSZip.loadAsync(buf).then(function (zip) {
+              var entries = [];
+              zip.forEach(function (path, entry) {
+                if (!entry.dir && /\.(xlsx|xls)$/i.test(path)) entries.push(entry);
+              });
+              return Promise.all(entries.map(function (entry) {
+                return entry.async('arraybuffer').then(function (b) {
+                  return { name: entry.name, buffer: b };
+                });
+              }));
+            });
           });
+        }
+        return file.arrayBuffer().then(function (buf) {
+          return [{ name: file.name, buffer: buf }];
         });
-        finalListedFileCount += fileArray.length;
-        finalListedProgress.textContent = finalListedFileCount + ' file(s) loaded (' + finalListedVariantEntries.size + ' variant entries indexed)';
-        buildFinalConsolidateRows();
+      })).then(function (groups) {
+        return [].concat.apply([], groups); // flatten
+      });
+    }
+
+    expandToExcelBuffers(Array.prototype.slice.call(files))
+      .then(function (xlFiles) {
+        return Promise.all(xlFiles.map(function (xl) {
+          var workbook = new ExcelJS.Workbook();
+          return workbook.xlsx.load(xl.buffer).then(function () {
+            return readListedVariantEntries(workbook);
+          });
+        })).then(function (entryLists) {
+          entryLists.forEach(function (entries) {
+            entries.forEach(function (entry) {
+              if (!finalListedVariantEntries.has(entry.key)) finalListedVariantEntries.set(entry.key, entry);
+            });
+          });
+          finalListedFileCount += xlFiles.length;
+          finalListedProgress.textContent =
+            finalListedFileCount + ' file(s) loaded (' + finalListedVariantEntries.size + ' variant entries indexed)';
+          buildFinalConsolidateRows();
+        });
       })
       .catch(function (err) {
-        showFinalError((err && err.message) || 'Failed to read one of the Listed Variant Excel files.');
+        showFinalError((err && err.message) || 'Failed to read one of the files.');
       })
       .finally(function () {
         finalListedInput.disabled = false;
