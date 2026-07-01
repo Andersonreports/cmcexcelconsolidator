@@ -1551,11 +1551,12 @@
     return patients;
   }
 
-  // Reads back the app's own Listed Variant Excel export. Columns are located
-  // by their header name rather than hardcoded position so the reader is
-  // robust to title rows, new columns being inserted, or any reordering.
-  // Row 1 is scanned: if its first cell is "S.NO" the header is on row 1;
-  // otherwise a title row is assumed and the header is on row 2.
+  // Reads back the app's own Listed Variant Excel export.
+  // Column positions are derived from VARIANT_COLUMNS (the same definition
+  // used when writing), so reader and writer always agree regardless of how
+  // ExcelJS reports sheet.columnCount during parsing.
+  // Row 1 is checked: if its first cell is "S.NO" the header is on row 1
+  // (no title); otherwise a title row is assumed and the header is on row 2.
   function readListedVariantEntries(workbook) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in one of the Listed Variant Excel files.');
@@ -1563,28 +1564,23 @@
     var cellA1 = String(sheet.getRow(1).getCell(1).value || '').trim();
     var headerRowIndex = cellA1.toUpperCase() === 'S.NO' ? 1 : 2;
 
-    // Build a map of header-text → column-number from the header row.
-    var colMap = {};
-    var headerRow = sheet.getRow(headerRowIndex);
-    var scanCount = Math.max(sheet.columnCount || 0, 40);
-    for (var ci = 1; ci <= scanCount; ci++) {
-      var h = String(headerRow.getCell(ci).value || '').trim().toUpperCase();
-      if (h && !colMap[h]) colMap[h] = ci;
+    // 1-based column number for a given key in VARIANT_COLUMNS.
+    function vcol(key) {
+      var idx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === key; });
+      return idx + 1; // all expected keys exist; idx+1 is always >= 1
     }
-    function col(name, fallback) { return colMap[name.toUpperCase()] || fallback; }
 
-    var geneCol       = col('GENE', 2);
-    var variantCol    = col('VARIANT', 3);
-    var proteinCol    = col('PROTEIN POS', 4);
-    var franklinCol   = col('FRANKLIN', 5);
-    var clinvarCol    = col('CLINVAR', 6);
-    var zygosityCol   = col('ZYGOSITY', 8);
-    // tolerate the long-standing typo "INHERTIANCE" in the header
-    var inheritCol    = col('INHERTIANCE', col('INHERITANCE', 9));
-    var vafCol        = col('VAF(%)', 13);
-    var allelicCol    = col('ALLELIC DEPTH', 14);
-    var readDepthCol  = col('READ DEPTH', 15);
-    var omimTitleCol  = col('OMIM TITLE', 16);
+    var geneCol      = vcol('gene');         // 2
+    var variantCol   = vcol('variant');      // 3
+    var proteinCol   = vcol('proteinPos');   // 4
+    var franklinCol  = vcol('franklin');     // 5
+    var clinvarCol   = vcol('clinvar');      // 6
+    var zygosityCol  = vcol('zygosity');     // 8
+    var inheritCol   = vcol('inheritance');  // 9
+    var vafCol       = vcol('vaf');          // 13
+    var allelicCol   = vcol('alleleDepths'); // 14
+    var readDepthCol = vcol('readDepths');   // 15
+    var omimTitleCol = vcol('omimTitle');    // 16
 
     var entries = [];
     sheet.eachRow(function (row, r) {
@@ -1599,7 +1595,10 @@
         clinvar:      row.getCell(clinvarCol).value,
         zygosity:     row.getCell(zygosityCol).value,
         inheritance:  row.getCell(inheritCol).value,
-        vaf:          row.getCell(vafCol).value,
+        // Excel auto-converts a "100.00%" string to the numeric value 1.0
+        // with a percentage display format; re-apply formatVafPercent so
+        // we always get a "XX.XX%" string regardless.
+        vaf:          formatVafPercent(row.getCell(vafCol).value),
         alleleDepths: row.getCell(allelicCol).value,
         readDepths:   row.getCell(readDepthCol).value,
         omimTitle:    row.getCell(omimTitleCol).value,
