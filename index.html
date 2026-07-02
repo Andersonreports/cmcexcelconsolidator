@@ -1142,6 +1142,14 @@
   // inheritance usually means a carrier, not a manifesting disease allele
   // on its own - flagged in red as a reminder this needs a second variant
   // (or different interpretation) to explain the phenotype.
+  function franklinColor(value) {
+    var v = String(value || '').trim().toUpperCase();
+    if (v === 'P')  return '#c2293a';   // Pathogenic  → red
+    if (v === 'LP') return '#c2293a';   // Likely Pathogenic → red
+    if (v === 'LB') return '#c2293a';   // Likely Benign → red (per user request)
+    return '';
+  }
+
   function isHetWithPureAR(row) {
     var zygosity = String(row.zygosity || '').trim().toUpperCase();
     var inheritance = String(row.inheritance || '').trim().toUpperCase();
@@ -1291,7 +1299,7 @@
         if (data && data.ok && data.abbr && !row.franklin) {
           row.franklin = data.abbr;
           var inputEl = document.getElementById(inputId);
-          if (inputEl) inputEl.value = data.abbr;
+          if (inputEl) { inputEl.value = data.abbr; inputEl.style.color = franklinColor(data.abbr); inputEl.style.fontWeight = franklinColor(data.abbr) ? '700' : ''; }
         } else if (!row.franklin) {
           fetchClinVarClass(row, rowIdx, batchIdx);
         }
@@ -1349,7 +1357,7 @@
         if (abbr && !row.franklin) {
           row.franklin = abbr;
           var inputEl = document.getElementById(inputId);
-          if (inputEl) inputEl.value = abbr;
+          if (inputEl) { inputEl.value = abbr; inputEl.style.color = franklinColor(abbr); inputEl.style.fontWeight = franklinColor(abbr) ? '700' : ''; }
         }
       })
       .catch(function () {});
@@ -1571,6 +1579,12 @@
             // Flex wrapper keeps the "↗" link inside the cell (not overflowing into CLINVAR)
             var bIdx = batchIdx != null ? batchIdx : 'x';
             input.id = 'finput-' + bIdx + '-' + rowIndex;
+            input.style.color = franklinColor(input.value);
+            input.style.fontWeight = franklinColor(input.value) ? '700' : '';
+            input.addEventListener('input', function (e) {
+              e.target.style.color = franklinColor(e.target.value);
+              e.target.style.fontWeight = franklinColor(e.target.value) ? '700' : '';
+            });
             var fWrapper = document.createElement('div');
             fWrapper.className = 'franklin-cell';
             fWrapper.appendChild(input);
