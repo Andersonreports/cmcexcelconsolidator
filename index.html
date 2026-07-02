@@ -228,13 +228,6 @@
     opacity: .7; transition: opacity .12s;
   }
   .franklin-link:hover { opacity: 1; text-decoration: underline; }
-  .franklin-server-badge {
-    display: inline-block; margin: 6px 0 2px;
-    padding: 3px 8px; border-radius: 4px; font: 600 10px/1.4 var(--sans);
-    letter-spacing: .04em; text-transform: uppercase;
-  }
-  .franklin-server-badge.on  { background: #d4f7d4; color: #1a6e1a; border: 1px solid #8fd68f; }
-  .franklin-server-badge.off { background: #f5f5f5; color: #888;    border: 1px solid #d0d0d0; }
 
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
@@ -394,7 +387,6 @@
           <div class="mapping-list" id="variant-mapping-list"></div>
         </details>
         <div id="variant-preview-label" class="batch-preview-label" hidden></div>
-        <div id="franklin-server-badge" class="franklin-server-badge" hidden></div>
 
         <div class="table-wrapper excel-grid-wrapper">
           <table class="excel-grid">
@@ -1223,304 +1215,74 @@
   var variantDepartmentInput = document.getElementById('variant-department-input');
   var variantTitleInput = document.getElementById('variant-title-input');
 
-  // Build a direct Franklin variant URL from VCF-style coordinates.
-  // URL format: https://franklin.genoox.com/clinical-db/variant/snp/chr{N}-{pos}-{ref}-{alt}
-  // Returns null when coordinates are not available (caller will fetch from Ensembl instead).
-  function buildFranklinUrl(chr, pos, ref, alt) {
-    var c = String(chr || '').trim().replace(/^chr/i, '');
-    var p = String(pos || '').trim();
-    var r = String(ref || '').trim();
-    var a = String(alt || '').trim();
-    if (c && p && r && a) {
-      return 'https://franklin.genoox.com/clinical-db/variant/snp/chr' + c + '-' + p + '-' + r + '-' + a;
-    }
-    return null; // no direct URL — caller will resolve via Ensembl
-  }
+  // ── Franklin (Genoox) auto-classification ───────────────────────────────────
+  // Franklin's real search/classify APIs are public but send no CORS headers, so a
+  // browser on GitHub Pages can't call them directly. FRANKLIN_PROXY_URL points at
+  // a small Google Apps Script relay (see franklin-proxy/Code.gs) that makes the
+  // same two calls server-side, always forcing the hg38 assembly, and returns just
+  // the "Suggested Classification" Franklin itself computes. Leave the constant
+  // blank to skip Franklin entirely and fall back straight to the ClinVar lookup.
+  var FRANKLIN_PROXY_URL = 'https://script.google.com/macros/s/AKfycbxZho7Jig9dKaCIVZIqwSv6FvUJxU9vx6yLwpqvoRjlt3ZQHKkQljthA8QOG9vYq6E3/exec';
 
-  // Resolve Franklin URLs and auto-fetch clinical significance via Ensembl VEP.
-  // VEP gives both genomic coordinates (for the URL) and ClinVar significance
-  // (pre-fills the Franklin column) in a single public, CORS-enabled call.
-  // Requests are staggered 250 ms apart to stay within Ensembl's rate limit.
-  function resolveVariantCoordsAsync(rows, batchIdx) {
-    var pending = [];
+  // Resolve Franklin classifications for every row missing one, staggered 250 ms
+  // apart so we don't hammer the relay / Franklin's servers.
+  function resolveFranklinForRows(rows, batchIdx) {
     rows.forEach(function (row, rowIdx) {
-      var hgvs = String(row._rawHgvs || '').trim();
-      if (!hgvs) {
-        // No HGVS — still try classification via Franklin page / ClinVar using gene+variant
-        var el = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
-        if (el) el.textContent = '↗';
-        if (!row.franklin && (row.gene || row.variant)) {
-          (function (r, ri) {
-            setTimeout(function () { fetchFranklinPageClass(r, ri, batchIdx); }, ri * 250);
-          })(row, rowIdx);
-        }
+      var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
+      if (row.franklin) {
+        if (linkEl) linkEl.textContent = '↗';
         return;
       }
-      var needsUrl   = !row._franklinUrl;
-      var needsClass = !row.franklin;
-      if (!needsUrl && !needsClass) {
-        var el2 = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
-        if (el2) el2.textContent = '↗';
-        return;
-      }
-      if (needsUrl) {
-        var el3 = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
-        if (el3) el3.textContent = '…';
-      }
-      pending.push({ row: row, rowIdx: rowIdx, hgvs: hgvs });
-    });
-
-    pending.forEach(function (item, i) {
-      setTimeout(function () { fetchVepForRow(item.row, item.rowIdx, item.hgvs, batchIdx); }, i * 250);
+      if (!row.gene && !row.variant) return;
+      if (linkEl) linkEl.textContent = '…';
+      (function (r, ri) {
+        setTimeout(function () { fetchFranklinForRow(r, ri, batchIdx); }, ri * 250);
+      })(row, rowIdx);
     });
   }
 
-  // ── Local Franklin Server integration ──────────────────────────────────────
-  // If the user runs franklin-fetcher/start-server.bat, a Playwright server runs
-  // on localhost:3001 and opens a real browser — so CORS isn't a problem.
-  // We call it for any rows still missing a Franklin classification after the
-  // VEP/ClinVar chain has had a chance to run (~4 s delay).
-  var _localServerKnown = null; // null = unknown, true = running, false = not running
-
-  function tryLocalFranklinServer(rows, batchIdx) {
-    var needed = [];
-    rows.forEach(function (row, rowIdx) {
-      if (!row.franklin && (row.gene || row.variant)) {
-        needed.push({ gene: row.gene || '', variant: row.variant || '', rowIdx: rowIdx });
-      }
-    });
-    if (!needed.length) return;
-
-    fetch('http://127.0.0.1:3001/batch', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ variants: needed }),
-    })
-    .then(function (r) {
-      if (!r.ok) throw new Error('server error');
-      _localServerKnown = true;
-      updateFranklinBadge();
-      return r.json();
-    })
-    .then(function (data) {
-      if (!Array.isArray(data.results)) return;
-      data.results.forEach(function (result) {
-        if (!result.classification) return;
-        var row = rows[result.rowIdx];
-        if (!row || row.franklin) return;
-        row.franklin = result.classification;
-        var el = document.getElementById('finput-' + batchIdx + '-' + result.rowIdx);
-        if (el) el.value = result.classification;
-      });
-    })
-    .catch(function () {
-      if (_localServerKnown === null) { _localServerKnown = false; updateFranklinBadge(); }
-    });
-  }
-
-  var _franklinBadgeEl = document.getElementById('franklin-server-badge');
-
-  function updateFranklinBadge() {
-    if (!_franklinBadgeEl) return;
-    if (_localServerKnown === true) {
-      _franklinBadgeEl.className = 'franklin-server-badge on';
-      _franklinBadgeEl.textContent = 'Franklin server: connected – auto-fill active';
-      _franklinBadgeEl.hidden = false;
-    } else if (_localServerKnown === false) {
-      _franklinBadgeEl.className = 'franklin-server-badge off';
-      _franklinBadgeEl.textContent = 'Franklin server: not running – run start-server.bat for auto-fill';
-      _franklinBadgeEl.hidden = false;
-    }
-  }
-
-  // Check if the local server is running (called once on page load, result shown in badge).
-  function pingLocalServer() {
-    fetch('http://127.0.0.1:3001/status', { cache: 'no-store' })
-      .then(function (r) { _localServerKnown = r.ok; updateFranklinBadge(); })
-      .catch(function () { _localServerKnown = false; updateFranklinBadge(); });
-  }
-  setTimeout(pingLocalServer, 1200);
-
-  // Map ClinVar significance terms to the same abbreviated labels Franklin uses.
-  function abbreviateClinSig(sigs) {
-    var norm = sigs.map(function (s) {
-      return s.toLowerCase().replace(/\s+/g, '_');
-    });
-    function has(term) {
-      return norm.some(function (n) { return n === term; });
-    }
-    // Exact-match in priority order so "pathogenic" wins over "likely_pathogenic"
-    if (has('pathogenic'))           return 'P';
-    if (has('likely_pathogenic'))    return 'LP';
-    if (has('uncertain_significance')) return 'VUS';
-    if (has('likely_benign'))        return 'LB';
-    if (has('benign'))               return 'B';
-    if (norm.some(function (n) { return n.indexOf('conflicting') !== -1; })) return 'Conflicting';
-    return null;
-  }
-
-  function fetchVepForRow(row, rowIdx, hgvs, batchIdx) {
+  function fetchFranklinForRow(row, rowIdx, batchIdx) {
     var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
     var inputId = 'finput-' + batchIdx + '-' + rowIdx;
 
-    // Step 1: try Franklin's own search API (may succeed if they allow CORS)
-    var franklinSearchUrl = 'https://franklin.genoox.com/api/search?term=' +
-                            encodeURIComponent(hgvs) + '&type=variant';
+    if (!FRANKLIN_PROXY_URL) {
+      var linkElNoProxy = document.getElementById(linkId);
+      if (linkElNoProxy) linkElNoProxy.textContent = '↗';
+      fetchClinVarClass(row, rowIdx, batchIdx);
+      return;
+    }
 
-    fetch(franklinSearchUrl, { headers: { 'Accept': 'application/json' } })
-      .then(function (r) {
-        if (!r.ok) throw new Error('franklin-api-not-available');
-        return r.json();
-      })
-      .then(function (data) {
-        var cls = (data && (data.classification || (data.result && data.result.classification))) || null;
-        if (cls) {
-          row.franklin = cls;
-          var inputEl = document.getElementById(inputId);
-          if (inputEl) inputEl.value = cls;
-          var linkEl = document.getElementById(linkId);
-          if (linkEl) linkEl.textContent = '↗';
-        } else {
-          // Franklin API gave no classification — must still run VEP/ClinVar chain
-          fetchVepFallback(row, rowIdx, hgvs, batchIdx);
-        }
-      })
-      .catch(function () {
-        fetchVepFallback(row, rowIdx, hgvs, batchIdx);
-      });
-  }
+    var url = FRANKLIN_PROXY_URL +
+      '?gene=' + encodeURIComponent(row.gene || '') +
+      '&variant=' + encodeURIComponent(row.variant || '');
 
-  function fetchVepFallback(row, rowIdx, hgvs, batchIdx) {
-    var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
-    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
-
-    fetch('https://rest.ensembl.org/vep/human/hgvs/' +
-          encodeURIComponent(hgvs) + '?content-type=application/json&canonical=1')
+    fetch(url, { headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        var entry = Array.isArray(data) && data[0];
-        if (!entry) throw new Error('no result');
-
-        // --- Build Franklin URL from VEP coordinates ---
-        if (!row._franklinUrl) {
-          var chr  = String(entry.seq_region_name || '').trim();
-          var pos  = String(entry.start || '').trim();
-          var pair = String(entry.allele_string || '').split('/');
-          var ref  = pair[0] || '';
-          var alt  = pair[pair.length - 1] || '';
-          if (chr && pos && ref && alt && ref !== alt) {
-            var url = 'https://franklin.genoox.com/clinical-db/variant/snp/chr' +
-                      chr + '-' + pos + '-' + ref + '-' + alt;
-            row._franklinUrl = url;
-            var linkEl = document.getElementById(linkId);
-            if (linkEl) linkEl.href = url;
+        var linkEl = document.getElementById(linkId);
+        if (data && data.ok && data.classification) {
+          if (data.chrom && data.pos && data.ref && data.alt) {
+            row._franklinUrl = 'https://franklin.genoox.com/clinical-db/variant/snp/chr' +
+              data.chrom + '-' + data.pos + '-' + data.ref + '-' + data.alt + '-hg38';
+            if (linkEl) linkEl.href = row._franklinUrl;
           }
-        }
-
-        // --- Show the arrow ---
-        var linkEl2 = document.getElementById(linkId);
-        if (linkEl2) linkEl2.textContent = '↗';
-
-        // --- Try ClinVar significance from VEP colocated_variants ---
-        if (!row.franklin) {
-          var colocated = entry.colocated_variants || [];
-          var abbr = null;
-          for (var i = 0; i < colocated.length; i++) {
-            var cv = colocated[i];
-            if (cv.clin_sig && cv.clin_sig.length) {
-              abbr = abbreviateClinSig(cv.clin_sig);
-              break;
-            }
-          }
-          if (abbr) {
-            row.franklin = abbr;
+          if (linkEl) linkEl.textContent = '↗';
+          if (!row.franklin) {
+            var value = data.abbr || data.classification;
+            row.franklin = value;
             var inputEl = document.getElementById(inputId);
-            if (inputEl) inputEl.value = abbr;
-          } else {
-            // VEP has no ClinVar data — fetch Franklin's page directly via proxy
-            fetchFranklinPageClass(row, rowIdx, batchIdx);
+            if (inputEl) inputEl.value = value;
           }
-        }
-      })
-      .catch(function () {
-        var linkEl3 = document.getElementById(linkId);
-        if (linkEl3) linkEl3.textContent = '↗';
-        if (!row.franklin) fetchFranklinPageClass(row, rowIdx, batchIdx);
-      });
-  }
-
-  // Fetch Franklin's page via CORS proxy using gene+variant search.
-  // Franklin is a public site; allorigins.win relays the page so we can parse it.
-  function fetchFranklinPageClass(row, rowIdx, batchIdx) {
-    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
-    if (row.franklin) return;
-
-    // Prefer direct variant URL (coordinate-based); fall back to gene+variant search
-    var franklinFetch;
-    if (row._franklinUrl && row._franklinUrl.indexOf('/variant/snp/') !== -1) {
-      franklinFetch = row._franklinUrl;
-    } else {
-      var q = [String(row.gene || '').trim(), String(row.variant || '').trim()]
-               .filter(Boolean).join(' ');
-      if (!q) { fetchClinVarClass(row, rowIdx, batchIdx); return; }
-      franklinFetch = 'https://franklin.genoox.com/clinical-db/search?q=' + encodeURIComponent(q);
-    }
-
-    fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(franklinFetch))
-      .then(function (r) { return r.text(); })
-      .then(function (html) {
-        var cls = parseFranklinHtml(html);
-        if (cls && !row.franklin) {
-          row.franklin = cls;
-          var inputEl = document.getElementById(inputId);
-          if (inputEl) inputEl.value = cls;
         } else {
-          // Franklin page parse failed — fall back to ClinVar eutils
+          if (linkEl) linkEl.textContent = '↗';
           fetchClinVarClass(row, rowIdx, batchIdx);
         }
       })
-      .catch(function () { fetchClinVarClass(row, rowIdx, batchIdx); });
-  }
-
-  // Parse "Suggested Classification" from Franklin's server-rendered HTML.
-  function parseFranklinHtml(html) {
-    // 1. __NEXT_DATA__ JSON embedded by Next.js SSR
-    var nm = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
-    if (nm) {
-      try { var cls = deepFindClassification(JSON.parse(nm[1]), 0); if (cls) return cls; }
-      catch (e) {}
-    }
-    // 2. "Suggested Classification" followed within 400 chars by the classification word
-    var sm = html.match(/[Ss]uggested\s+[Cc]lassification[\s\S]{0,400}?(Pathogenic|Likely\s+pathogenic|Uncertain\s+significance|Likely\s+benign|Benign)\b/i);
-    if (sm && sm[1]) return abbreviateClinSigText(sm[1].replace(/\s+/g, ' ').trim());
-    // 3. Any JSON key named "classification" / "acmg_classification" etc. in the page source
-    var jm = html.match(/"(?:classification|suggestedClassification|suggested_classification|acmg_classification|pathogenicity)"\s*:\s*"([^"]{2,40})"/i);
-    if (jm && jm[1]) return abbreviateClinSigText(jm[1]);
-    return null;
-  }
-
-  // Recursively search a Next.js page-props object for a classification value.
-  function deepFindClassification(obj, depth) {
-    if (depth > 10 || !obj || typeof obj !== 'object') return null;
-    var keys = ['classification', 'suggestedClassification', 'suggested_classification',
-                'acmg_classification', 'clinicalSignificance', 'pathogenicity',
-                'suggested_pathogenicity', 'variant_classification', 'acmg_class'];
-    for (var i = 0; i < keys.length; i++) {
-      var val = obj[keys[i]];
-      if (!val && val !== 0) continue;
-      if (typeof val === 'string') { var a = abbreviateClinSigText(val); if (a) return a; }
-      if (typeof val === 'object') {
-        var inner = String(val.label || val.name || val.description || val.value || val.text || '');
-        if (inner) { var a2 = abbreviateClinSigText(inner); if (a2) return a2; }
-      }
-    }
-    for (var k in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, k) && typeof obj[k] === 'object') {
-        var r = deepFindClassification(obj[k], depth + 1);
-        if (r) return r;
-      }
-    }
-    return null;
+      .catch(function () {
+        var linkEl2 = document.getElementById(linkId);
+        if (linkEl2) linkEl2.textContent = '↗';
+        fetchClinVarClass(row, rowIdx, batchIdx);
+      });
   }
 
   // Last-resort: search NCBI ClinVar eutils by gene + variant text.
@@ -1668,8 +1430,7 @@
         variant: variant,
         proteinPos: proteinPos,
         franklin: lookupFranklin(gene, variant),
-        _rawHgvs: hgvsCList[winnerIdx] || hgvsCList[0] || '',
-        _franklinUrl: buildFranklinUrl(get('variantChr'), get('variantPos'), get('variantRef'), get('variantAlt')),
+        _franklinUrl: null,
         clinvar: get('clinvarClass') || '',
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
@@ -1926,10 +1687,7 @@
       variantPreviewLabel.hidden = false;
     }
     renderVariantTable(idx);
-    resolveVariantCoordsAsync(variantRows, idx);
-    // After VEP/ClinVar has had time to fill what it can, ask the local server
-    // for any rows still blank (requires franklin-fetcher/start-server.bat running).
-    setTimeout(function () { tryLocalFranklinServer(variantRows, idx); }, 5000);
+    resolveFranklinForRows(variantRows, idx);
     renderBatchList();
   }
 
