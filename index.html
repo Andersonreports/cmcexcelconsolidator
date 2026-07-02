@@ -2348,6 +2348,17 @@
            encodeURIComponent(gene + '[gene] AND ' + variant + '[All Fields]');
   }
 
+  // Returns { text, hyperlink } for ExcelJS if the value contains PubMed ID(s),
+  // otherwise returns the raw string. Links to the first numeric ID found.
+  function pubmedHyperlinkValue(rawVal) {
+    var s = String(rawVal || '').trim();
+    if (!s) return null;
+    var parts = s.split(/[,;\s]+/).map(function (p) { return p.trim(); }).filter(Boolean);
+    var pmids = parts.filter(function (p) { return /^\d+$/.test(p); });
+    if (!pmids.length) return s;
+    return { text: s, hyperlink: 'https://pubmed.ncbi.nlm.nih.gov/' + pmids[0] + '/' };
+  }
+
   function fetchClinVarOneRow(row) {
     var gene = String(row.gene || '').trim();
     var variant = String(row.variant || '').trim();
@@ -2425,6 +2436,7 @@
     var noPathStart = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
     var noPathEnd   = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
     var clinvarColIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
+    var litColIdx     = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'literatureEvidence'; });
 
     finalConsolidateRows.forEach(function (row, i) {
       var dataRow  = sheet.getRow(i + 2);
@@ -2452,6 +2464,14 @@
             }
           }
           // else: leave cell empty
+        } else if (colIdx === litColIdx) {
+          var litVal = pubmedHyperlinkValue(row.literatureEvidence);
+          if (litVal && typeof litVal === 'object') {
+            cell.value = litVal;
+            cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
+          } else if (litVal) {
+            cell.value = litVal;
+          }
         } else {
           cell.value = row[c.key];
         }
