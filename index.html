@@ -1259,21 +1259,20 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var linkEl = document.getElementById(linkId);
-        if (data && data.ok && data.classification) {
-          if (data.chrom && data.pos && data.ref && data.alt) {
-            row._franklinUrl = 'https://franklin.genoox.com/clinical-db/variant/snp/chr' +
-              data.chrom + '-' + data.pos + '-' + data.ref + '-' + data.alt + '-hg38';
-            if (linkEl) linkEl.href = row._franklinUrl;
-          }
-          if (linkEl) linkEl.textContent = '↗';
-          if (!row.franklin) {
-            var value = data.abbr || data.classification;
-            row.franklin = value;
-            var inputEl = document.getElementById(inputId);
-            if (inputEl) inputEl.value = value;
-          }
-        } else {
-          if (linkEl) linkEl.textContent = '↗';
+        if (data && data.ok && data.chrom && data.pos && data.ref && data.alt) {
+          row._franklinUrl = 'https://franklin.genoox.com/clinical-db/variant/snp/chr' +
+            data.chrom + '-' + data.pos + '-' + data.ref + '-' + data.alt + '-hg38';
+          if (linkEl) linkEl.href = row._franklinUrl;
+        }
+        if (linkEl) linkEl.textContent = '↗';
+        // Only ever show a clean abbreviated code (P/LP/VUS/LB/B/Conflicting) —
+        // never Franklin's raw classification string. If the relay couldn't
+        // map it, fall back to ClinVar rather than display something garbled.
+        if (data && data.ok && data.abbr && !row.franklin) {
+          row.franklin = data.abbr;
+          var inputEl = document.getElementById(inputId);
+          if (inputEl) inputEl.value = data.abbr;
+        } else if (!row.franklin) {
           fetchClinVarClass(row, rowIdx, batchIdx);
         }
       })
