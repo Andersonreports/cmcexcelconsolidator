@@ -228,7 +228,6 @@
     opacity: .7; transition: opacity .12s;
   }
   .franklin-link:hover { opacity: 1; text-decoration: underline; }
-
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
   .raw-text-debug summary:hover { color: var(--ink); }
@@ -1930,9 +1929,23 @@
     }
 
     // Header row index: "S.NO" at A1 → no title (header on row 1);
-    // anything else → title on row 1, header on row 2.
+    // anything else → VarSeq format with group row 1 and header row 2.
     var cellA1 = String(sheet.getRow(1).getCell(1).value || '').trim();
     var headerRowIndex = cellA1.toUpperCase() === 'S.NO' ? 1 : 2;
+
+    // For VarSeq files, use the same group-aware column detection that the
+    // Listed Variant section uses (findVarSeqColumn).  This is necessary for
+    // columns like "Classification" that appear under multiple groups (ClinVar,
+    // ACMG, AlphaMissense, etc.) — the flat colMap can only store one of them.
+    var isVarSeqFormat = headerRowIndex === 2;
+    var vsGroupRow  = isVarSeqFormat ? sheet.getRow(1) : null;
+    var vsHeaderRow = isVarSeqFormat ? sheet.getRow(headerRowIndex) : null;
+    var vsColCount  = sheet.columnCount;
+
+    function findVSCol(spec) {
+      if (!isVarSeqFormat) return null;
+      return findVarSeqColumn(vsGroupRow, vsHeaderRow, vsColCount, spec);
+    }
 
     // Gene: app export = "GENE"; VarSeq = "GENE NAMES"
     var geneCol    = col('GENE', 'GENE NAMES', vcol('gene'));
@@ -1941,10 +1954,14 @@
     if (colMap['VARIANT'] === undefined && hgvsCCol) variantCol = hgvsCCol;
 
     // Detail columns: known names for both app export and VarSeq formats.
-    var proteinCol   = col('PROTEIN POS', 'HGVS P.', vcol('proteinPos'));
-    var franklinCol  = col('FRANKLIN',                vcol('franklin'));
-    var clinvarCol   = col('CLINVAR',                 vcol('clinvar'));
-    var zygosityCol  = col('ZYGOSITY', 'ZYGOSITY',   vcol('zygosity'));
+    var proteinCol  = col('PROTEIN POS', 'HGVS P.', vcol('proteinPos'));
+    var franklinCol = col('FRANKLIN',               vcol('franklin'));
+    // ClinVar classification: VarSeq stores it as "Classification" under the
+    // "ClinVar" group (row 1) — must use group-aware detection to avoid
+    // confusing it with the ACMG or AlphaMissense "Classification" columns.
+    var clinvarCol  = findVSCol({ header: 'Classification', groupIncludes: ['ClinVar'] })
+                      || col('CLINVAR', vcol('clinvar'));
+    var zygosityCol = col('ZYGOSITY', 'ZYGOSITY', vcol('zygosity'));
     var inheritCol   = col('INHERTIANCE', 'INHERITANCE', 'INHERTIANCE', vcol('inheritance'));
     var vafCol       = col('VAF(%)', 'VARIANT ALLELE FREQ',    vcol('vaf'));
     var allelicCol   = col('ALLELIC DEPTH', 'ALLELIC DEPTHS (AD)', vcol('alleleDepths'));
@@ -1958,6 +1975,11 @@
     // OMIM title: only use a named header — no positional fallback, since a random column number
     // would show unrelated data (e.g. read depth) when the file has no OMIM column.
     var omimTitleCol = col('OMIM TITLE', 'TITLE', 'DISEASE NAME', 'OMIM DISEASE NAME', null);
+    // Genomic coordinates — present in VarSeq exports; used for ClinVar VCF lookup
+    var chrCol = col('CHR', 'CHROM', 'CHROMOSOME', 0);
+    var posCol = col('POS', 'POSITION', 'START', 0);
+    var refCol = col('REF', 'REFERENCE', 0);
+    var altCol = col('ALT', 'ALTERNATE', 'ALTERNATIVE', 0);
 
     var entries = [];
     sheet.eachRow(function (row, r) {
@@ -1971,6 +1993,7 @@
         proteinPos:   row.getCell(proteinCol).value,
         franklin:     row.getCell(franklinCol).value,
         clinvar:      row.getCell(clinvarCol).value,
+        clinvarUrl:   '',
         zygosity:     row.getCell(zygosityCol).value,
         inheritance:  row.getCell(inheritCol).value,
         // Excel auto-converts "100.00%" strings to the numeric 1.0 —
@@ -1979,6 +2002,11 @@
         alleleDepths: row.getCell(allelicCol).value,
         readDepths:   row.getCell(readDepthCol).value,
         omimTitle:    omimTitleCol ? row.getCell(omimTitleCol).value : null,
+        // Genomic coords for ClinVar VCF tabix lookup
+        chr: chrCol ? String(row.getCell(chrCol).value || '').trim() : '',
+        pos: posCol ? String(row.getCell(posCol).value || '').trim() : '',
+        ref: refCol ? String(row.getCell(refCol).value || '').trim() : '',
+        alt: altCol ? String(row.getCell(altCol).value || '').trim() : '',
       });
     });
     return entries;
@@ -2040,11 +2068,17 @@
           alleleDepths: details ? details.alleleDepths : '',
           readDepths: details ? details.readDepths : '',
           omimTitle: details ? details.omimTitle : '',
-          clinvar: details ? details.clinvar : '',
+          clinvar: details ? (details.clinvar || '') : '',
+          clinvarUrl: details ? (details.clinvarUrl || '') : '',
           acmgClassification: details ? details.franklin : '',
           literatureEvidence: literatureEvidence || '',
           remark: remark || '',
           unmatched: unmatched,
+          // Genomic coordinates for ClinVar VCF lookup
+          chr: details ? (details.chr || '') : '',
+          pos: details ? (details.pos || '') : '',
+          ref: details ? (details.ref || '') : '',
+          alt: details ? (details.alt || '') : '',
         };
       }
 
@@ -2077,10 +2111,15 @@
           readDepths: vr.readDepths,
           omimTitle: vr.omimTitle,
           clinvar: vr.clinvar,
+          clinvarUrl: vr.clinvarUrl || '',
           acmgClassification: vr.acmgClassification,
           literatureEvidence: vr.literatureEvidence,
           remark: vr.remark,
           unmatched: vr.unmatched,
+          chr: vr.chr || '',
+          pos: vr.pos || '',
+          ref: vr.ref || '',
+          alt: vr.alt || '',
         });
       });
     });
@@ -2277,7 +2316,103 @@
     renderFinalTable();
   });
 
-  finalDownloadBtn.addEventListener('click', function () {
+  // ── ClinVar browser lookup (NCBI eutils – no server needed) ─────────────────
+  // For each row in the final consolidated report that has gene+variant, fetch
+  // the ClinVar variation ID via eutils, then build a hyperlink URL.
+  // Results are stored in row.clinvarId / row.clinvarUrl / row.clinvar.
+
+  function normVariant(v) {
+    return String(v || '').replace(/del[ACGT]+$/i, 'del').replace(/ins[ACGT]+$/i, 'ins');
+  }
+
+  function parseClinSigText(text) {
+    var t = String(text || '').toLowerCase().trim();
+    if (!t) return null;
+    if (t === 'pathogenic') return 'P';
+    if (t === 'likely pathogenic' || t === 'pathogenic/likely pathogenic') return 'LP';
+    if (t.includes('uncertain significance')) return 'VUS';
+    if (t === 'likely benign' || t === 'benign/likely benign') return 'LB';
+    if (t === 'benign') return 'B';
+    if (t.includes('conflicting')) return 'Conflicting';
+    if (t.includes('pathogenic') && t.includes('likely')) return 'LP';
+    if (t.includes('pathogenic')) return 'P';
+    if (t.includes('benign') && t.includes('likely')) return 'LB';
+    if (t.includes('benign')) return 'B';
+    if (t.includes('uncertain')) return 'VUS';
+    return null;
+  }
+
+  function clinvarFallbackUrl(gene, variant) {
+    // Best-effort search URL used when we don't have a specific variation ID.
+    return 'https://www.ncbi.nlm.nih.gov/clinvar/?term=' +
+           encodeURIComponent(gene + '[gene] AND ' + variant + '[All Fields]');
+  }
+
+  function fetchClinVarOneRow(row) {
+    var gene = String(row.gene || '').trim();
+    var variant = String(row.variant || '').trim();
+    if (!gene || !variant || gene === 'No Pathogenic Variant') return Promise.resolve();
+
+    // Always set at least a fallback search link immediately so the Excel always
+    // gets a hyperlink even if the eutils lookup fails or is slow.
+    if (!row.clinvarUrl) {
+      row.clinvarUrl = clinvarFallbackUrl(gene, variant);
+    }
+
+    var norm = normVariant(variant);
+    var termA = '(' + gene + '[gene] AND "' + variant + '"[All Fields])';
+    var termB = norm !== variant ? ' OR (' + gene + '[gene] AND "' + norm + '"[All Fields])' : '';
+    var searchUrl =
+      'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
+      '?db=clinvar&term=' + encodeURIComponent(termA + termB) + '&retmax=3&retmode=json';
+
+    return fetch(searchUrl)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var ids = (data.esearchresult && data.esearchresult.idlist) || [];
+        if (!ids.length) return;
+        var uid = ids[0];
+        return fetch(
+          'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi' +
+          '?db=clinvar&id=' + uid + '&retmode=json'
+        )
+          .then(function (r) { return r.json(); })
+          .then(function (sum) {
+            var doc = sum.result && sum.result[uid];
+            var sigText =
+              (doc && doc.clinical_significance && doc.clinical_significance.description) ||
+              (doc && doc.description) || '';
+            var sig = parseClinSigText(sigText);
+            // Upgrade to exact variation page URL
+            row.clinvarId  = uid;
+            row.clinvarUrl = 'https://www.ncbi.nlm.nih.gov/clinvar/variation/' + uid + '/';
+            if (sig) row.clinvar = sig;
+          });
+      })
+      .catch(function () {}); // keep the fallback URL; silently ignore network errors
+  }
+
+  // Fetch ClinVar for all variant rows, staggered to respect NCBI rate limits.
+  function fetchAllClinVar(rows) {
+    var variantRows = rows.filter(function (r) {
+      return r.gene && r.gene !== 'No Pathogenic Variant' && r.variant;
+    });
+    if (!variantRows.length) return Promise.resolve();
+
+    return new Promise(function (resolve) {
+      var i = 0;
+      function next() {
+        if (i >= variantRows.length) { resolve(); return; }
+        fetchClinVarOneRow(variantRows[i]).then(function () {
+          i++;
+          setTimeout(next, 300); // 300 ms gap → ~3 req/s, within NCBI's free tier limit
+        });
+      }
+      next();
+    });
+  }
+
+  function buildAndDownloadFinalExcel() {
     var workbook = new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Final Consolidated');
 
@@ -2289,18 +2424,41 @@
 
     var noPathStart = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
     var noPathEnd   = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
+    var clinvarColIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
 
     finalConsolidateRows.forEach(function (row, i) {
-      var dataRow = sheet.getRow(i + 2);
+      var dataRow  = sheet.getRow(i + 2);
       var isNoPath = row.gene === 'No Pathogenic Variant' && !row.variant;
 
       FINAL_COLUMNS.forEach(function (c, colIdx) {
-        if (isNoPath && colIdx > noPathStart && colIdx <= noPathEnd) return; // covered by merge
-        dataRow.getCell(colIdx + 1).value = row[c.key];
+        if (isNoPath && colIdx > noPathStart && colIdx <= noPathEnd) return;
+
+        var cell = dataRow.getCell(colIdx + 1);
+
+        // ClinVar column: write as a clickable hyperlink whenever the cell has text.
+        // Exact URL from eutils is preferred; falls back to a ClinVar search URL
+        // so that "Pathogenic" (etc.) is ALWAYS a link, not plain text.
+        // Empty cells (variant not in ClinVar) stay empty — no phantom links.
+        if (colIdx === clinvarColIdx && !isNoPath) {
+          var cvText = String(row.clinvar || '').trim();
+          if (cvText) {
+            var cvUrl = row.clinvarUrl ||
+                        (row.gene && row.variant ? clinvarFallbackUrl(row.gene, row.variant) : '');
+            if (cvUrl) {
+              cell.value = { text: cvText, hyperlink: cvUrl };
+              cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
+            } else {
+              cell.value = cvText;
+            }
+          }
+          // else: leave cell empty
+        } else {
+          cell.value = row[c.key];
+        }
       });
 
       if (isNoPath) {
-        var startCol = noPathStart + 1; // 1-based
+        var startCol = noPathStart + 1;
         var endCol   = noPathEnd + 1;
         sheet.mergeCells(i + 2, startCol, i + 2, endCol);
         var mergedCell = dataRow.getCell(startCol);
@@ -2311,6 +2469,23 @@
 
     workbook.xlsx.writeBuffer().then(function (buffer) {
       downloadBlob(buffer, 'final-consolidated-report.xlsx');
+      finalDownloadBtn.disabled = false;
+      finalDownloadBtn.textContent = 'Download Excel';
+    });
+  }
+
+  finalDownloadBtn.addEventListener('click', function () {
+    finalDownloadBtn.disabled = true;
+    finalDownloadBtn.textContent = 'Fetching ClinVar…';
+    fetchAllClinVar(finalConsolidateRows).then(function () {
+      // Also refresh the table cells so the user sees the fetched values
+      finalConsolidateRows.forEach(function (row, ri) {
+        if (!row.clinvar) return;
+        var inputs = finalTableBody.querySelectorAll('tr:nth-child(' + (ri + 1) + ') input');
+        var cvIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
+        if (inputs[cvIdx]) inputs[cvIdx].value = row.clinvar;
+      });
+      buildAndDownloadFinalExcel();
     });
   });
 
