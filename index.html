@@ -1424,9 +1424,15 @@
       if (!gene) return;
       var variant = stripHgvsPrefix(hgvsCList[winnerIdx] || hgvsCList[0] || '');
 
+      // Skip rows that have neither zygosity nor inheritance — these are
+      // typically annotation-only or summary rows, not real variant calls.
+      var rawZygosity    = get('zygosity');
+      var rawInheritance = get('omimInheritance');
+      if (!rawZygosity && !rawInheritance) return;
+
       var proteinPos = stripHgvsPrefix(get('hgvsP'));
 
-      var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
+      var inheritanceCodes = abbreviateInheritance(splitList(rawInheritance));
 
       rows.push({
         sNo: '',
