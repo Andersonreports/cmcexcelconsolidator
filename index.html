@@ -456,6 +456,26 @@
 (function () {
   'use strict';
 
+  // ---------- OMIM genemap2 lookup ----------
+  // Populated asynchronously from omim_genemap2.txt (col 8 = gene symbol, col 12 = phenotypes).
+  // Maps GENE_SYMBOL.toUpperCase() → first phenotype MIM number string (e.g. "610921").
+  var omimGeneMap = new Map();
+
+  fetch('omim_genemap2.txt')
+    .then(function (r) { return r.text(); })
+    .then(function (text) {
+      text.split('\n').forEach(function (line) {
+        if (!line || line.charAt(0) === '#') return;
+        var cols = line.split('\t');
+        var symbol = (cols[8] || '').trim();
+        var phenotypes = (cols[12] || '').trim();
+        if (!symbol || !phenotypes) return;
+        var m = phenotypes.match(/\b(\d{6})\b/);
+        if (m) omimGeneMap.set(symbol.toUpperCase(), m[1]);
+      });
+    })
+    .catch(function () {}); // silently ignore if file not found
+
   // ---------- Tab switching ----------
   var tabButtons = document.querySelectorAll('.tab-button');
   var panels = {
@@ -2100,7 +2120,8 @@
           alleleDepths: details ? details.alleleDepths : '',
           readDepths: details ? details.readDepths : '',
           omimTitle: details ? details.omimTitle : '',
-          omimNumber: details ? extractMimNumber(details.omimPhenotypes) : '',
+          omimNumber: omimGeneMap.get(gene.toUpperCase()) ||
+                      (details ? extractMimNumber(details.omimPhenotypes) : ''),
           clinvar: details ? (details.clinvar || '') : '',
           clinvarUrl: details ? (details.clinvarUrl || '') : '',
           acmgClassification: details ? details.franklin : '',
