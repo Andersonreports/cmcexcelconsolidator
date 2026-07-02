@@ -2068,6 +2068,7 @@
           alleleDepths: details ? details.alleleDepths : '',
           readDepths: details ? details.readDepths : '',
           omimTitle: details ? details.omimTitle : '',
+          omimNumber: details ? extractMimNumber(details.omimPhenotypes) : '',
           clinvar: details ? (details.clinvar || '') : '',
           clinvarUrl: details ? (details.clinvarUrl || '') : '',
           acmgClassification: details ? details.franklin : '',
@@ -2348,6 +2349,13 @@
            encodeURIComponent(gene + '[gene] AND ' + variant + '[All Fields]');
   }
 
+  // Extracts the first 6-digit MIM number from an OMIM phenotype string
+  // e.g. "Fanconi anemia, complementation group A, 227650 (3)" → "227650"
+  function extractMimNumber(phenotypeStr) {
+    var m = String(phenotypeStr || '').match(/\b(\d{6})\b/);
+    return m ? m[1] : '';
+  }
+
   // Returns { text, hyperlink } for ExcelJS if the value contains PubMed ID(s),
   // otherwise returns the raw string. Links to the first numeric ID found.
   function pubmedHyperlinkValue(rawVal) {
@@ -2437,6 +2445,7 @@
     var noPathEnd   = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
     var clinvarColIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
     var litColIdx     = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'literatureEvidence'; });
+    var omimColIdx    = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'omimTitle'; });
 
     finalConsolidateRows.forEach(function (row, i) {
       var dataRow  = sheet.getRow(i + 2);
@@ -2464,6 +2473,15 @@
             }
           }
           // else: leave cell empty
+        } else if (colIdx === omimColIdx) {
+          var omimText = String(row.omimTitle || '').trim();
+          if (omimText) {
+            var omimUrl = row.omimNumber
+              ? 'https://www.omim.org/entry/' + row.omimNumber
+              : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim());
+            cell.value = { text: omimText, hyperlink: omimUrl };
+            cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
+          }
         } else if (colIdx === litColIdx) {
           var litVal = pubmedHyperlinkValue(row.literatureEvidence);
           if (litVal && typeof litVal === 'object') {
