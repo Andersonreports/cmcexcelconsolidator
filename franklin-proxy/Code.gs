@@ -29,7 +29,10 @@ function doGet(e) {
   if (!query) return respond({ ok: false, error: 'gene and/or variant required' });
 
   var cache    = CacheService.getScriptCache();
-  var cacheKey = 'fr:' + query.toLowerCase();
+  // v2 bump: v1 cached raw unmapped strings ("ModeratePathogenicSupport", etc.)
+  // for classifications abbreviate() didn't yet recognize — bumping the key
+  // prefix drops those stale entries instantly instead of waiting out the TTL.
+  var cacheKey = 'fr:v2:' + query.toLowerCase();
   var cached   = cache.get(cacheKey);
   if (cached) return respond(JSON.parse(cached));
 
@@ -101,16 +104,28 @@ function postJson(url, bodyObj) {
   return JSON.parse(res.getContentText());
 }
 
+// Franklin's classify endpoint doesn't always send space-separated English —
+// "LikelyPathogenic" (no space) and sub-threshold tiers like
+// "ModeratePathogenicSupport" / "LowBenignSupport" are real values it returns.
+// Confirmed against the live Franklin UI: any "...Support" tier is what the
+// 5-point gauge (Benign/Likely Benign/VUS/Likely Pathogenic/Pathogenic)
+// displays as VUS, since it's weaker evidence than "Likely" and doesn't meet
+// that bar.
 function abbreviate(text) {
-  var t = String(text || '').toLowerCase().replace(/_/g, ' ').trim();
-  if (t === 'pathogenic')                                    return 'P';
-  if (t === 'likely pathogenic')                             return 'LP';
-  if (t === 'pathogenic/likely pathogenic')                  return 'LP';
-  if (t.indexOf('uncertain significance') !== -1)            return 'VUS';
-  if (t === 'likely benign')                                 return 'LB';
-  if (t === 'benign/likely benign')                          return 'LB';
-  if (t === 'benign')                                        return 'B';
-  if (t.indexOf('conflicting') !== -1)                       return 'Conflicting';
+  if (!text) return null;
+  var t = String(text)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // camelCase -> spaced
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .trim();
+
+  if (t.indexOf('support') !== -1)                              return 'VUS';
+  if (t.indexOf('conflicting') !== -1)                          return 'Conflicting';
+  if (t.indexOf('uncertain') !== -1 || t === 'vus')             return 'VUS';
+  if (t.indexOf('pathogenic') !== -1 && t.indexOf('likely') !== -1) return 'LP';
+  if (t.indexOf('pathogenic') !== -1)                           return 'P';
+  if (t.indexOf('benign') !== -1 && t.indexOf('likely') !== -1) return 'LB';
+  if (t.indexOf('benign') !== -1)                               return 'B';
   return null;
 }
 
