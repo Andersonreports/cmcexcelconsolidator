@@ -228,6 +228,13 @@
     opacity: .7; transition: opacity .12s;
   }
   .franklin-link:hover { opacity: 1; text-decoration: underline; }
+  .franklin-server-badge {
+    display: inline-block; margin: 6px 0 2px;
+    padding: 3px 8px; border-radius: 4px; font: 600 10px/1.4 var(--sans);
+    letter-spacing: .04em; text-transform: uppercase;
+  }
+  .franklin-server-badge.on  { background: #d4f7d4; color: #1a6e1a; border: 1px solid #8fd68f; }
+  .franklin-server-badge.off { background: #f5f5f5; color: #888;    border: 1px solid #d0d0d0; }
 
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
@@ -387,6 +394,7 @@
           <div class="mapping-list" id="variant-mapping-list"></div>
         </details>
         <div id="variant-preview-label" class="batch-preview-label" hidden></div>
+        <div id="franklin-server-badge" class="franklin-server-badge" hidden></div>
 
         <div class="table-wrapper excel-grid-wrapper">
           <table class="excel-grid">
@@ -1267,6 +1275,72 @@
     });
   }
 
+  // ── Local Franklin Server integration ──────────────────────────────────────
+  // If the user runs franklin-fetcher/start-server.bat, a Playwright server runs
+  // on localhost:3001 and opens a real browser — so CORS isn't a problem.
+  // We call it for any rows still missing a Franklin classification after the
+  // VEP/ClinVar chain has had a chance to run (~4 s delay).
+  var _localServerKnown = null; // null = unknown, true = running, false = not running
+
+  function tryLocalFranklinServer(rows, batchIdx) {
+    var needed = [];
+    rows.forEach(function (row, rowIdx) {
+      if (!row.franklin && (row.gene || row.variant)) {
+        needed.push({ gene: row.gene || '', variant: row.variant || '', rowIdx: rowIdx });
+      }
+    });
+    if (!needed.length) return;
+
+    fetch('http://127.0.0.1:3001/batch', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ variants: needed }),
+    })
+    .then(function (r) {
+      if (!r.ok) throw new Error('server error');
+      _localServerKnown = true;
+      updateFranklinBadge();
+      return r.json();
+    })
+    .then(function (data) {
+      if (!Array.isArray(data.results)) return;
+      data.results.forEach(function (result) {
+        if (!result.classification) return;
+        var row = rows[result.rowIdx];
+        if (!row || row.franklin) return;
+        row.franklin = result.classification;
+        var el = document.getElementById('finput-' + batchIdx + '-' + result.rowIdx);
+        if (el) el.value = result.classification;
+      });
+    })
+    .catch(function () {
+      if (_localServerKnown === null) { _localServerKnown = false; updateFranklinBadge(); }
+    });
+  }
+
+  var _franklinBadgeEl = document.getElementById('franklin-server-badge');
+
+  function updateFranklinBadge() {
+    if (!_franklinBadgeEl) return;
+    if (_localServerKnown === true) {
+      _franklinBadgeEl.className = 'franklin-server-badge on';
+      _franklinBadgeEl.textContent = 'Franklin server: connected – auto-fill active';
+      _franklinBadgeEl.hidden = false;
+    } else if (_localServerKnown === false) {
+      _franklinBadgeEl.className = 'franklin-server-badge off';
+      _franklinBadgeEl.textContent = 'Franklin server: not running – run start-server.bat for auto-fill';
+      _franklinBadgeEl.hidden = false;
+    }
+  }
+
+  // Check if the local server is running (called once on page load, result shown in badge).
+  function pingLocalServer() {
+    fetch('http://127.0.0.1:3001/status', { cache: 'no-store' })
+      .then(function (r) { _localServerKnown = r.ok; updateFranklinBadge(); })
+      .catch(function () { _localServerKnown = false; updateFranklinBadge(); });
+  }
+  setTimeout(pingLocalServer, 1200);
+
   // Map ClinVar significance terms to the same abbreviated labels Franklin uses.
   function abbreviateClinSig(sigs) {
     var norm = sigs.map(function (s) {
@@ -1853,6 +1927,9 @@
     }
     renderVariantTable(idx);
     resolveVariantCoordsAsync(variantRows, idx);
+    // After VEP/ClinVar has had time to fill what it can, ask the local server
+    // for any rows still blank (requires franklin-fetcher/start-server.bat running).
+    setTimeout(function () { tryLocalFranklinServer(variantRows, idx); }, 5000);
     renderBatchList();
   }
 

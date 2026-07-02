@@ -1,14 +1,15 @@
 {
   "name": "franklin-fetcher",
-  "version": "1.0.0",
-  "description": "Auto-fetch Franklin classifications using Playwright browser automation",
-  "main": "fetch-franklin.js",
+  "version": "2.0.0",
+  "description": "Auto-fetch Franklin classifications – local server + standalone script",
+  "main": "server.js",
   "scripts": {
-    "setup": "npm install && npx playwright install chromium",
-    "fetch": "node fetch-franklin.js"
+    "setup":  "npm install && npx playwright install chromium",
+    "server": "node server.js",
+    "fetch":  "node fetch-franklin.js"
   },
   "dependencies": {
-    "exceljs": "^4.4.0",
+    "exceljs":    "^4.4.0",
     "playwright": "^1.45.0"
   }
 }
