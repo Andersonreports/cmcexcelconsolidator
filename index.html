@@ -1470,7 +1470,7 @@
         readDepths: get('readDepths'),
         omimTitle: get('omimTitle'),
         omimPhenotypes: get('omimPhenotypes'),
-        omimDescription: get('omimDescription'),
+        omimDescription: get('omimDescription') || get('clingenDiseaseLabel') || get('omimPhenotypes'),
         diseaseLabel: get('clingenDiseaseLabel'),
         clingenClass: get('clingenClassification'),
         gnomadGenome4Count: get('gnomadGenome4Count'),
