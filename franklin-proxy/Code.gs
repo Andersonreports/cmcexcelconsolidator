@@ -22,6 +22,9 @@ var FRANKLIN_BASE = 'https://franklin.genoox.com';
 var CACHE_SECONDS = 21600; // 6h — same gene+variant is asked by many users
 
 function doGet(e) {
+  e = e || {}; // e is only populated for a real HTTP request — undefined if
+               // you click "Run" on doGet directly in the editor. Use
+               // testLookup() below to test from the editor instead.
   var gene    = String((e.parameter && e.parameter.gene)    || '').trim();
   var variant = String((e.parameter && e.parameter.variant) || '').trim();
   var query   = [gene, variant].filter(Boolean).join(' ').trim();
@@ -133,4 +136,12 @@ function respond(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Click "Run" on this function (not doGet) to test from the editor —
+// check View > Logs (or Ctrl+Enter) for the result.
+function testLookup() {
+  Logger.log(JSON.stringify(lookupClassification('PTEN c.802G>A')));  // expect abbr "VUS"
+  Logger.log(JSON.stringify(lookupClassification('CFTR c.350G>A')));  // expect abbr "LP"
+  Logger.log(JSON.stringify(lookupClassification('BRCA1 c.68_69delAG'))); // expect abbr "P"
 }
