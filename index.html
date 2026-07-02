@@ -1238,10 +1238,13 @@
     rows.forEach(function (row, rowIdx) {
       var hgvs = String(row._rawHgvs || '').trim();
       if (!hgvs) {
-        // No HGVS at all — just ensure link shows the arrow
-        if (row._franklinUrl) {
-          var el = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
-          if (el) el.textContent = '↗';
+        // No HGVS — still try classification via Franklin page / ClinVar using gene+variant
+        var el = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
+        if (el) el.textContent = '↗';
+        if (!row.franklin && (row.gene || row.variant)) {
+          (function (r, ri) {
+            setTimeout(function () { fetchFranklinPageClass(r, ri, batchIdx); }, ri * 250);
+          })(row, rowIdx);
         }
         return;
       }
@@ -1296,18 +1299,19 @@
         return r.json();
       })
       .then(function (data) {
-        // Parse Franklin's classification from whatever they return
         var cls = (data && (data.classification || (data.result && data.result.classification))) || null;
         if (cls) {
           row.franklin = cls;
           var inputEl = document.getElementById(inputId);
           if (inputEl) inputEl.value = cls;
+          var linkEl = document.getElementById(linkId);
+          if (linkEl) linkEl.textContent = '↗';
+        } else {
+          // Franklin API gave no classification — must still run VEP/ClinVar chain
+          fetchVepFallback(row, rowIdx, hgvs, batchIdx);
         }
-        var linkEl = document.getElementById(linkId);
-        if (linkEl) linkEl.textContent = '↗';
       })
       .catch(function () {
-        // Franklin API not accessible (expected due to CORS) — fall back to Ensembl VEP
         fetchVepFallback(row, rowIdx, hgvs, batchIdx);
       });
   }
