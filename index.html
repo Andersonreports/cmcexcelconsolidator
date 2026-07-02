@@ -2094,9 +2094,23 @@
     }
 
     // Header row index: "S.NO" at A1 → no title (header on row 1);
-    // anything else → title on row 1, header on row 2.
+    // anything else → VarSeq format with group row 1 and header row 2.
     var cellA1 = String(sheet.getRow(1).getCell(1).value || '').trim();
     var headerRowIndex = cellA1.toUpperCase() === 'S.NO' ? 1 : 2;
+
+    // For VarSeq files, use the same group-aware column detection that the
+    // Listed Variant section uses (findVarSeqColumn).  This is necessary for
+    // columns like "Classification" that appear under multiple groups (ClinVar,
+    // ACMG, AlphaMissense, etc.) — the flat colMap can only store one of them.
+    var isVarSeqFormat = headerRowIndex === 2;
+    var vsGroupRow  = isVarSeqFormat ? sheet.getRow(1) : null;
+    var vsHeaderRow = isVarSeqFormat ? sheet.getRow(headerRowIndex) : null;
+    var vsColCount  = sheet.columnCount;
+
+    function findVSCol(spec) {
+      if (!isVarSeqFormat) return null;
+      return findVarSeqColumn(vsGroupRow, vsHeaderRow, vsColCount, spec);
+    }
 
     // Gene: app export = "GENE"; VarSeq = "GENE NAMES"
     var geneCol    = col('GENE', 'GENE NAMES', vcol('gene'));
@@ -2105,10 +2119,14 @@
     if (colMap['VARIANT'] === undefined && hgvsCCol) variantCol = hgvsCCol;
 
     // Detail columns: known names for both app export and VarSeq formats.
-    var proteinCol   = col('PROTEIN POS', 'HGVS P.', vcol('proteinPos'));
-    var franklinCol  = col('FRANKLIN',                vcol('franklin'));
-    var clinvarCol   = col('CLINVAR',                 vcol('clinvar'));
-    var zygosityCol  = col('ZYGOSITY', 'ZYGOSITY',   vcol('zygosity'));
+    var proteinCol  = col('PROTEIN POS', 'HGVS P.', vcol('proteinPos'));
+    var franklinCol = col('FRANKLIN',               vcol('franklin'));
+    // ClinVar classification: VarSeq stores it as "Classification" under the
+    // "ClinVar" group (row 1) — must use group-aware detection to avoid
+    // confusing it with the ACMG or AlphaMissense "Classification" columns.
+    var clinvarCol  = findVSCol({ header: 'Classification', groupIncludes: ['ClinVar'] })
+                      || col('CLINVAR', vcol('clinvar'));
+    var zygosityCol = col('ZYGOSITY', 'ZYGOSITY', vcol('zygosity'));
     var inheritCol   = col('INHERTIANCE', 'INHERITANCE', 'INHERTIANCE', vcol('inheritance'));
     var vafCol       = col('VAF(%)', 'VARIANT ALLELE FREQ',    vcol('vaf'));
     var allelicCol   = col('ALLELIC DEPTH', 'ALLELIC DEPTHS (AD)', vcol('alleleDepths'));
@@ -2489,10 +2507,22 @@
     return null;
   }
 
+  function clinvarFallbackUrl(gene, variant) {
+    // Best-effort search URL used when we don't have a specific variation ID.
+    return 'https://www.ncbi.nlm.nih.gov/clinvar/?term=' +
+           encodeURIComponent(gene + '[gene] AND ' + variant + '[All Fields]');
+  }
+
   function fetchClinVarOneRow(row) {
     var gene = String(row.gene || '').trim();
     var variant = String(row.variant || '').trim();
     if (!gene || !variant || gene === 'No Pathogenic Variant') return Promise.resolve();
+
+    // Always set at least a fallback search link immediately so the Excel always
+    // gets a hyperlink even if the eutils lookup fails or is slow.
+    if (!row.clinvarUrl) {
+      row.clinvarUrl = clinvarFallbackUrl(gene, variant);
+    }
 
     var norm = normVariant(variant);
     var termA = '(' + gene + '[gene] AND "' + variant + '"[All Fields])';
@@ -2518,12 +2548,13 @@
               (doc && doc.clinical_significance && doc.clinical_significance.description) ||
               (doc && doc.description) || '';
             var sig = parseClinSigText(sigText);
+            // Upgrade to exact variation page URL
             row.clinvarId  = uid;
             row.clinvarUrl = 'https://www.ncbi.nlm.nih.gov/clinvar/variation/' + uid + '/';
             if (sig) row.clinvar = sig;
           });
       })
-      .catch(function () {}); // silently skip failures
+      .catch(function () {}); // keep the fallback URL; silently ignore network errors
   }
 
   // Fetch ClinVar for all variant rows, staggered to respect NCBI rate limits.
@@ -2569,13 +2600,23 @@
 
         var cell = dataRow.getCell(colIdx + 1);
 
-        // ClinVar column: write as a hyperlink when we have a URL
-        if (colIdx === clinvarColIdx && row.clinvarUrl) {
-          cell.value = {
-            text:      String(row.clinvar || row.clinvarId || ''),
-            hyperlink: row.clinvarUrl,
-          };
-          cell.font = { color: { argb: 'FF0563C1' }, underline: true };
+        // ClinVar column: write as a clickable hyperlink whenever the cell has text.
+        // Exact URL from eutils is preferred; falls back to a ClinVar search URL
+        // so that "Pathogenic" (etc.) is ALWAYS a link, not plain text.
+        // Empty cells (variant not in ClinVar) stay empty — no phantom links.
+        if (colIdx === clinvarColIdx && !isNoPath) {
+          var cvText = String(row.clinvar || '').trim();
+          if (cvText) {
+            var cvUrl = row.clinvarUrl ||
+                        (row.gene && row.variant ? clinvarFallbackUrl(row.gene, row.variant) : '');
+            if (cvUrl) {
+              cell.value = { text: cvText, hyperlink: cvUrl };
+              cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
+            } else {
+              cell.value = cvText;
+            }
+          }
+          // else: leave cell empty
         } else {
           cell.value = row[c.key];
         }
