@@ -1420,12 +1420,9 @@
         if (rank < bestRank) { bestRank = rank; winnerIdx = i; }
       });
 
-      var winningAcmg = acmgList[winnerIdx] || acmgList[0] || '';
-      if (isBenignClassification(winningAcmg)) return; // excluded from the report
-
       var gene = genes[winnerIdx] || genes[0] || '';
+      if (!gene) return;
       var variant = stripHgvsPrefix(hgvsCList[winnerIdx] || hgvsCList[0] || '');
-      if (isFalseCall(gene, variant)) return; // skip known false-call genes/variants
 
       var proteinPos = stripHgvsPrefix(get('hgvsP'));
 
