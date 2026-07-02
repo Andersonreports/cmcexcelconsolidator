@@ -1390,6 +1390,17 @@
       cols[key] = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS[key]);
     });
 
+    // CONDITIONS column fallback: VarSeq may name the OMIM description column differently.
+    // Try common alternatives before giving up.
+    if (!cols.omimDescription) {
+      cols.omimDescription =
+        findVarSeqColumn(groupRow, headerRow, colCount, { header: 'Conditions', groupIncludes: ['OMIM'] }) ||
+        findVarSeqColumn(groupRow, headerRow, colCount, { header: 'Condition',  groupIncludes: ['OMIM'] }) ||
+        findVarSeqColumn(groupRow, headerRow, colCount, { header: 'Conditions' }) ||
+        findVarSeqColumn(groupRow, headerRow, colCount, { header: 'Condition'  }) ||
+        findVarSeqColumn(groupRow, headerRow, colCount, { header: 'Description' }); // any group, last resort
+    }
+
     var runNameMatch = String(groupRow.getCell(1).value || '').match(/^(.*?)(?:_outfastp.*)?$/);
     var runName = runNameMatch ? runNameMatch[1] : String(groupRow.getCell(1).value || '');
 
@@ -1519,7 +1530,31 @@
 
         var rowNumTd = document.createElement('td');
         rowNumTd.className = 'grid-row-number';
-        rowNumTd.textContent = rowIndex + 1;
+        rowNumTd.style.cssText = 'white-space:nowrap;';
+
+        var delBtn = document.createElement('button');
+        delBtn.textContent = '×';
+        delBtn.title = 'Remove this variant from the list';
+        delBtn.style.cssText = 'font-size:11px;line-height:1;padding:0 3px;margin-right:4px;cursor:pointer;border:1px solid #bbb;background:#fff;border-radius:2px;color:#888;vertical-align:middle;';
+        delBtn.addEventListener('click', (function (capturedIdx) {
+          return function () {
+            variantRows.splice(capturedIdx, 1);
+            variantRows.forEach(function (r, i) { r.sNo = i + 1; });
+            var item = variantBatch[variantPreviewIdx];
+            if (item) {
+              variantPreviewLabel.textContent =
+                'Previewing file ' + (variantPreviewIdx + 1) + ' of ' + variantBatch.length +
+                ': ' + item.fileName +
+                ' (' + variantRows.length + ' variant' + (variantRows.length !== 1 ? 's' : '') + ')';
+            }
+            renderVariantTable(variantPreviewIdx);
+          };
+        })(rowIndex));
+
+        var rowNum = document.createElement('span');
+        rowNum.textContent = rowIndex + 1;
+        rowNumTd.appendChild(delBtn);
+        rowNumTd.appendChild(rowNum);
         tr.appendChild(rowNumTd);
 
         VARIANT_COLUMNS.forEach(function (c) {
