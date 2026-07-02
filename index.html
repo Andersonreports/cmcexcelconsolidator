@@ -1654,8 +1654,14 @@
       headerRowIndex = 2;
     }
     var headerRow = sheet.getRow(headerRowIndex);
-    VARIANT_COLUMNS.forEach(function (c, i) { headerRow.getCell(i + 1).value = c.header; });
-    headerRow.font = { bold: true };
+    VARIANT_COLUMNS.forEach(function (c, i) {
+      var cell = headerRow.getCell(i + 1);
+      cell.value = c.header;
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    headerRow.height = 22;
     var inheritanceColIdx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'inheritance'; });
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
@@ -2488,8 +2494,14 @@
     FINAL_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 20; });
 
     var headerRow = sheet.getRow(1);
-    FINAL_COLUMNS.forEach(function (c, i) { headerRow.getCell(i + 1).value = c.header; });
-    headerRow.font = { bold: true };
+    FINAL_COLUMNS.forEach(function (c, i) {
+      var cell = headerRow.getCell(i + 1);
+      cell.value = c.header;
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    headerRow.height = 22;
 
     var noPathStart = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
     var noPathEnd   = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
