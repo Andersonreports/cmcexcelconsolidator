@@ -1415,6 +1415,19 @@
 
   function isFalseCall() { return false; }
 
+  // Extract patient info from VarSeq filename and combine with run name.
+  // Filename pattern: ..._MR_AL54_Y_499_11YM_... or ..._MRS_AL54_Y_495_24YF...
+  // Result format:   MR.AL54-Y-499 (11Y/M)GEN_T_2.0.spik_4294
+  function extractPatientTitle(filename, runName) {
+    var base = filename.replace(/\.[^.]+$/, '');
+    var m = base.match(/_?(MR|MRS|MS|MASTER)_([A-Z0-9]+)_([A-Z]+)_(\d+)_(\d+)Y_?([MF])/i);
+    if (!m) return runName || base;
+    var patient = m[1].toUpperCase() + '.' + m[2].toUpperCase() +
+                  '-' + m[3].toUpperCase() + '-' + m[4] +
+                  ' (' + m[5] + 'Y/' + m[6].toUpperCase() + ')';
+    return patient + (runName ? runName : '');
+  }
+
   function processVarSeqWorkbook(workbook) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in the uploaded file.');
@@ -1835,7 +1848,7 @@
         })
         .then(function (workbook) {
           var result = processVarSeqWorkbook(workbook);
-          var autoTitle = result.runName || file.name.replace(/\.[^.]+$/, '');
+          var autoTitle = extractPatientTitle(file.name, result.runName);
           return {
             fileName: file.name,
             rows: result.rows,
