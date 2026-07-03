@@ -42,11 +42,7 @@
 
   .top-bar {
     background: var(--bg-page); border-bottom: 1px solid var(--border);
-    padding: 20px 30px; display: flex; align-items: center; justify-content: space-between;
-  }
-  .top-bar-label {
-    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-2);
-    font-weight: 600; margin-right: 20px;
+    padding: 20px 30px; display: flex; align-items: center; justify-content: flex-end;
   }
 
   .sidebar {
@@ -243,15 +239,10 @@
   .batch-item-btn:disabled { opacity: .45; cursor: not-allowed; }
   .batch-item-btn.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .batch-preview-label { padding: 10px 0 4px; font: 600 11px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--text); }
-  .franklin-cell { display: flex; align-items: center; }
-  .franklin-cell input { flex: 1; min-width: 60px; }
-  .franklin-link {
     flex-shrink: 0; margin-left: 4px; font: 600 11px/1 var(--sans);
     color: var(--accent); text-decoration: none; vertical-align: middle;
     opacity: .7; transition: opacity .12s;
   }
-  .franklin-link:hover { opacity: 1; text-decoration: underline; }
-  .franklin-color-pick {
     flex-shrink: 0; margin-left: 3px; width: 50px; height: 18px;
     font-size: 10px; padding: 0 2px; border: 1px solid var(--border);
     border-radius: 3px; background: var(--bg); color: var(--text); cursor: pointer;
@@ -402,27 +393,10 @@
           </label>
         </div>
         <div id="variant-batch-list" class="batch-list" hidden></div>
-        <div class="upload-row" style="margin-top:14px" data-report-type="cmc">
-          <label class="upload-label">
-            ACMG/Franklin reference Excel (optional)
-            <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
-          </label>
-          <span class="progress-text" id="franklin-progress-text"></span>
-        </div>
         <div class="error-banner" id="variant-error" hidden></div>
         <!-- Keep hidden for legacy JS compatibility -->
         <select id="variant-sample-select" hidden></select>
         <input type="text" id="variant-title-input" hidden />
-      </div>
-
-      <div class="card" data-report-type="cmc">
-        <div class="card-title">Report settings</div>
-        <div class="title-builder">
-          <label>
-            Department
-            <input type="text" id="variant-department-input" value="CMC HEMATOLOGY" />
-          </label>
-        </div>
       </div>
 
       <div class="card">
@@ -1001,7 +975,6 @@
     { key: 'gene', header: 'GENE' },
     { key: 'variant', header: 'VARIANT' },
     { key: 'proteinPos', header: 'PROTEIN POS' },
-    { key: 'franklin', header: 'FRANKLIN' },
     { key: 'clinvar', header: 'CLINVAR' },
     { key: 'varseq', header: 'VARSEQ' },
     { key: 'zygosity', header: 'ZYGOSITY' },
@@ -1041,7 +1014,6 @@
     gene: 'Gene Names (entry matching the most severe ACMG classification)',
     variant: 'HGVS c. (prefix before ":" stripped)',
     proteinPos: 'HGVS p. (prefix before ":" stripped)',
-    franklin: 'Optional Franklin/ACMG reference upload, matched by Gene + HGVS c.',
     clinvar: 'Classification, under the "ClinVar" group',
     varseq: 'Classification, under the "ACMG Sample Classifier" group',
     zygosity: 'Zygosity (abbreviated: Heterozygous→HET, Homozygous→HOM/HEMI, Hemizygous→HEMI)',
@@ -1235,18 +1207,6 @@
   // inheritance usually means a carrier, not a manifesting disease allele
   // on its own - flagged in red as a reminder this needs a second variant
   // (or different interpretation) to explain the phenotype.
-  function franklinColor(value) {
-    var v = String(value || '').trim().toUpperCase();
-    if (v === 'P')      return '#c2293a';  // Pathogenic → red
-    if (v === 'LP')     return '#c2293a';  // Likely Pathogenic → red
-    if (v === 'LB')     return '#c2293a';  // Likely Benign → red
-    if (v === 'B')      return '#1558A5';  // Benign → bold blue
-    if (v === 'B/VUS')  return '#1558A5';  // between Benign and VUS → bold blue
-    if (v === 'VUS/LP') return '#000000';  // between VUS and LP → bold black
-    if (v === 'VUS')    return '#2E74B5';  // plain VUS → bold teal/blue
-    return '';
-  }
-
   function isHetWithPureAR(row) {
     var zygosity = String(row.zygosity || '').trim().toUpperCase();
     var inheritance = String(row.inheritance || '').trim().toUpperCase();
@@ -1257,67 +1217,6 @@
     if (!rawCalc) return '';
     var m = String(rawCalc).trim().match(/^([A-Za-z]+)\s*[:\-]/);
     return m ? m[1].toUpperCase() : String(rawCalc).trim().toUpperCase();
-  }
-
-  // ---- Franklin/ACMG cross-reference (optional second upload) ----
-  var franklinEntries = [];
-  var franklinFileInput = document.getElementById('franklin-file-input');
-  var franklinProgressText = document.getElementById('franklin-progress-text');
-
-  function lookupFranklin(gene, variant) {
-    var g = gene.trim().toUpperCase();
-    var v = variant.replace(/\s+/g, '').toUpperCase();
-    for (var i = 0; i < franklinEntries.length; i++) {
-      if (franklinEntries[i].gene === g && franklinEntries[i].variant === v) return franklinEntries[i].code;
-    }
-    return '';
-  }
-
-  franklinFileInput.addEventListener('change', function (e) {
-    var file = e.target.files && e.target.files[0];
-    if (!file) return;
-    showVariantError('');
-    franklinFileInput.disabled = true;
-    franklinProgressText.textContent = 'Reading file…';
-
-    file.arrayBuffer()
-      .then(function (buffer) {
-        var workbook = new ExcelJS.Workbook();
-        return workbook.xlsx.load(buffer).then(function () { return workbook; });
-      })
-      .then(function (workbook) {
-        var sheet = workbook.worksheets[0];
-        if (!sheet) throw new Error('No worksheet found in the reference file.');
-        var entries = [];
-        sheet.eachRow(function (row, r) {
-          if (r === 1) return;
-          var gene = String(row.getCell(1).value || '').trim().toUpperCase();
-          var variant = String(row.getCell(2).value || '').replace(/\s+/g, '').toUpperCase();
-          var calc = row.getCell(3).value;
-          if (!gene || !variant) return;
-          entries.push({ gene: gene, variant: variant, code: extractAcmgCode(calc) });
-        });
-        franklinEntries = entries;
-        franklinProgressText.textContent = file.name + ' (' + entries.length + ' entries)';
-        if (variantRows.length > 0) reapplyFranklinLookup();
-      })
-      .catch(function (err) {
-        showVariantError((err && err.message) || 'Failed to read the reference file.');
-        franklinEntries = [];
-        franklinProgressText.textContent = '';
-      })
-      .finally(function () {
-        franklinFileInput.disabled = false;
-        franklinFileInput.value = '';
-      });
-  });
-
-  function reapplyFranklinLookup() {
-    variantRows.forEach(function (row) {
-      var code = lookupFranklin(row.gene, row.variant);
-      if (code) row.franklin = code;
-    });
-    renderVariantTable();
   }
 
   // ---- VarSeq workbook processing (batch mode) ----
@@ -1336,149 +1235,7 @@
   var variantClearAllBtn = document.getElementById('variant-clear-all');
   var variantDownloadAllBtn = document.getElementById('variant-download-all');
   var variantSampleSelect = document.getElementById('variant-sample-select');
-  var variantDepartmentInput = document.getElementById('variant-department-input');
   var variantTitleInput = document.getElementById('variant-title-input');
-
-  // ── Franklin (Genoox) auto-classification ───────────────────────────────────
-  // Franklin's real search/classify APIs are public but send no CORS headers, so a
-  // browser on GitHub Pages can't call them directly. FRANKLIN_PROXY_URL points at
-  // a small Google Apps Script relay (see franklin-proxy/Code.gs) that makes the
-  // same two calls server-side, always forcing the hg38 assembly, and returns just
-  // the "Suggested Classification" Franklin itself computes. Leave the constant
-  // blank to skip Franklin entirely and fall back straight to the ClinVar lookup.
-  var FRANKLIN_PROXY_URL = 'https://script.google.com/macros/s/AKfycbxZho7Jig9dKaCIVZIqwSv6FvUJxU9vx6yLwpqvoRjlt3ZQHKkQljthA8QOG9vYq6E3/exec';
-
-  // Resolve Franklin classifications for every row missing one, staggered 250 ms
-  // apart so we don't hammer the relay / Franklin's servers.
-  function resolveFranklinForRows(rows, batchIdx) {
-    rows.forEach(function (row, rowIdx) {
-      var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
-      if (row.franklin) {
-        if (linkEl) linkEl.textContent = '↗';
-        return;
-      }
-      if (!row.gene && !row.variant) return;
-      if (linkEl) linkEl.textContent = '…';
-      (function (r, ri) {
-        setTimeout(function () { fetchFranklinForRow(r, ri, batchIdx); }, ri * 250);
-      })(row, rowIdx);
-    });
-  }
-
-  function fetchFranklinForRow(row, rowIdx, batchIdx) {
-    var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
-    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
-
-    if (!FRANKLIN_PROXY_URL) {
-      var linkElNoProxy = document.getElementById(linkId);
-      if (linkElNoProxy) linkElNoProxy.textContent = '↗';
-      fetchClinVarClass(row, rowIdx, batchIdx);
-      return;
-    }
-
-    var url = FRANKLIN_PROXY_URL +
-      '?gene=' + encodeURIComponent(row.gene || '') +
-      '&variant=' + encodeURIComponent(row.variant || '');
-
-    fetch(url, { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        var linkEl = document.getElementById(linkId);
-        if (data && data.ok && data.chrom && data.pos && data.ref && data.alt) {
-          row._franklinUrl = 'https://franklin.genoox.com/clinical-db/variant/snp/chr' +
-            data.chrom + '-' + data.pos + '-' + data.ref + '-' + data.alt + '-hg38';
-          if (linkEl) linkEl.href = row._franklinUrl;
-        }
-        if (linkEl) linkEl.textContent = '↗';
-        // Only ever show a clean abbreviated code (P/LP/VUS/LB/B/Conflicting) —
-        // never Franklin's raw classification string. If the relay couldn't
-        // map it, fall back to ClinVar rather than display something garbled.
-        if (data && data.ok && data.abbr && !row.franklin) {
-          row.franklin = data.abbr;
-          var inputEl = document.getElementById(inputId);
-          if (inputEl) {
-            inputEl.value = data.abbr;
-            var fetchedColor = row.franklinColorOverride || franklinColor(data.abbr);
-            inputEl.style.color = fetchedColor || '';
-            inputEl.style.fontWeight = fetchedColor ? '700' : '';
-            var pickEl = document.getElementById(inputId.replace('finput-', 'fpick-'));
-            if (pickEl && !row.franklinColorOverride) {
-              var ah = franklinColor(data.abbr) || '#000000';
-              pickEl.value = ah === '#c2293a' ? '#c2293a' : ah === '#000000' ? '#000000' : '#1558A5';
-            }
-          }
-        } else if (!row.franklin) {
-          fetchClinVarClass(row, rowIdx, batchIdx);
-        }
-      })
-      .catch(function () {
-        var linkEl2 = document.getElementById(linkId);
-        if (linkEl2) linkEl2.textContent = '↗';
-        fetchClinVarClass(row, rowIdx, batchIdx);
-      });
-  }
-
-  // Last-resort: search NCBI ClinVar eutils by gene + variant text.
-  // Also tries canonical deletion form (c.649delC → c.649del) to handle notation mismatches.
-  function fetchClinVarClass(row, rowIdx, batchIdx) {
-    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
-    if (row.franklin) return;
-
-    var gene    = String(row.gene    || '').trim();
-    var variant = String(row.variant || '').trim();
-    if (!gene && !variant) return;
-
-    // Try original notation + canonical deletion form
-    var varForms = [variant];
-    var dm = variant.match(/^(c\.[0-9_+\-*]+)del[ACGT]+$/i);
-    if (dm) varForms.push(dm[1] + 'del');
-    var dupm = variant.match(/^(c\.[0-9_+\-*]+)dup[ACGT]+$/i);
-    if (dupm) varForms.push(dupm[1] + 'dup');
-
-    var parts = varForms.map(function (v) {
-      return '(' + (gene ? gene + '[gene] AND ' : '') + '"' + v + '"[All Fields])';
-    });
-
-    fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
-          '?db=clinvar&term=' + encodeURIComponent(parts.join(' OR ')) + '&retmax=5&retmode=json')
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        var ids = (data.esearchresult && data.esearchresult.idlist) || [];
-        if (!ids.length) return null;
-        return fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi' +
-                     '?db=clinvar&id=' + ids.slice(0, 3).join(',') + '&retmode=json')
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            var result = data.result || {};
-            for (var i = 0; i < ids.length; i++) {
-              var e = result[ids[i]];
-              if (!e) continue;
-              var desc = (e.clinical_significance && e.clinical_significance.description) || '';
-              var abbr = abbreviateClinSigText(desc);
-              if (abbr) return abbr;
-            }
-            return null;
-          });
-      })
-      .then(function (abbr) {
-        if (abbr && !row.franklin) {
-          row.franklin = abbr;
-          var inputEl = document.getElementById(inputId);
-          if (inputEl) {
-            inputEl.value = abbr;
-            var cvColor = row.franklinColorOverride || franklinColor(abbr);
-            inputEl.style.color = cvColor || '';
-            inputEl.style.fontWeight = cvColor ? '700' : '';
-            var pickEl = document.getElementById(inputId.replace('finput-', 'fpick-'));
-            if (pickEl && !row.franklinColorOverride) {
-              var ah2 = franklinColor(abbr) || '#000000';
-              pickEl.value = ah2 === '#c2293a' ? '#c2293a' : ah2 === '#000000' ? '#000000' : '#1558A5';
-            }
-          }
-        }
-      })
-      .catch(function () {});
-  }
 
   // Map ClinVar summary text descriptions to Franklin-style abbreviations.
   function abbreviateClinSigText(text) {
@@ -1598,8 +1355,6 @@
         gene: gene,
         variant: variant,
         proteinPos: proteinPos,
-        franklin: lookupFranklin(gene, variant),
-        _franklinUrl: null,
         clinvar: get('clinvarClass') || '',
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
@@ -1730,54 +1485,7 @@
             updateInheritanceColor();
           });
           if (c.key === 'inheritance') inheritanceInput = input;
-          if (c.key === 'franklin') {
-            // Flex wrapper keeps the "↗" link and color picker inside the cell
-            var bIdx = batchIdx != null ? batchIdx : 'x';
-            input.id = 'finput-' + bIdx + '-' + rowIndex;
-            var initFColor = row.franklinColorOverride || franklinColor(input.value);
-            input.style.color = initFColor || '';
-            input.style.fontWeight = initFColor ? '700' : '';
-            input.addEventListener('input', function (e) {
-              var c2 = row.franklinColorOverride || franklinColor(e.target.value);
-              e.target.style.color = c2 || '';
-              e.target.style.fontWeight = c2 ? '700' : '';
-            });
-            var fWrapper = document.createElement('div');
-            fWrapper.className = 'franklin-cell';
-            fWrapper.appendChild(input);
-            var fLink = document.createElement('a');
-            fLink.href = row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home';
-            fLink.id = 'flink-' + bIdx + '-' + rowIndex;
-            fLink.target = '_blank';
-            fLink.rel = 'noopener noreferrer';
-            fLink.className = 'franklin-link';
-            fLink.textContent = row._franklinUrl ? '↗' : '…';
-            fLink.title = 'Open on Franklin by QIAGEN';
-            fWrapper.appendChild(fLink);
-            // Color override dropdown
-            var colorPick = document.createElement('select');
-            colorPick.className = 'franklin-color-pick';
-            colorPick.id = 'fpick-' + bIdx + '-' + rowIndex;
-            colorPick.title = 'Override Franklin color';
-            [['Black','#000000'],['Blue','#1558A5'],['Red','#c2293a']].forEach(function(opt) {
-              var o = document.createElement('option');
-              o.value = opt[1]; o.textContent = opt[0];
-              colorPick.appendChild(o);
-            });
-            // Pre-select the closest match to the current color
-            var autoHex = franklinColor(input.value) || '#000000';
-            colorPick.value = row.franklinColorOverride ||
-              (autoHex === '#c2293a' ? '#c2293a' : autoHex === '#000000' ? '#000000' : '#1558A5');
-            colorPick.addEventListener('change', function () {
-              row.franklinColorOverride = colorPick.value;
-              input.style.color = colorPick.value;
-              input.style.fontWeight = '700';
-            });
-            fWrapper.appendChild(colorPick);
-            td.appendChild(fWrapper);
-          } else {
-            td.appendChild(input);
-          }
+          td.appendChild(input);
           tr.appendChild(td);
         });
 
@@ -1840,19 +1548,11 @@
     });
     headerRow.height = 22;
     var inheritanceColIdx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'inheritance'; });
-    var franklinColIdx    = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
       if (isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
-      }
-      var fColor = row.franklinColorOverride || franklinColor(row.franklin);
-      if (fColor) {
-        dataRow.getCell(franklinColIdx + 1).font = {
-          bold: true,
-          color: { argb: 'FF' + fColor.replace('#', '').toUpperCase() }
-        };
       }
     });
     return workbook.xlsx.writeBuffer();
@@ -1945,7 +1645,6 @@
     showVariantError('');
     variantFileInput.disabled = true;
 
-    var department = variantDepartmentInput.value.trim();
     var promises = Array.from(files).map(function (file) {
       return file.arrayBuffer()
         .then(function (buffer) {
@@ -2195,8 +1894,7 @@
 
     // Detail columns: known names for both app export and VarSeq formats.
     var proteinCol  = col('PROTEIN POS', 'HGVS P.', vcol('proteinPos'));
-    var franklinCol = col('FRANKLIN',               vcol('franklin'));
-    // ClinVar classification: VarSeq stores it as "Classification" under the
+        // ClinVar classification: VarSeq stores it as "Classification" under the
     // "ClinVar" group (row 1) — must use group-aware detection to avoid
     // confusing it with the ACMG or AlphaMissense "Classification" columns.
     var clinvarCol  = findVSCol({ header: 'Classification', groupIncludes: ['ClinVar'] })
@@ -2231,7 +1929,6 @@
       entries.push({
         key:          normalizeGeneVariantKey(gene, variant),
         proteinPos:   row.getCell(proteinCol).value,
-        franklin:     row.getCell(franklinCol).value,
         clinvar:      row.getCell(clinvarCol).value,
         clinvarUrl:   '',
         zygosity:     row.getCell(zygosityCol).value,
@@ -2312,7 +2009,7 @@
                       (details ? extractMimNumber(details.omimPhenotypes) : ''),
           clinvar: details ? (details.clinvar || '') : '',
           clinvarUrl: details ? (details.clinvarUrl || '') : '',
-          acmgClassification: details ? details.franklin : '',
+          acmgClassification: '',
           literatureEvidence: literatureEvidence || '',
           remark: remark || '',
           unmatched: unmatched,
