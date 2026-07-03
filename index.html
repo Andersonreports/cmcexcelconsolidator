@@ -1144,9 +1144,12 @@
   // (or different interpretation) to explain the phenotype.
   function franklinColor(value) {
     var v = String(value || '').trim().toUpperCase();
-    if (v === 'P')  return '#c2293a';   // Pathogenic  → red
-    if (v === 'LP') return '#c2293a';   // Likely Pathogenic → red
-    if (v === 'LB') return '#c2293a';   // Likely Benign → red (per user request)
+    if (v === 'P')      return '#c2293a';  // Pathogenic → red
+    if (v === 'LP')     return '#c2293a';  // Likely Pathogenic → red
+    if (v === 'LB')     return '#c2293a';  // Likely Benign → red
+    if (v === 'B')      return '#1558A5';  // Benign → bold blue
+    if (v === 'B/VUS')  return '#1558A5';  // between Benign and VUS → bold blue
+    if (v === 'VUS/LP') return '#000000';  // between VUS and LP → bold black
     return '';
   }
 
@@ -1372,6 +1375,9 @@
     if (t === 'uncertain significance') return 'VUS';
     if (t === 'likely benign' || t === 'benign/likely benign') return 'LB';
     if (t === 'benign') return 'B';
+    // Intermediate: VUS leaning toward LP or toward Benign
+    if (t.indexOf('uncertain') !== -1 && t.indexOf('pathogenic') !== -1) return 'VUS/LP';
+    if (t.indexOf('uncertain') !== -1 && t.indexOf('benign') !== -1)     return 'B/VUS';
     if (t.indexOf('conflicting') !== -1) return 'Conflicting';
     if (t.indexOf('pathogenic') !== -1 && t.indexOf('likely') !== -1) return 'LP';
     if (t.indexOf('pathogenic') !== -1) return 'P';
@@ -1663,11 +1669,19 @@
     });
     headerRow.height = 22;
     var inheritanceColIdx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'inheritance'; });
+    var franklinColIdx    = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
       if (isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { color: { argb: 'FFC2293A' } };
+      }
+      var fColor = franklinColor(row.franklin);
+      if (fColor) {
+        dataRow.getCell(franklinColIdx + 1).font = {
+          bold: true,
+          color: { argb: 'FF' + fColor.replace('#', '').toUpperCase() }
+        };
       }
     });
     return workbook.xlsx.writeBuffer();

@@ -122,7 +122,10 @@ function abbreviate(text) {
     .toLowerCase()
     .trim();
 
-  if (t.indexOf('support') !== -1)                              return 'VUS';
+  // "...Support" tiers sit between the 5 main bands — classify by which side they lean toward
+  if (t.indexOf('support') !== -1 && t.indexOf('benign') !== -1)     return 'B/VUS';
+  if (t.indexOf('support') !== -1 && t.indexOf('pathogenic') !== -1) return 'VUS/LP';
+  if (t.indexOf('support') !== -1)                                    return 'VUS';
   if (t.indexOf('conflicting') !== -1)                          return 'Conflicting';
   if (t.indexOf('uncertain') !== -1 || t === 'vus')             return 'VUS';
   if (t.indexOf('pathogenic') !== -1 && t.indexOf('likely') !== -1) return 'LP';
