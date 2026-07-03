@@ -228,6 +228,11 @@
     opacity: .7; transition: opacity .12s;
   }
   .franklin-link:hover { opacity: 1; text-decoration: underline; }
+  .franklin-color-pick {
+    flex-shrink: 0; margin-left: 3px; width: 50px; height: 18px;
+    font-size: 10px; padding: 0 2px; border: 1px solid var(--border);
+    border-radius: 3px; background: var(--bg); color: var(--text); cursor: pointer;
+  }
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
   .raw-text-debug summary:hover { color: var(--ink); }
@@ -1303,7 +1308,17 @@
         if (data && data.ok && data.abbr && !row.franklin) {
           row.franklin = data.abbr;
           var inputEl = document.getElementById(inputId);
-          if (inputEl) { inputEl.value = data.abbr; inputEl.style.color = franklinColor(data.abbr); inputEl.style.fontWeight = franklinColor(data.abbr) ? '700' : ''; }
+          if (inputEl) {
+            inputEl.value = data.abbr;
+            var fetchedColor = row.franklinColorOverride || franklinColor(data.abbr);
+            inputEl.style.color = fetchedColor || '';
+            inputEl.style.fontWeight = fetchedColor ? '700' : '';
+            var pickEl = document.getElementById(inputId.replace('finput-', 'fpick-'));
+            if (pickEl && !row.franklinColorOverride) {
+              var ah = franklinColor(data.abbr) || '#000000';
+              pickEl.value = ah === '#c2293a' ? '#c2293a' : ah === '#000000' ? '#000000' : '#1558A5';
+            }
+          }
         } else if (!row.franklin) {
           fetchClinVarClass(row, rowIdx, batchIdx);
         }
@@ -1361,7 +1376,17 @@
         if (abbr && !row.franklin) {
           row.franklin = abbr;
           var inputEl = document.getElementById(inputId);
-          if (inputEl) { inputEl.value = abbr; inputEl.style.color = franklinColor(abbr); inputEl.style.fontWeight = franklinColor(abbr) ? '700' : ''; }
+          if (inputEl) {
+            inputEl.value = abbr;
+            var cvColor = row.franklinColorOverride || franklinColor(abbr);
+            inputEl.style.color = cvColor || '';
+            inputEl.style.fontWeight = cvColor ? '700' : '';
+            var pickEl = document.getElementById(inputId.replace('finput-', 'fpick-'));
+            if (pickEl && !row.franklinColorOverride) {
+              var ah2 = franklinColor(abbr) || '#000000';
+              pickEl.value = ah2 === '#c2293a' ? '#c2293a' : ah2 === '#000000' ? '#000000' : '#1558A5';
+            }
+          }
         }
       })
       .catch(function () {});
@@ -1583,14 +1608,16 @@
           });
           if (c.key === 'inheritance') inheritanceInput = input;
           if (c.key === 'franklin') {
-            // Flex wrapper keeps the "↗" link inside the cell (not overflowing into CLINVAR)
+            // Flex wrapper keeps the "↗" link and color picker inside the cell
             var bIdx = batchIdx != null ? batchIdx : 'x';
             input.id = 'finput-' + bIdx + '-' + rowIndex;
-            input.style.color = franklinColor(input.value);
-            input.style.fontWeight = franklinColor(input.value) ? '700' : '';
+            var initFColor = row.franklinColorOverride || franklinColor(input.value);
+            input.style.color = initFColor || '';
+            input.style.fontWeight = initFColor ? '700' : '';
             input.addEventListener('input', function (e) {
-              e.target.style.color = franklinColor(e.target.value);
-              e.target.style.fontWeight = franklinColor(e.target.value) ? '700' : '';
+              var c2 = row.franklinColorOverride || franklinColor(e.target.value);
+              e.target.style.color = c2 || '';
+              e.target.style.fontWeight = c2 ? '700' : '';
             });
             var fWrapper = document.createElement('div');
             fWrapper.className = 'franklin-cell';
@@ -1604,6 +1631,26 @@
             fLink.textContent = row._franklinUrl ? '↗' : '…';
             fLink.title = 'Open on Franklin by QIAGEN';
             fWrapper.appendChild(fLink);
+            // Color override dropdown
+            var colorPick = document.createElement('select');
+            colorPick.className = 'franklin-color-pick';
+            colorPick.id = 'fpick-' + bIdx + '-' + rowIndex;
+            colorPick.title = 'Override Franklin color';
+            [['Black','#000000'],['Blue','#1558A5'],['Red','#c2293a']].forEach(function(opt) {
+              var o = document.createElement('option');
+              o.value = opt[1]; o.textContent = opt[0];
+              colorPick.appendChild(o);
+            });
+            // Pre-select the closest match to the current color
+            var autoHex = franklinColor(input.value) || '#000000';
+            colorPick.value = row.franklinColorOverride ||
+              (autoHex === '#c2293a' ? '#c2293a' : autoHex === '#000000' ? '#000000' : '#1558A5');
+            colorPick.addEventListener('change', function () {
+              row.franklinColorOverride = colorPick.value;
+              input.style.color = colorPick.value;
+              input.style.fontWeight = '700';
+            });
+            fWrapper.appendChild(colorPick);
             td.appendChild(fWrapper);
           } else {
             td.appendChild(input);
@@ -1677,7 +1724,7 @@
       if (isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { color: { argb: 'FFC2293A' } };
       }
-      var fColor = franklinColor(row.franklin);
+      var fColor = row.franklinColorOverride || franklinColor(row.franklin);
       if (fColor) {
         dataRow.getCell(franklinColIdx + 1).font = {
           bold: true,
