@@ -56,6 +56,18 @@
   .brand-text strong { font-family: var(--serif); font-size: 16px; color: var(--ink); line-height: 1.25; font-weight: 600; }
   .brand-text span { font-size: 10.5px; color: var(--accent-2); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; }
 
+  .report-type-selector {
+    display: flex; gap: 6px; margin-bottom: 24px;
+  }
+  .report-type-btn {
+    flex: 1; all: unset; box-sizing: border-box; padding: 9px 10px; text-align: center;
+    font: 600 12px/1.2 var(--sans); color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 2px; cursor: pointer;
+    transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .report-type-btn:hover { background: var(--code-bg); color: var(--ink); border-color: var(--accent-2); }
+  .report-type-btn.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
   .sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
   .sidebar-nav-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text);
@@ -68,6 +80,7 @@
   }
   .nav-item:hover { background: var(--code-bg); color: var(--ink); }
   .nav-item.active { background: var(--code-bg); color: var(--ink); font-weight: 600; border-left-color: var(--accent-2); }
+  .nav-item.hidden-report { display: none; }
 
   .main-content { flex: 1; min-width: 0; padding: 40px 48px 64px; max-width: 1180px; }
 
@@ -284,14 +297,27 @@
       <div class="brand-mark">CMC</div>
       <div class="brand-text">
         <strong>Excel Consolidator</strong>
-        <span>CMC Hematology</span>
+        <span>Report Type</span>
       </div>
     </div>
+
+    <div class="report-type-selector">
+      <button class="report-type-btn active" data-report-type="cmc">CMC</button>
+      <button class="report-type-btn" data-report-type="single">Single</button>
+      <button class="report-type-btn" data-report-type="couple">Couple</button>
+    </div>
+
     <nav class="sidebar-nav">
-      <span class="sidebar-nav-label">Tools</span>
-      <button class="nav-item tab-button active" data-tab="sample-list">Sample List Excel</button>
-      <button class="nav-item tab-button" data-tab="listed-variant">Listed Variant Excel</button>
-      <button class="nav-item tab-button" data-tab="final-consolidate">Sample Final Consolidate</button>
+      <span class="sidebar-nav-label tools-label" data-report-type="cmc">Tools</span>
+      <button class="nav-item tab-button active" data-tab="sample-list" data-report-type="cmc">Sample List Excel</button>
+      <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cmc">Listed Variant Excel</button>
+      <button class="nav-item tab-button" data-tab="final-consolidate" data-report-type="cmc">Sample Final Consolidate</button>
+
+      <span class="sidebar-nav-label tools-label" data-report-type="single" hidden>Tool</span>
+      <button class="nav-item tab-button" data-tab="single-report" data-report-type="single" hidden>Single Report</button>
+
+      <span class="sidebar-nav-label tools-label" data-report-type="couple" hidden>Tool</span>
+      <button class="nav-item tab-button" data-tab="couple-report" data-report-type="couple" hidden>Couple Report</button>
     </nav>
   </aside>
 
@@ -451,6 +477,78 @@
         </div>
       </div>
     </section>
+
+    <section class="tab-panel" id="panel-single-report" hidden>
+      <div class="panel-header">
+        <div class="panel-eyebrow">Single Report</div>
+        <h2>Generate single report</h2>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Upload</div>
+        <div class="upload-row">
+          <label class="upload-label">
+            Report File
+            <input type="file" id="single-file-input" accept=".xlsx,.xls" />
+          </label>
+          <span class="progress-text" id="single-progress-text"></span>
+        </div>
+        <div class="error-banner" id="single-error" hidden></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Report preview</div>
+        <div class="table-wrapper excel-grid-wrapper">
+          <table class="excel-grid">
+            <thead id="single-table-head"><tr></tr></thead>
+            <tbody id="single-table-body">
+              <tr><td class="empty-state">No data yet. Upload a report file to preview it here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="action-row">
+          <button id="single-clear-all" disabled>Clear All</button>
+          <button class="primary" id="single-download" disabled>Download Excel</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="panel-couple-report" hidden>
+      <div class="panel-header">
+        <div class="panel-eyebrow">Couple Report</div>
+        <h2>Generate couple report</h2>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Upload</div>
+        <div class="upload-row">
+          <label class="upload-label">
+            Report File
+            <input type="file" id="couple-file-input" accept=".xlsx,.xls" />
+          </label>
+          <span class="progress-text" id="couple-progress-text"></span>
+        </div>
+        <div class="error-banner" id="couple-error" hidden></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Report preview</div>
+        <div class="table-wrapper excel-grid-wrapper">
+          <table class="excel-grid">
+            <thead id="couple-table-head"><tr></tr></thead>
+            <tbody id="couple-table-body">
+              <tr><td class="empty-state">No data yet. Upload a report file to preview it here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="action-row">
+          <button id="couple-clear-all" disabled>Clear All</button>
+          <button class="primary" id="couple-download" disabled>Download Excel</button>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -481,12 +579,49 @@
     })
     .catch(function () {}); // silently ignore if file not found
 
+  // ---------- Report type switching ----------
+  var currentReportType = 'cmc';
+  var reportTypeButtons = document.querySelectorAll('.report-type-btn');
+  var toolsLabels = document.querySelectorAll('.tools-label');
+
+  function switchReportType(reportType) {
+    currentReportType = reportType;
+
+    // Update report type buttons
+    reportTypeButtons.forEach(function (btn) {
+      btn.classList.toggle('active', btn.dataset.reportType === reportType);
+    });
+
+    // Hide/show tools and labels
+    var allNavItems = document.querySelectorAll('.nav-item[data-report-type]');
+    allNavItems.forEach(function (item) {
+      item.hidden = item.dataset.reportType !== reportType;
+    });
+    toolsLabels.forEach(function (label) {
+      label.hidden = label.dataset.reportType !== reportType;
+    });
+
+    // Reset to first tab of selected report type
+    var firstTabOfType = document.querySelector('.nav-item[data-report-type="' + reportType + '"]:not([hidden])');
+    if (firstTabOfType) {
+      firstTabOfType.click();
+    }
+  }
+
+  reportTypeButtons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      switchReportType(btn.dataset.reportType);
+    });
+  });
+
   // ---------- Tab switching ----------
   var tabButtons = document.querySelectorAll('.tab-button');
   var panels = {
     'sample-list': document.getElementById('panel-sample-list'),
     'listed-variant': document.getElementById('panel-listed-variant'),
     'final-consolidate': document.getElementById('panel-final-consolidate'),
+    'single-report': document.getElementById('panel-single-report'),
+    'couple-report': document.getElementById('panel-couple-report'),
   };
   tabButtons.forEach(function (btn) {
     btn.addEventListener('click', function () {
