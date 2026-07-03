@@ -1566,7 +1566,11 @@
         var inheritanceInput = null;
 
         function updateInheritanceColor() {
-          if (inheritanceInput) inheritanceInput.style.color = isHetWithPureAR(variantRows[rowIndex]) ? '#c2293a' : '';
+          if (inheritanceInput) {
+            var isAR = isHetWithPureAR(variantRows[rowIndex]);
+            inheritanceInput.style.color = isAR ? '#c2293a' : '';
+            inheritanceInput.style.fontWeight = isAR ? '700' : '';
+          }
         }
 
         var rowNumTd = document.createElement('td');
@@ -1722,7 +1726,7 @@
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
       if (isHetWithPureAR(row)) {
-        dataRow.getCell(inheritanceColIdx + 1).font = { color: { argb: 'FFC2293A' } };
+        dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
       }
       var fColor = row.franklinColorOverride || franklinColor(row.franklin);
       if (fColor) {
