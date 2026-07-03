@@ -402,7 +402,7 @@
           </label>
         </div>
         <div id="variant-batch-list" class="batch-list" hidden></div>
-        <div class="upload-row" style="margin-top:14px">
+        <div class="upload-row" style="margin-top:14px" data-report-type="cmc">
           <label class="upload-label">
             ACMG/Franklin reference Excel (optional)
             <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
@@ -415,7 +415,7 @@
         <input type="text" id="variant-title-input" hidden />
       </div>
 
-      <div class="card">
+      <div class="card" data-report-type="cmc">
         <div class="card-title">Report settings</div>
         <div class="title-builder">
           <label>
@@ -543,6 +543,14 @@
     });
     toolsLabels.forEach(function (label) {
       label.hidden = label.dataset.reportType !== reportType;
+    });
+
+    // Hide/show content sections based on report type
+    var reportTypeElements = document.querySelectorAll('[data-report-type]');
+    reportTypeElements.forEach(function (el) {
+      if (!el.classList.contains('nav-item') && !el.classList.contains('tools-label')) {
+        el.hidden = el.dataset.reportType !== reportType;
+      }
     });
 
     // Reset to first tab of selected report type
