@@ -36,14 +36,24 @@
   h1, h2 { font-weight: 600; color: var(--ink); margin: 0; }
   p { margin: 0; }
 
-  /* ---------- App shell: sidebar + dashboard content ---------- */
-  .app-shell { display: flex; min-height: 100vh; }
+  /* ---------- App shell: header + sidebar + dashboard content ---------- */
+  .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+  .app-shell-content { display: flex; flex: 1; }
+
+  .top-bar {
+    background: var(--bg-page); border-bottom: 1px solid var(--border);
+    padding: 20px 30px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .top-bar-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-2);
+    font-weight: 600; margin-right: 20px;
+  }
 
   .sidebar {
     width: 252px; flex: 0 0 252px; border-right: 1px solid var(--border);
     background: var(--bg-page);
     padding: 30px 18px; display: flex; flex-direction: column; gap: 34px;
-    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    position: sticky; top: 0; height: calc(100vh - 70px); overflow-y: auto;
   }
   .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 6px; }
   .brand-mark {
@@ -57,12 +67,12 @@
   .brand-text span { font-size: 10.5px; color: var(--accent-2); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; }
 
   .report-type-selector {
-    display: flex; gap: 6px; margin-bottom: 24px;
+    display: flex; gap: 8px; align-items: center;
   }
   .report-type-btn {
-    flex: 1; all: unset; box-sizing: border-box; padding: 9px 10px; text-align: center;
-    font: 600 12px/1.2 var(--sans); color: var(--text); background: var(--bg);
-    border: 1px solid var(--border); border-radius: 2px; cursor: pointer;
+    all: unset; box-sizing: border-box; padding: 10px 24px; text-align: center;
+    font: 600 13px/1.3 var(--sans); color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 2px; cursor: pointer; white-space: nowrap;
     transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   }
   .report-type-btn:hover { background: var(--code-bg); color: var(--ink); border-color: var(--accent-2); }
@@ -82,7 +92,7 @@
   .nav-item.active { background: var(--code-bg); color: var(--ink); font-weight: 600; border-left-color: var(--accent-2); }
   .nav-item.hidden-report { display: none; }
 
-  .main-content { flex: 1; min-width: 0; padding: 40px 48px 64px; max-width: 1180px; }
+  .main-content { flex: 1; min-width: 0; padding: 40px 48px 64px; }
 
   .panel-header {
     margin-bottom: 28px; padding-bottom: 18px; border-bottom: 1px solid var(--border);
@@ -278,11 +288,13 @@
   .mapping-list-source { color: var(--text); }
 
   @media (max-width: 860px) {
-    .app-shell { flex-direction: column; }
+    .app-shell-content { flex-direction: column; }
+    .top-bar { flex-direction: column; align-items: flex-start; gap: 12px; }
     .sidebar {
       width: 100%; flex: 0 0 auto; height: auto; position: static; overflow-y: visible;
       border-right: none; border-bottom: 1px solid var(--border);
       flex-direction: row; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 16px 18px;
     }
     .sidebar-nav { flex-direction: row; }
     .sidebar-nav-label { display: none; }
@@ -292,36 +304,40 @@
 </head>
 <body>
 <div class="app-shell">
-  <aside class="sidebar">
-    <div class="sidebar-brand">
-      <div class="brand-mark">CMC</div>
-      <div class="brand-text">
-        <strong>Excel Consolidator</strong>
-        <span>Report Type</span>
-      </div>
-    </div>
-
+  <header class="top-bar">
+    <span class="top-bar-label">REPORT TYPE</span>
     <div class="report-type-selector">
       <button class="report-type-btn active" data-report-type="cmc">CMC</button>
       <button class="report-type-btn" data-report-type="single">Single</button>
       <button class="report-type-btn" data-report-type="couple">Couple</button>
     </div>
+  </header>
 
-    <nav class="sidebar-nav">
-      <span class="sidebar-nav-label tools-label" data-report-type="cmc">Tools</span>
-      <button class="nav-item tab-button active" data-tab="sample-list" data-report-type="cmc">Sample List Excel</button>
-      <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cmc">Listed Variant Excel</button>
-      <button class="nav-item tab-button" data-tab="final-consolidate" data-report-type="cmc">Sample Final Consolidate</button>
+  <div class="app-shell-content">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-mark">CMC</div>
+        <div class="brand-text">
+          <strong>Excel Consolidator</strong>
+          <span>CMC Hematology</span>
+        </div>
+      </div>
 
-      <span class="sidebar-nav-label tools-label" data-report-type="single" hidden>Tool</span>
-      <button class="nav-item tab-button" data-tab="single-report" data-report-type="single" hidden>Single Report</button>
+      <nav class="sidebar-nav">
+        <span class="sidebar-nav-label tools-label" data-report-type="cmc">Steps</span>
+        <button class="nav-item tab-button active" data-tab="sample-list" data-report-type="cmc">Sample List Excel</button>
+        <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cmc">Listed Variant Excel</button>
+        <button class="nav-item tab-button" data-tab="final-consolidate" data-report-type="cmc">Sample Final Consolidate</button>
 
-      <span class="sidebar-nav-label tools-label" data-report-type="couple" hidden>Tool</span>
-      <button class="nav-item tab-button" data-tab="couple-report" data-report-type="couple" hidden>Couple Report</button>
-    </nav>
-  </aside>
+        <span class="sidebar-nav-label tools-label" data-report-type="single" hidden>Step</span>
+        <button class="nav-item tab-button" data-tab="single-report" data-report-type="single" hidden>Single Report</button>
 
-  <main class="main-content">
+        <span class="sidebar-nav-label tools-label" data-report-type="couple" hidden>Step</span>
+        <button class="nav-item tab-button" data-tab="couple-report" data-report-type="couple" hidden>Couple Report</button>
+      </nav>
+    </aside>
+
+    <main class="main-content">
     <section class="tab-panel" id="panel-sample-list">
       <div class="panel-header">
         <div class="panel-eyebrow">Sample List Excel</div>
@@ -550,6 +566,7 @@
       </div>
     </section>
   </main>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
