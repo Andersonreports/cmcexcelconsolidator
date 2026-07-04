@@ -262,6 +262,11 @@
   .batch-item-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
 
   .batch-preview-label { padding: 10px 0 4px; font: 600 11px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--text); }
+  .franklin-cell { display: flex; align-items: center; }
+  .franklin-cell input { flex: 1; min-width: 60px; }
+  .franklin-link { flex-shrink:0; margin-left:4px; font:600 11px/1 var(--sans); color:var(--primary); text-decoration:none; opacity:.7; transition:opacity .12s; }
+  .franklin-link:hover { opacity:1; text-decoration:underline; }
+  .franklin-color-pick { flex-shrink:0; margin-left:3px; width:50px; height:18px; font-size:10px; padding:0 2px; border:1px solid var(--border); border-radius:3px; background:var(--bg); color:var(--ink); cursor:pointer; }
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
   .raw-text-debug summary:hover { color: var(--ink); }
@@ -411,6 +416,13 @@
             <input type="file" id="variant-file-input" accept=".xlsx,.xls" multiple />
           </label>
           <span class="progress-text" id="variant-progress-text"></span>
+        </div>
+        <div class="upload-row">
+          <label class="upload-label">
+            ACMG Reference Excel (optional — pre-fills Franklin column)
+            <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
+          </label>
+          <span class="progress-text" id="franklin-progress-text"></span>
         </div>
         <div id="variant-batch-list" class="batch-list" hidden></div>
         <div class="error-banner" id="variant-error" hidden></div>
@@ -1008,6 +1020,7 @@
     { key: 'gene', header: 'GENE' },
     { key: 'variant', header: 'VARIANT' },
     { key: 'proteinPos', header: 'PROTEIN POS' },
+    { key: 'franklin', header: 'FRANKLIN' },
     { key: 'clinvar', header: 'CLINVAR' },
     { key: 'varseq', header: 'VARSEQ' },
     { key: 'zygosity', header: 'ZYGOSITY' },
@@ -1271,6 +1284,67 @@
   var variantSampleSelect = document.getElementById('variant-sample-select');
   var variantTitleInput = document.getElementById('variant-title-input');
 
+  // ---- Franklin/ACMG cross-reference (optional second upload) ----
+  var franklinEntries = [];
+  var franklinFileInput = document.getElementById('franklin-file-input');
+  var franklinProgressText = document.getElementById('franklin-progress-text');
+
+  function lookupFranklin(gene, variant) {
+    var g = gene.trim().toUpperCase();
+    var v = variant.replace(/\s+/g, '').toUpperCase();
+    for (var i = 0; i < franklinEntries.length; i++) {
+      if (franklinEntries[i].gene === g && franklinEntries[i].variant === v) return franklinEntries[i].code;
+    }
+    return '';
+  }
+
+  franklinFileInput.addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    showVariantError('');
+    franklinFileInput.disabled = true;
+    franklinProgressText.textContent = 'Reading file…';
+
+    file.arrayBuffer()
+      .then(function (buffer) {
+        var workbook = new ExcelJS.Workbook();
+        return workbook.xlsx.load(buffer).then(function () { return workbook; });
+      })
+      .then(function (workbook) {
+        var sheet = workbook.worksheets[0];
+        if (!sheet) throw new Error('No worksheet found in the reference file.');
+        var entries = [];
+        sheet.eachRow(function (row, r) {
+          if (r === 1) return;
+          var gene = String(row.getCell(1).value || '').trim().toUpperCase();
+          var variant = String(row.getCell(2).value || '').replace(/\s+/g, '').toUpperCase();
+          var calc = row.getCell(3).value;
+          if (!gene || !variant) return;
+          entries.push({ gene: gene, variant: variant, code: extractAcmgCode(calc) });
+        });
+        franklinEntries = entries;
+        franklinProgressText.textContent = file.name + ' (' + entries.length + ' entries)';
+        if (variantRows.length > 0) reapplyFranklinLookup();
+      })
+      .catch(function (err) {
+        showVariantError((err && err.message) || 'Failed to read the reference file.');
+        franklinEntries = [];
+        franklinProgressText.textContent = '';
+      })
+      .finally(function () {
+        franklinFileInput.disabled = false;
+        franklinFileInput.value = '';
+      });
+  });
+
+  function reapplyFranklinLookup() {
+    variantRows.forEach(function (row) {
+      var code = lookupFranklin(row.gene, row.variant);
+      if (code) row.franklin = code;
+    });
+    renderVariantTable(variantPreviewIdx);
+  }
+
   // Map ClinVar summary text descriptions to Franklin-style abbreviations.
   function abbreviateClinSigText(text) {
     var t = String(text || '').toLowerCase().trim();
@@ -1293,6 +1367,145 @@
   }
 
   function isFalseCall() { return false; }
+
+  function franklinColor(value) {
+    var v = String(value || '').trim().toUpperCase();
+    if (v === 'P')      return '#c2293a';
+    if (v === 'LP')     return '#c2293a';
+    if (v === 'LB')     return '#c2293a';
+    if (v === 'B')      return '#1558A5';
+    if (v === 'B/VUS')  return '#1558A5';
+    if (v === 'VUS/LP') return '#000000';
+    if (v === 'VUS')    return '#2E74B5';
+    return '';
+  }
+
+  // ── Franklin (Genoox) auto-classification ──────────────────────────────────
+  var FRANKLIN_PROXY_URL = 'https://script.google.com/macros/s/AKfycbxZho7Jig9dKaCIVZIqwSv6FvUJxU9vx6yLwpqvoRjlt3ZQHKkQljthA8QOG9vYq6E3/exec';
+
+  function resolveFranklinForRows(rows, batchIdx) {
+    rows.forEach(function (row, rowIdx) {
+      var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
+      if (row.franklin) {
+        if (linkEl) linkEl.textContent = '↗';
+        return;
+      }
+      if (!row.gene && !row.variant) return;
+      if (linkEl) linkEl.textContent = '…';
+      (function (r, ri) {
+        setTimeout(function () { fetchFranklinForRow(r, ri, batchIdx); }, ri * 250);
+      })(row, rowIdx);
+    });
+  }
+
+  function fetchFranklinForRow(row, rowIdx, batchIdx) {
+    var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
+    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
+
+    if (!FRANKLIN_PROXY_URL) {
+      var linkElNoProxy = document.getElementById(linkId);
+      if (linkElNoProxy) linkElNoProxy.textContent = '↗';
+      fetchClinVarClass(row, rowIdx, batchIdx);
+      return;
+    }
+
+    var url = FRANKLIN_PROXY_URL +
+      '?gene=' + encodeURIComponent(row.gene || '') +
+      '&variant=' + encodeURIComponent(row.variant || '');
+
+    fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var linkEl = document.getElementById(linkId);
+        if (data && data.ok && data.chrom && data.pos && data.ref && data.alt) {
+          row._franklinUrl = 'https://franklin.genoox.com/clinical-db/variant/snp/chr' +
+            data.chrom + '-' + data.pos + '-' + data.ref + '-' + data.alt + '-hg38';
+          if (linkEl) linkEl.href = row._franklinUrl;
+        }
+        if (linkEl) linkEl.textContent = '↗';
+        if (data && data.ok && data.abbr && !row.franklin) {
+          row.franklin = data.abbr;
+          var inputEl = document.getElementById(inputId);
+          if (inputEl) {
+            inputEl.value = data.abbr;
+            var fetchedColor = row.franklinColorOverride || franklinColor(data.abbr);
+            inputEl.style.color = fetchedColor || '';
+            inputEl.style.fontWeight = fetchedColor ? '700' : '';
+            var pickEl = document.getElementById(inputId.replace('finput-', 'fpick-'));
+            if (pickEl && !row.franklinColorOverride) {
+              var ah = franklinColor(data.abbr) || '#000000';
+              pickEl.value = ah === '#c2293a' ? '#c2293a' : ah === '#000000' ? '#000000' : '#1558A5';
+            }
+          }
+        } else if (!row.franklin) {
+          fetchClinVarClass(row, rowIdx, batchIdx);
+        }
+      })
+      .catch(function () {
+        var linkEl2 = document.getElementById(linkId);
+        if (linkEl2) linkEl2.textContent = '↗';
+        fetchClinVarClass(row, rowIdx, batchIdx);
+      });
+  }
+
+  function fetchClinVarClass(row, rowIdx, batchIdx) {
+    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
+    if (row.franklin) return;
+
+    var gene    = String(row.gene    || '').trim();
+    var variant = String(row.variant || '').trim();
+    if (!gene && !variant) return;
+
+    var varForms = [variant];
+    var dm = variant.match(/^(c\.[0-9_+\-*]+)del[ACGT]+$/i);
+    if (dm) varForms.push(dm[1] + 'del');
+    var dupm = variant.match(/^(c\.[0-9_+\-*]+)dup[ACGT]+$/i);
+    if (dupm) varForms.push(dupm[1] + 'dup');
+
+    var parts = varForms.map(function (v) {
+      return '(' + (gene ? gene + '[gene] AND ' : '') + '"' + v + '"[All Fields])';
+    });
+
+    fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
+          '?db=clinvar&term=' + encodeURIComponent(parts.join(' OR ')) + '&retmax=5&retmode=json')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var ids = (data.esearchresult && data.esearchresult.idlist) || [];
+        if (!ids.length) return null;
+        return fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi' +
+                     '?db=clinvar&id=' + ids.slice(0, 3).join(',') + '&retmode=json')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            var result = data.result || {};
+            for (var i = 0; i < ids.length; i++) {
+              var e = result[ids[i]];
+              if (!e) continue;
+              var desc = (e.clinical_significance && e.clinical_significance.description) || '';
+              var abbr = abbreviateClinSigText(desc);
+              if (abbr) return abbr;
+            }
+            return null;
+          });
+      })
+      .then(function (abbr) {
+        if (abbr && !row.franklin) {
+          row.franklin = abbr;
+          var inputEl = document.getElementById(inputId);
+          if (inputEl) {
+            inputEl.value = abbr;
+            var cvColor = row.franklinColorOverride || franklinColor(abbr);
+            inputEl.style.color = cvColor || '';
+            inputEl.style.fontWeight = cvColor ? '700' : '';
+            var pickEl = document.getElementById(inputId.replace('finput-', 'fpick-'));
+            if (pickEl && !row.franklinColorOverride) {
+              var ah2 = franklinColor(abbr) || '#000000';
+              pickEl.value = ah2 === '#c2293a' ? '#c2293a' : ah2 === '#000000' ? '#000000' : '#1558A5';
+            }
+          }
+        }
+      })
+      .catch(function () {});
+  }
 
   // Extract patient info from VarSeq filename and combine with run name.
   // Handles variants:
@@ -1389,6 +1602,8 @@
         gene: gene,
         variant: variant,
         proteinPos: proteinPos,
+        franklin: lookupFranklin(gene, variant),
+        _franklinUrl: null,
         clinvar: get('clinvarClass') || '',
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
@@ -1519,7 +1734,49 @@
             updateInheritanceColor();
           });
           if (c.key === 'inheritance') inheritanceInput = input;
-          td.appendChild(input);
+          if (c.key === 'franklin') {
+            var bIdx = batchIdx != null ? batchIdx : 'x';
+            input.id = 'finput-' + bIdx + '-' + rowIndex;
+            var initFColor = row.franklinColorOverride || franklinColor(input.value);
+            input.style.color = initFColor || '';
+            input.style.fontWeight = initFColor ? '700' : '';
+            input.addEventListener('input', function (e) {
+              var fc = row.franklinColorOverride || franklinColor(e.target.value);
+              e.target.style.color = fc || '';
+              e.target.style.fontWeight = fc ? '700' : '';
+            });
+            var fWrapper = document.createElement('div');
+            fWrapper.className = 'franklin-cell';
+            fWrapper.appendChild(input);
+            var fLink = document.createElement('a');
+            fLink.href = row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home';
+            fLink.id = 'flink-' + bIdx + '-' + rowIndex;
+            fLink.target = '_blank'; fLink.rel = 'noopener noreferrer';
+            fLink.className = 'franklin-link';
+            fLink.textContent = row._franklinUrl ? '↗' : '…';
+            fLink.title = 'Open on Franklin by QIAGEN';
+            fWrapper.appendChild(fLink);
+            var colorPick = document.createElement('select');
+            colorPick.className = 'franklin-color-pick';
+            colorPick.id = 'fpick-' + bIdx + '-' + rowIndex;
+            colorPick.title = 'Override Franklin color';
+            [['Black','#000000'],['Blue','#1558A5'],['Red','#c2293a']].forEach(function(opt){
+              var o = document.createElement('option');
+              o.value = opt[1]; o.textContent = opt[0];
+              colorPick.appendChild(o);
+            });
+            var ah = franklinColor(input.value) || '#000000';
+            colorPick.value = row.franklinColorOverride || (ah === '#c2293a' ? '#c2293a' : ah === '#000000' ? '#000000' : '#1558A5');
+            colorPick.addEventListener('change', function() {
+              row.franklinColorOverride = colorPick.value;
+              input.style.color = colorPick.value;
+              input.style.fontWeight = '700';
+            });
+            fWrapper.appendChild(colorPick);
+            td.appendChild(fWrapper);
+          } else {
+            td.appendChild(input);
+          }
           tr.appendChild(td);
         });
 
@@ -1586,12 +1843,31 @@
     });
     headerRow.height = 22;
     var inheritanceColIdx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'inheritance'; });
+    var franklinColIdx    = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
+    var homoColIdxs = VARIANT_COLUMNS.reduce(function (acc, c, i) {
+      if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
+      return acc;
+    }, []);
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
       if (isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
       }
+      if (franklinColIdx >= 0) {
+        var fColor = row.franklinColorOverride || franklinColor(row.franklin);
+        if (fColor) {
+          dataRow.getCell(franklinColIdx + 1).font = { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } };
+        }
+      }
+      homoColIdxs.forEach(function (colIdx) {
+        var val = row[VARIANT_COLUMNS[colIdx].key];
+        if (val != null && val !== '' && Number(val) > 0) {
+          var cell = dataRow.getCell(colIdx + 1);
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } };
+          cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        }
+      });
     });
     return workbook.xlsx.writeBuffer();
   }
@@ -1664,6 +1940,7 @@
       variantPreviewLabel.hidden = false;
     }
     renderVariantTable(idx);
+    resolveFranklinForRows(variantRows, idx);
     renderBatchList();
   }
 
