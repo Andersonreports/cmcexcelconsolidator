@@ -1639,6 +1639,142 @@
     return { rows: rows, runName: runName };
   }
 
+  // Consolidate couple VarSeq Excel into separate samples with headers
+  function buildCoupleConsolidatedExcel(workbook, customTitle) {
+    var sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found');
+
+    var groupRow = sheet.getRow(1);
+    var headerRow = sheet.getRow(2);
+    var colCount = sheet.columnCount;
+
+    // Find shared annotation columns
+    var cols = {};
+    Object.keys(VARSEQ_COLUMN_SPECS).forEach(function (key) {
+      cols[key] = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS[key]);
+    });
+
+    var outbook = new ExcelJS.Workbook();
+    var outsheet = outbook.addWorksheet('Listed Variants');
+
+    // Column widths
+    for (var i = 1; i <= 15; i++) {
+      outsheet.getColumn(i).width = 18;
+    }
+
+    var outputHeaders = [
+      'Chr:Pos', 'Ref/Alt', 'Gene Names', 'HGVS c. (Clinically Relevant)',
+      'HGVS p. (Clinically Relevant)', 'FRANKLIN CLASSIFICATION', 'Zygosity',
+      'Read Depths (DP)', 'Variant Allele Freq', 'Allelic Depths (AD)', 'Zygosity',
+      'Read Depths (DP)', 'Variant Allele Freq', 'Allelic Depths (AD)', 'CLINVAR Classification'
+    ];
+
+    var variants = [];
+    sheet.eachRow(function (row, r) {
+      if (r <= 2) return;
+
+      function get(key) {
+        return cols[key] ? row.getCell(cols[key]).value : null;
+      }
+
+      var genes = splitList(get('geneNames'));
+      var hgvsCList = splitList(get('hgvsC'));
+      var hgvsPList = splitList(get('hgvsP'));
+
+      var gene = genes[0] || '';
+      if (!gene) return;
+
+      variants.push({
+        chrPos: get('variantChr') ? (get('variantChr') + ':' + get('variantPos')) : '',
+        refAlt: (get('variantRef') || '') + '/' + (get('variantAlt') || ''),
+        gene: gene,
+        hgvsC: hgvsCList[0] || '',
+        hgvsP: hgvsPList[0] || '',
+        clinvar: get('clinvarClass') || '',
+        zygosity: get('zygosity') || '',
+        vaf: get('vaf') || '',
+        dp: get('readDepths') || '',
+        ad: get('alleleDepths') || ''
+      });
+    });
+
+    // Helper to get sample name from run name
+    function extractSampleName(runName) {
+      if (!runName) return 'Sample';
+      var match = runName.match(/GEN_T[^_]*_spik_(\d+)[^_]*_(.+?)(?:_\d+)?$/);
+      if (match) return 'GEN_T_2.0.spik_' + match[1] + '_' + match[2].toUpperCase();
+      return runName;
+    }
+
+    var currentRow = 1;
+
+    // Sample 1 section
+    var title1 = extractSampleName(String(groupRow.getCell(3).value || ''));
+    outsheet.getRow(currentRow).getCell(1).value = 'LISTED VARIANTS FOR ' + title1;
+    outsheet.getRow(currentRow).getCell(1).font = { bold: true, size: 12 };
+    currentRow++;
+
+    // Sample 1 headers
+    for (var i = 0; i < outputHeaders.length; i++) {
+      var hcell = outsheet.getRow(currentRow).getCell(i + 1);
+      hcell.value = outputHeaders[i];
+      hcell.font = { bold: true };
+      hcell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD3D3D3' } };
+    }
+    currentRow++;
+
+    // Sample 1 data rows
+    variants.forEach(function (v) {
+      outsheet.getRow(currentRow).getCell(1).value = v.chrPos;
+      outsheet.getRow(currentRow).getCell(2).value = v.refAlt;
+      outsheet.getRow(currentRow).getCell(3).value = v.gene;
+      outsheet.getRow(currentRow).getCell(4).value = v.hgvsC;
+      outsheet.getRow(currentRow).getCell(5).value = v.hgvsP;
+      outsheet.getRow(currentRow).getCell(6).value = 'P';
+      outsheet.getRow(currentRow).getCell(7).value = v.zygosity.indexOf('Heterozygous') !== -1 ? 'HET' : (v.zygosity.indexOf('Homozygous') !== -1 ? 'HOM' : '');
+      outsheet.getRow(currentRow).getCell(8).value = v.dp;
+      outsheet.getRow(currentRow).getCell(9).value = v.vaf;
+      outsheet.getRow(currentRow).getCell(10).value = v.ad;
+      outsheet.getRow(currentRow).getCell(15).value = v.clinvar;
+      currentRow++;
+    });
+
+    currentRow++; // Blank row
+
+    // Sample 2 section
+    var title2 = extractSampleName(String(groupRow.getCell(7).value || ''));
+    outsheet.getRow(currentRow).getCell(1).value = 'LISTED VARIANTS FOR ' + title2;
+    outsheet.getRow(currentRow).getCell(1).font = { bold: true, size: 12 };
+    currentRow++;
+
+    // Sample 2 headers
+    for (var i = 0; i < outputHeaders.length; i++) {
+      var hcell = outsheet.getRow(currentRow).getCell(i + 1);
+      hcell.value = outputHeaders[i];
+      hcell.font = { bold: true };
+      hcell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD3D3D3' } };
+    }
+    currentRow++;
+
+    // Sample 2 data rows (same variants for consolidation)
+    variants.forEach(function (v) {
+      outsheet.getRow(currentRow).getCell(1).value = v.chrPos;
+      outsheet.getRow(currentRow).getCell(2).value = v.refAlt;
+      outsheet.getRow(currentRow).getCell(3).value = v.gene;
+      outsheet.getRow(currentRow).getCell(4).value = v.hgvsC;
+      outsheet.getRow(currentRow).getCell(5).value = v.hgvsP;
+      outsheet.getRow(currentRow).getCell(6).value = 'P';
+      outsheet.getRow(currentRow).getCell(7).value = v.zygosity.indexOf('Heterozygous') !== -1 ? 'HET' : (v.zygosity.indexOf('Homozygous') !== -1 ? 'HOM' : '');
+      outsheet.getRow(currentRow).getCell(8).value = v.dp;
+      outsheet.getRow(currentRow).getCell(9).value = v.vaf;
+      outsheet.getRow(currentRow).getCell(10).value = v.ad;
+      outsheet.getRow(currentRow).getCell(15).value = v.clinvar;
+      currentRow++;
+    });
+
+    return outbook.xlsx.writeBuffer();
+  }
+
   function columnLetter(n) {
     var letters = '';
     while (n > 0) {
@@ -1914,9 +2050,13 @@
       var previewBtn = document.createElement('button');
       previewBtn.className = 'batch-item-btn' + (idx === variantPreviewIdx ? ' active' : '');
       previewBtn.textContent = idx === variantPreviewIdx ? 'Previewing' : 'Preview';
-      previewBtn.disabled = !!item.error;
-      previewBtn.addEventListener('click', function () { selectBatchPreview(idx); });
-      div.appendChild(previewBtn);
+      previewBtn.disabled = !!item.error || item.isCoupleConsolidation;
+      if (!item.isCoupleConsolidation) {
+        previewBtn.addEventListener('click', function () { selectBatchPreview(idx); });
+      }
+      if (!item.isCoupleConsolidation) {
+        div.appendChild(previewBtn);
+      }
 
       var dlBtn = document.createElement('button');
       dlBtn.className = 'batch-item-btn';
@@ -1947,10 +2087,16 @@
   function downloadBatchItem(idx) {
     var item = variantBatch[idx];
     if (!item || item.error) return;
-    buildVariantExcel(item.rows, item.title).then(function (buffer) {
-      var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
-      downloadBlob(buffer, safeName);
-    });
+
+    if (item.isCoupleConsolidation && item.excelBuffer) {
+      var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-consolidated.xlsx';
+      downloadBlob(item.excelBuffer, safeName);
+    } else {
+      buildVariantExcel(item.rows, item.title).then(function (buffer) {
+        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
+        downloadBlob(buffer, safeName);
+      });
+    }
   }
 
   variantFileInput.addEventListener('change', function (e) {
@@ -1966,16 +2112,42 @@
           return workbook.xlsx.load(buffer).then(function () { return workbook; });
         })
         .then(function (workbook) {
-          var result = processVarSeqWorkbook(workbook);
-          var autoTitle = extractPatientTitle(file.name, result.runName);
-          return {
-            fileName: file.name,
-            rows: result.rows,
-            runName: result.runName,
-            title: autoTitle,
-            loadedAt: new Date().toLocaleDateString(),
-            error: null
-          };
+          // Detect if this is a couple file (has multiple sample columns)
+          var sheet = workbook.worksheets[0];
+          var groupRow = sheet.getRow(1);
+          var isCoupleFile = currentReportType === 'couple' &&
+                             groupRow.getCell(3).value &&
+                             groupRow.getCell(7).value;
+
+          if (isCoupleFile) {
+            // Use couple consolidation
+            var fileName = file.name.replace(/\.[^.]+$/, '');
+            return buildCoupleConsolidatedExcel(workbook).then(function (buffer) {
+              return {
+                fileName: file.name,
+                rows: [],
+                runName: '',
+                title: 'LISTED VARIANTS FOR ' + fileName,
+                loadedAt: new Date().toLocaleDateString(),
+                error: null,
+                isCoupleConsolidation: true,
+                excelBuffer: buffer
+              };
+            });
+          } else {
+            // Use standard VarSeq processing
+            var result = processVarSeqWorkbook(workbook);
+            var autoTitle = extractPatientTitle(file.name, result.runName);
+            return {
+              fileName: file.name,
+              rows: result.rows,
+              runName: result.runName,
+              title: autoTitle,
+              loadedAt: new Date().toLocaleDateString(),
+              error: null,
+              isCoupleConsolidation: false
+            };
+          }
         })
         .catch(function (err) {
           return {
@@ -1984,7 +2156,8 @@
             runName: '',
             title: file.name.replace(/\.[^.]+$/, ''),
             loadedAt: new Date().toLocaleDateString(),
-            error: (err && err.message) || 'Failed to read file'
+            error: (err && err.message) || 'Failed to read file',
+            isCoupleConsolidation: false
           };
         });
     });
@@ -2018,7 +2191,7 @@
   });
 
   variantDownloadAllBtn.addEventListener('click', function () {
-    var validItems = variantBatch.filter(function (item) { return !item.error && item.rows.length > 0; });
+    var validItems = variantBatch.filter(function (item) { return !item.error && (item.rows.length > 0 || item.excelBuffer); });
     if (!validItems.length) return;
 
     variantDownloadAllBtn.disabled = true;
@@ -2026,10 +2199,16 @@
 
     var zip = new JSZip();
     Promise.all(validItems.map(function (item) {
-      return buildVariantExcel(item.rows, item.title).then(function (buffer) {
-        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
-        zip.file(safeName, buffer);
-      });
+      if (item.isCoupleConsolidation && item.excelBuffer) {
+        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-consolidated.xlsx';
+        zip.file(safeName, item.excelBuffer);
+        return Promise.resolve();
+      } else {
+        return buildVariantExcel(item.rows, item.title).then(function (buffer) {
+          var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
+          zip.file(safeName, buffer);
+        });
+      }
     })).then(function () {
       return zip.generateAsync({ type: 'arraybuffer' });
     }).then(function (zipBuffer) {
