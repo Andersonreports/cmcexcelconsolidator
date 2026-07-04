@@ -98,6 +98,7 @@
   .nav-item:hover { background: var(--bg-secondary); color: var(--primary); }
   .nav-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; border-left-color: var(--primary); }
   .nav-item.hidden-report { display: none; }
+  .nav-item[hidden], .tools-label[hidden] { display: none !important; }
 
   .main-content { flex: 1; min-width: 0; padding: 32px 40px 48px; }
 
@@ -579,18 +580,10 @@
       label.hidden = label.dataset.reportType !== reportType;
     });
 
-    // Hide/show content sections based on report type
-    var reportTypeElements = document.querySelectorAll('[data-report-type]');
-    reportTypeElements.forEach(function (el) {
-      if (!el.classList.contains('nav-item') && !el.classList.contains('tools-label')) {
-        el.hidden = el.dataset.reportType !== reportType;
-      }
-    });
-
     // Reset to first tab of selected report type
     var firstTabOfType = document.querySelector('.nav-item[data-report-type="' + reportType + '"]:not([hidden])');
     if (firstTabOfType) {
-      firstTabOfType.click();
+      selectTab(firstTabOfType);
     }
   }
 
@@ -600,9 +593,6 @@
     });
   });
 
-  // Initialize with CMC report type on page load
-  switchReportType('cmc');
-
   // ---------- Tab switching ----------
   var tabButtons = document.querySelectorAll('.tab-button');
   var panels = {
@@ -610,16 +600,24 @@
     'listed-variant': document.getElementById('panel-listed-variant'),
     'final-consolidate': document.getElementById('panel-final-consolidate'),
   };
+  function selectTab(btn) {
+    if (!btn || btn.hidden) return;
+    tabButtons.forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    Object.keys(panels).forEach(function (key) {
+      panels[key].hidden = key !== btn.dataset.tab;
+    });
+    if (btn.dataset.tab === 'listed-variant') populateSampleSelect();
+  }
+
   tabButtons.forEach(function (btn) {
     btn.addEventListener('click', function () {
-      tabButtons.forEach(function (b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      Object.keys(panels).forEach(function (key) {
-        panels[key].hidden = key !== btn.dataset.tab;
-      });
-      if (btn.dataset.tab === 'listed-variant') populateSampleSelect();
+      selectTab(btn);
     });
   });
+
+  // Initialize after tab handlers exist so CMC shows only its three sub-tabs.
+  switchReportType('cmc');
 
   // ---------- Shared Excel export helper ----------
   function downloadBlob(buffer, fileName) {
