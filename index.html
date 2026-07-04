@@ -417,7 +417,7 @@
           </label>
           <span class="progress-text" id="variant-progress-text"></span>
         </div>
-        <div class="upload-row">
+        <div class="upload-row" id="franklin-upload-row" data-report-type="cmc">
           <label class="upload-label">
             ACMG Reference Excel (optional — pre-fills Franklin column)
             <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
@@ -566,6 +566,12 @@
     toolsLabels.forEach(function (label) {
       label.hidden = label.dataset.reportType !== reportType;
     });
+
+    // Hide/show ACMG reference section (only for CMC mode)
+    var franklinUploadRow = document.getElementById('franklin-upload-row');
+    if (franklinUploadRow) {
+      franklinUploadRow.hidden = reportType !== 'cmc';
+    }
 
     // Reset to first tab of selected report type
     var firstTabOfType = document.querySelector('.nav-item[data-report-type="' + reportType + '"]:not([hidden])');
