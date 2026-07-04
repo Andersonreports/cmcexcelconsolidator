@@ -1576,6 +1576,14 @@
       cols[key] = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS[key]);
     });
 
+    console.log('Column detection results:', {
+      geneNames: cols.geneNames,
+      hgvsC: cols.hgvsC,
+      zygosity: cols.zygosity,
+      omimInheritance: cols.omimInheritance,
+      totalColumns: colCount
+    });
+
     // CONDITIONS column fallback: VarSeq may name the OMIM description column differently.
     // Try common alternatives before giving up.
     if (!cols.omimDescription) {
@@ -1591,8 +1599,12 @@
     var runName = runNameMatch ? runNameMatch[1] : String(groupRow.getCell(1).value || '');
 
     var rows = [];
+    var debugRowsChecked = 0;
+    var debugRowsSkipped = { noGene: 0, noZygOrInherit: 0, benign: 0 };
+
     sheet.eachRow(function (row, r) {
       if (r <= 2) return;
+      debugRowsChecked++;
 
       function get(key) {
         return cols[key] ? row.getCell(cols[key]).value : null;
@@ -1609,14 +1621,14 @@
       });
 
       var gene = genes[winnerIdx] || genes[0] || '';
-      if (!gene) return;
+      if (!gene) { debugRowsSkipped.noGene++; return; }
       var variant = stripHgvsPrefix(hgvsCList[winnerIdx] || hgvsCList[0] || '');
 
       // Skip rows that have neither zygosity nor inheritance — these are
       // typically annotation-only or summary rows, not real variant calls.
       var rawZygosity    = get('zygosity');
       var rawInheritance = get('omimInheritance');
-      if (!rawZygosity && !rawInheritance) return;
+      if (!rawZygosity && !rawInheritance) { debugRowsSkipped.noZygOrInherit++; return; }
 
       var proteinPos = stripHgvsPrefix(get('hgvsP'));
 
@@ -1658,6 +1670,12 @@
         alphaMissense: get('alphaMissense'),
         revel: get('revel'),
       });
+    });
+
+    console.log('Variant extraction debug info:', {
+      rowsChecked: debugRowsChecked,
+      rowsExtracted: rows.length,
+      skipped: debugRowsSkipped
     });
 
     rows.forEach(function (row, i) { row.sNo = i + 1; });
