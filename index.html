@@ -298,6 +298,9 @@
   .mapping-list-col { flex: 0 0 220px; font-weight: 600; color: var(--ink); font-family: var(--mono); font-size: 12px; }
   .mapping-list-source { color: var(--text); }
 
+  /* Hide ACMG reference section when not in CMC mode */
+  #franklin-upload-row[style*="display: none"] { display: none !important; }
+
   @media (max-width: 860px) {
     .app-shell-content { flex-direction: column; }
     .top-bar { flex-direction: column; align-items: flex-start; gap: 12px; }
@@ -570,7 +573,7 @@
     // Hide/show ACMG reference section (only for CMC mode)
     var franklinUploadRow = document.getElementById('franklin-upload-row');
     if (franklinUploadRow) {
-      franklinUploadRow.hidden = reportType !== 'cmc';
+      franklinUploadRow.style.display = reportType === 'cmc' ? 'block' : 'none';
     }
 
     // Reset to first tab of selected report type
