@@ -261,16 +261,7 @@
   .batch-item-btn:disabled { opacity: .5; cursor: not-allowed; }
   .batch-item-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
 
-  /* Active Selection section */
-  .active-selection { margin-bottom: 28px; }
-  .active-selection-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-  .active-selection-badge { background: var(--primary-light); color: var(--primary); padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
   .batch-preview-label { padding: 10px 0 4px; font: 600 11px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--text); }
-  .franklin-cell { display: flex; align-items: center; }
-  .franklin-cell input { flex: 1; min-width: 60px; }
-  .franklin-link { flex-shrink:0; margin-left:4px; font:600 11px/1 var(--sans); color:var(--primary); text-decoration:none; opacity:.7; transition:opacity .12s; }
-  .franklin-link:hover { opacity:1; text-decoration:underline; }
-  .franklin-color-pick { flex-shrink:0; margin-left:3px; width:50px; height:18px; font-size:10px; padding:0 2px; border:1px solid var(--border); border-radius:3px; background:var(--bg); color:var(--ink); cursor:pointer; }
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
   .raw-text-debug summary:hover { color: var(--ink); }
@@ -410,27 +401,6 @@
         <div class="panel-eyebrow">CONSOLIDATION MANAGEMENT CENTER</div>
         <h2>Genomic Consolidation Hub</h2>
         <p style="color: var(--text-secondary); margin-top: 6px; font-size: 14px;">Execute high-precision multi-step variant extraction and consolidation workflows.</p>
-      </div>
-
-      <div class="card active-selection">
-        <div class="active-selection-title">
-          Active Selection
-          <span class="active-selection-badge" id="active-selection-badge">0 BATCHES LOADED</span>
-        </div>
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Patient Reference</th>
-                <th>Collection Date</th>
-                <th>Processing Status</th>
-              </tr>
-            </thead>
-            <tbody id="active-selection-body">
-              <tr><td colspan="3" class="empty-state">No batches loaded yet.</td></tr>
-            </tbody>
-          </table>
-        </div>
       </div>
 
       <div class="card">
@@ -1038,7 +1008,6 @@
     { key: 'gene', header: 'GENE' },
     { key: 'variant', header: 'VARIANT' },
     { key: 'proteinPos', header: 'PROTEIN POS' },
-    { key: 'franklin', header: 'FRANKLIN' },
     { key: 'clinvar', header: 'CLINVAR' },
     { key: 'varseq', header: 'VARSEQ' },
     { key: 'zygosity', header: 'ZYGOSITY' },
@@ -1295,8 +1264,6 @@
   var variantFileInput = document.getElementById('variant-file-input');
   var variantBatchList = document.getElementById('variant-batch-list');
   var variantPreviewLabel = document.getElementById('variant-preview-label');
-  var activeSelectionBody = document.getElementById('active-selection-body');
-  var activeSelectionBadge = document.getElementById('active-selection-badge');
   var variantSelectedCount = document.getElementById('variant-selected-count');
   var variantError = document.getElementById('variant-error');
   var variantClearAllBtn = document.getElementById('variant-clear-all');
@@ -1326,18 +1293,6 @@
   }
 
   function isFalseCall() { return false; }
-
-  function franklinColor(value) {
-    var v = String(value || '').trim().toUpperCase();
-    if (v === 'P')      return '#c2293a';
-    if (v === 'LP')     return '#c2293a';
-    if (v === 'LB')     return '#c2293a';
-    if (v === 'B')      return '#1558A5';
-    if (v === 'B/VUS')  return '#1558A5';
-    if (v === 'VUS/LP') return '#000000';
-    if (v === 'VUS')    return '#2E74B5';
-    return '';
-  }
 
   // Extract patient info from VarSeq filename and combine with run name.
   // Handles variants:
@@ -1564,49 +1519,7 @@
             updateInheritanceColor();
           });
           if (c.key === 'inheritance') inheritanceInput = input;
-          if (c.key === 'franklin') {
-            var bIdx = batchIdx != null ? batchIdx : 'x';
-            input.id = 'finput-' + bIdx + '-' + rowIndex;
-            var initFColor = row.franklinColorOverride || franklinColor(input.value);
-            input.style.color = initFColor || '';
-            input.style.fontWeight = initFColor ? '700' : '';
-            input.addEventListener('input', function (e) {
-              var fc = row.franklinColorOverride || franklinColor(e.target.value);
-              e.target.style.color = fc || '';
-              e.target.style.fontWeight = fc ? '700' : '';
-            });
-            var fWrapper = document.createElement('div');
-            fWrapper.className = 'franklin-cell';
-            fWrapper.appendChild(input);
-            var fLink = document.createElement('a');
-            fLink.href = row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home';
-            fLink.id = 'flink-' + bIdx + '-' + rowIndex;
-            fLink.target = '_blank'; fLink.rel = 'noopener noreferrer';
-            fLink.className = 'franklin-link';
-            fLink.textContent = row._franklinUrl ? '↗' : '…';
-            fLink.title = 'Open on Franklin by QIAGEN';
-            fWrapper.appendChild(fLink);
-            var colorPick = document.createElement('select');
-            colorPick.className = 'franklin-color-pick';
-            colorPick.id = 'fpick-' + bIdx + '-' + rowIndex;
-            colorPick.title = 'Override Franklin color';
-            [['Black','#000000'],['Blue','#1558A5'],['Red','#c2293a']].forEach(function(opt){
-              var o = document.createElement('option');
-              o.value = opt[1]; o.textContent = opt[0];
-              colorPick.appendChild(o);
-            });
-            var ah = franklinColor(input.value) || '#000000';
-            colorPick.value = row.franklinColorOverride || (ah === '#c2293a' ? '#c2293a' : ah === '#000000' ? '#000000' : '#1558A5');
-            colorPick.addEventListener('change', function() {
-              row.franklinColorOverride = colorPick.value;
-              input.style.color = colorPick.value;
-              input.style.fontWeight = '700';
-            });
-            fWrapper.appendChild(colorPick);
-            td.appendChild(fWrapper);
-          } else {
-            td.appendChild(input);
-          }
+          td.appendChild(input);
           tr.appendChild(td);
         });
 
@@ -1620,43 +1533,6 @@
       variantSelectedCount.textContent =
         variantRows.length + ' record' + (variantRows.length !== 1 ? 's' : '');
     }
-  }
-
-  function patientReferenceFromTitle(item) {
-    var title = String((item && item.title) || (item && item.fileName) || '').trim();
-    var match = title.match(/^(.*?)(?:\s*\(|$)/);
-    return (match && match[1].trim()) || title || 'Untitled batch';
-  }
-
-  function renderActiveSelection() {
-    if (!activeSelectionBody || !activeSelectionBadge) return;
-    var loaded = variantBatch.filter(function (item) { return !item.error; }).length;
-    activeSelectionBadge.textContent = loaded + ' BATCH' + (loaded !== 1 ? 'ES' : '') + ' LOADED';
-    activeSelectionBody.innerHTML = '';
-
-    if (!variantBatch.length) {
-      var emptyRow = document.createElement('tr');
-      emptyRow.innerHTML = '<td colspan="3" class="empty-state">No batches loaded yet.</td>';
-      activeSelectionBody.appendChild(emptyRow);
-      return;
-    }
-
-    variantBatch.forEach(function (item, idx) {
-      var tr = document.createElement('tr');
-      var patientTd = document.createElement('td');
-      patientTd.textContent = patientReferenceFromTitle(item);
-      var dateTd = document.createElement('td');
-      dateTd.textContent = item.loadedAt || '';
-      var statusTd = document.createElement('td');
-      var badge = document.createElement('span');
-      badge.className = 'status-badge ' + (item.error ? 'status-queued' : 'status-ready');
-      badge.textContent = item.error ? 'Needs review' : (idx === variantPreviewIdx ? 'Previewing' : 'Ready');
-      statusTd.appendChild(badge);
-      tr.appendChild(patientTd);
-      tr.appendChild(dateTd);
-      tr.appendChild(statusTd);
-      activeSelectionBody.appendChild(tr);
-    });
   }
 
   function showVariantError(message) {
@@ -1710,31 +1586,12 @@
     });
     headerRow.height = 22;
     var inheritanceColIdx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'inheritance'; });
-    var franklinColIdx    = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
-    var homoColIdxs = VARIANT_COLUMNS.reduce(function (acc, c, i) {
-      if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
-      return acc;
-    }, []);
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
       if (isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
       }
-      if (franklinColIdx >= 0) {
-        var fColor = row.franklinColorOverride || franklinColor(row.franklin);
-        if (fColor) {
-          dataRow.getCell(franklinColIdx + 1).font = { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } };
-        }
-      }
-      homoColIdxs.forEach(function (colIdx) {
-        var val = row[VARIANT_COLUMNS[colIdx].key];
-        if (val != null && val !== '' && Number(val) > 0) {
-          var cell = dataRow.getCell(colIdx + 1);
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } };
-          cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        }
-      });
     });
     return workbook.xlsx.writeBuffer();
   }
@@ -1794,7 +1651,6 @@
 
       variantBatchList.appendChild(div);
     });
-    renderActiveSelection();
   }
 
   function selectBatchPreview(idx) {
