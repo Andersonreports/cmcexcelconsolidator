@@ -243,10 +243,15 @@
   .batch-item-btn:disabled { opacity: .45; cursor: not-allowed; }
   .batch-item-btn.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .batch-preview-label { padding: 10px 0 4px; font: 600 11px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--text); }
+  .franklin-cell { display: flex; align-items: center; }
+  .franklin-cell input { flex: 1; min-width: 60px; }
+  .franklin-link {
     flex-shrink: 0; margin-left: 4px; font: 600 11px/1 var(--sans);
     color: var(--accent); text-decoration: none; vertical-align: middle;
     opacity: .7; transition: opacity .12s;
   }
+  .franklin-link:hover { opacity: 1; text-decoration: underline; }
+  .franklin-color-pick {
     flex-shrink: 0; margin-left: 3px; width: 50px; height: 18px;
     font-size: 10px; padding: 0 2px; border: 1px solid var(--border);
     border-radius: 3px; background: var(--bg); color: var(--text); cursor: pointer;
@@ -566,8 +571,15 @@
   });
 
   // ---------- Shared Excel export helper ----------
+  function downloadMimeType(fileName) {
+    if (/\.zip$/i.test(fileName)) return 'application/zip';
+    if (/\.xlsx$/i.test(fileName)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (/\.xls$/i.test(fileName)) return 'application/vnd.ms-excel';
+    return 'application/octet-stream';
+  }
+
   function downloadBlob(buffer, fileName) {
-    var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    var blob = new Blob([buffer], { type: downloadMimeType(fileName) });
     var url = URL.createObjectURL(blob);
     var link = document.createElement('a');
     link.href = url;
@@ -575,7 +587,7 @@
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
   function exportRowsToXlsx(rows, columns, sheetName, fileName) {
@@ -1264,6 +1276,18 @@
 
   function isFalseCall() { return false; }
 
+  function franklinColor(value) {
+    var v = String(value || '').trim().toUpperCase();
+    if (v === 'P')      return '#c2293a';
+    if (v === 'LP')     return '#c2293a';
+    if (v === 'LB')     return '#c2293a';
+    if (v === 'B')      return '#1558A5';
+    if (v === 'B/VUS')  return '#1558A5';
+    if (v === 'VUS/LP') return '#000000';
+    if (v === 'VUS')    return '#2E74B5';
+    return '';
+  }
+
   // Extract patient info from VarSeq filename and combine with run name.
   // Handles variants:
   //   _MR_AL54_Y_499_11YM_    → MR.AL54-Y-499 (11Y/M)
@@ -1489,7 +1513,51 @@
             updateInheritanceColor();
           });
           if (c.key === 'inheritance') inheritanceInput = input;
-          td.appendChild(input);
+          if (c.key === 'franklin') {
+            var bIdx = batchIdx != null ? batchIdx : 'x';
+            input.id = 'finput-' + bIdx + '-' + rowIndex;
+            var initFColor = row.franklinColorOverride || franklinColor(input.value);
+            input.style.color = initFColor || '';
+            input.style.fontWeight = initFColor ? '700' : '';
+            input.addEventListener('input', function (e) {
+              var c2 = row.franklinColorOverride || franklinColor(e.target.value);
+              e.target.style.color = c2 || '';
+              e.target.style.fontWeight = c2 ? '700' : '';
+            });
+            var fWrapper = document.createElement('div');
+            fWrapper.className = 'franklin-cell';
+            fWrapper.appendChild(input);
+            var fLink = document.createElement('a');
+            fLink.href = row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home';
+            fLink.id = 'flink-' + bIdx + '-' + rowIndex;
+            fLink.target = '_blank';
+            fLink.rel = 'noopener noreferrer';
+            fLink.className = 'franklin-link';
+            fLink.textContent = row._franklinUrl ? '↗' : '…';
+            fLink.title = 'Open on Franklin by QIAGEN';
+            fWrapper.appendChild(fLink);
+            var colorPick = document.createElement('select');
+            colorPick.className = 'franklin-color-pick';
+            colorPick.id = 'fpick-' + bIdx + '-' + rowIndex;
+            colorPick.title = 'Override Franklin color';
+            [['Black','#000000'],['Blue','#1558A5'],['Red','#c2293a']].forEach(function(opt) {
+              var o = document.createElement('option');
+              o.value = opt[1]; o.textContent = opt[0];
+              colorPick.appendChild(o);
+            });
+            var autoHex = franklinColor(input.value) || '#000000';
+            colorPick.value = row.franklinColorOverride ||
+              (autoHex === '#c2293a' ? '#c2293a' : autoHex === '#000000' ? '#000000' : '#1558A5');
+            colorPick.addEventListener('change', function () {
+              row.franklinColorOverride = colorPick.value;
+              input.style.color = colorPick.value;
+              input.style.fontWeight = '700';
+            });
+            fWrapper.appendChild(colorPick);
+            td.appendChild(fWrapper);
+          } else {
+            td.appendChild(input);
+          }
           tr.appendChild(td);
         });
 
@@ -1730,20 +1798,47 @@
 
     variantDownloadAllBtn.disabled = true;
     variantDownloadAllBtn.textContent = 'Generating ZIP…';
+    showVariantError('');
 
-    var zip = new JSZip();
-    Promise.all(validItems.map(function (item) {
-      return buildVariantExcel(item.rows, item.title).then(function (buffer) {
+    if (typeof JSZip === 'undefined') {
+      showVariantError('ZIP support did not load. Check your internet connection and reload the page.');
+      variantDownloadAllBtn.disabled = variantBatch.length === 0;
+      variantDownloadAllBtn.textContent = 'Download All (ZIP)';
+      return;
+    }
+
+    var zip;
+    try {
+      zip = new JSZip();
+    } catch (err) {
+      showVariantError((err && err.message) || 'Failed to initialize ZIP generation.');
+      variantDownloadAllBtn.disabled = variantBatch.length === 0;
+      variantDownloadAllBtn.textContent = 'Download All (ZIP)';
+      return;
+    }
+
+    var addedCount = 0;
+    var buildChain = validItems.reduce(function (promise, item, idx) {
+      return promise.then(function () {
+        variantDownloadAllBtn.textContent = 'Generating ZIP… (' + (idx + 1) + '/' + validItems.length + ')';
+        return buildVariantExcel(item.rows, item.title);
+      }).then(function (buffer) {
         var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
         zip.file(safeName, buffer);
+        addedCount += 1;
       });
-    })).then(function () {
+    }, Promise.resolve());
+
+    buildChain.then(function () {
+      if (addedCount === 0) throw new Error('No Excel files could be added to the ZIP.');
+      variantDownloadAllBtn.textContent = 'Saving ZIP…';
       return zip.generateAsync({ type: 'arraybuffer' });
     }).then(function (zipBuffer) {
       downloadBlob(zipBuffer, 'listed-variants-batch.zip');
     }).catch(function (err) {
+      console.error('Failed to generate ZIP.', err);
       showVariantError((err && err.message) || 'Failed to generate ZIP.');
-    }).finally(function () {
+    }).then(function () {
       variantDownloadAllBtn.disabled = variantBatch.length === 0;
       variantDownloadAllBtn.textContent = 'Download All (ZIP)';
     });
