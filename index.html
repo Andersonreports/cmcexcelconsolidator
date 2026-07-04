@@ -1183,6 +1183,22 @@
     return null;
   }
 
+  function findVarSeqColumns(groupRow, headerRow, colCount, spec) {
+    var matches = [];
+    var lastGroup = '';
+    for (var c = 1; c <= colCount; c++) {
+      var group = String(groupRow.getCell(c).value || '');
+      if (group) lastGroup = group;
+      var groupText = group || lastGroup;
+      var header = String(headerRow.getCell(c).value || '');
+      if (spec.header && header !== spec.header) continue;
+      if (spec.headerStartsWith && header.indexOf(spec.headerStartsWith) !== 0) continue;
+      if (spec.groupIncludes && !spec.groupIncludes.every(function (needle) { return groupText.indexOf(needle) !== -1; })) continue;
+      matches.push(c);
+    }
+    return matches;
+  }
+
   function splitList(value) {
     if (value == null) return [];
     return String(value).split(',').map(function (s) { return s.trim(); });
@@ -1657,10 +1673,12 @@
     var headerRow = sheet.getRow(2);
     var colCount = sheet.columnCount;
 
-    // Find shared annotation columns
+    // Find shared annotation columns and all sample columns
     var cols = {};
+    var colsAll = {};
     Object.keys(VARSEQ_COLUMN_SPECS).forEach(function (key) {
-      cols[key] = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS[key]);
+      colsAll[key] = findVarSeqColumns(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS[key]);
+      cols[key] = colsAll[key][0] || null;
     });
 
     var outbook = new ExcelJS.Workbook();
@@ -1686,6 +1704,11 @@
         return cols[key] ? row.getCell(cols[key]).value : null;
       }
 
+      function getNth(key, index) {
+        var matches = colsAll[key] || [];
+        return matches[index] ? row.getCell(matches[index]).value : null;
+      }
+
       var genes = splitList(get('geneNames'));
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
@@ -1700,10 +1723,18 @@
         hgvsC: hgvsCList[0] || '',
         hgvsP: hgvsPList[0] || '',
         clinvar: get('clinvarClass') || '',
-        zygosity: get('zygosity') || '',
-        vaf: get('vaf') || '',
-        dp: get('readDepths') || '',
-        ad: get('alleleDepths') || ''
+        sample1: {
+          zygosity: getNth('zygosity', 0) || '',
+          vaf: getNth('vaf', 0) || '',
+          dp: getNth('readDepths', 0) || '',
+          ad: getNth('alleleDepths', 0) || ''
+        },
+        sample2: {
+          zygosity: getNth('zygosity', 1) || '',
+          vaf: getNth('vaf', 1) || '',
+          dp: getNth('readDepths', 1) || '',
+          ad: getNth('alleleDepths', 1) || ''
+        }
       });
     });
 
@@ -1740,10 +1771,10 @@
       outsheet.getRow(currentRow).getCell(4).value = v.hgvsC;
       outsheet.getRow(currentRow).getCell(5).value = v.hgvsP;
       outsheet.getRow(currentRow).getCell(6).value = 'P';
-      outsheet.getRow(currentRow).getCell(7).value = v.zygosity.indexOf('Heterozygous') !== -1 ? 'HET' : (v.zygosity.indexOf('Homozygous') !== -1 ? 'HOM' : '');
-      outsheet.getRow(currentRow).getCell(8).value = v.dp;
-      outsheet.getRow(currentRow).getCell(9).value = v.vaf;
-      outsheet.getRow(currentRow).getCell(10).value = v.ad;
+      outsheet.getRow(currentRow).getCell(7).value = abbreviateZygosity(v.sample1.zygosity, []);
+      outsheet.getRow(currentRow).getCell(8).value = v.sample1.dp;
+      outsheet.getRow(currentRow).getCell(9).value = v.sample1.vaf;
+      outsheet.getRow(currentRow).getCell(10).value = v.sample1.ad;
       outsheet.getRow(currentRow).getCell(15).value = v.clinvar;
       currentRow++;
     });
@@ -1773,10 +1804,10 @@
       outsheet.getRow(currentRow).getCell(4).value = v.hgvsC;
       outsheet.getRow(currentRow).getCell(5).value = v.hgvsP;
       outsheet.getRow(currentRow).getCell(6).value = 'P';
-      outsheet.getRow(currentRow).getCell(7).value = v.zygosity.indexOf('Heterozygous') !== -1 ? 'HET' : (v.zygosity.indexOf('Homozygous') !== -1 ? 'HOM' : '');
-      outsheet.getRow(currentRow).getCell(8).value = v.dp;
-      outsheet.getRow(currentRow).getCell(9).value = v.vaf;
-      outsheet.getRow(currentRow).getCell(10).value = v.ad;
+      outsheet.getRow(currentRow).getCell(7).value = abbreviateZygosity(v.sample2.zygosity, []);
+      outsheet.getRow(currentRow).getCell(8).value = v.sample2.dp;
+      outsheet.getRow(currentRow).getCell(9).value = v.sample2.vaf;
+      outsheet.getRow(currentRow).getCell(10).value = v.sample2.ad;
       outsheet.getRow(currentRow).getCell(15).value = v.clinvar;
       currentRow++;
     });
@@ -2059,13 +2090,9 @@
       var previewBtn = document.createElement('button');
       previewBtn.className = 'batch-item-btn' + (idx === variantPreviewIdx ? ' active' : '');
       previewBtn.textContent = idx === variantPreviewIdx ? 'Previewing' : 'Preview';
-      previewBtn.disabled = !!item.error || item.isCoupleConsolidation;
-      if (!item.isCoupleConsolidation) {
-        previewBtn.addEventListener('click', function () { selectBatchPreview(idx); });
-      }
-      if (!item.isCoupleConsolidation) {
-        div.appendChild(previewBtn);
-      }
+      previewBtn.disabled = !!item.error;
+      previewBtn.addEventListener('click', function () { selectBatchPreview(idx); });
+      div.appendChild(previewBtn);
 
       var dlBtn = document.createElement('button');
       dlBtn.className = 'batch-item-btn';
@@ -2131,11 +2158,12 @@
           if (isCoupleFile) {
             // Use couple consolidation
             var fileName = file.name.replace(/\.[^.]+$/, '');
+            var result = processVarSeqWorkbook(workbook);
             return buildCoupleConsolidatedExcel(workbook).then(function (buffer) {
               return {
                 fileName: file.name,
-                rows: [],
-                runName: '',
+                rows: result.rows,
+                runName: result.runName,
                 title: 'LISTED VARIANTS FOR ' + fileName,
                 loadedAt: new Date().toLocaleDateString(),
                 error: null,
