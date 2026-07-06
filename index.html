@@ -1367,6 +1367,12 @@
     return String(value);
   }
 
+  // Returns the hyperlink target of a cell value when ExcelJS parsed it as a
+  // { text, hyperlink } cell, so it can be preserved through to the export.
+  function cellHyperlink(value) {
+    return (value != null && typeof value === 'object' && value.hyperlink) ? value.hyperlink : null;
+  }
+
   function splitList(value) {
     if (value == null) return [];
     return String(value).split(',').map(function (s) { return s.trim(); });
@@ -1887,6 +1893,9 @@
       function get(key) {
         return cols[key] ? cellText(row.getCell(cols[key]).value) : null;
       }
+      function getRaw(key) {
+        return cols[key] ? row.getCell(cols[key]).value : null;
+      }
       function getNth(key, index) {
         var matches = colsAll[key] || [];
         return matches[index] ? cellText(row.getCell(matches[index]).value) : null;
@@ -1906,6 +1915,7 @@
       var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
 
       var chrPos = get('chrPosCombined');
+      var chrPosHyperlink = cellHyperlink(getRaw('chrPosCombined'));
       if (!chrPos && get('variantChr')) chrPos = get('variantChr') + ':' + get('variantPos');
       var refAlt = get('refAltCombined');
       if (!refAlt && (get('variantRef') || get('variantAlt'))) refAlt = (get('variantRef') || '') + '/' + (get('variantAlt') || '');
@@ -1913,6 +1923,7 @@
       rows.push({
         sNo: '',
         chrPos: chrPos || '',
+        _chrPosHyperlink: chrPosHyperlink,
         refAlt: refAlt || '',
         gene: gene,
         variant: variant,
@@ -1996,6 +2007,7 @@
     COUPLE_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
 
     var franklinColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
+    var chrPosColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'chrPos'; });
     var homoColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
       if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
       return acc;
@@ -2015,6 +2027,9 @@
       sectionRows.forEach(function (row, i) {
         var dataRow = sheet.getRow(headerRowIdx + 1 + i);
         COUPLE_EXPORT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+        if (chrPosColIdx >= 0 && row._chrPosHyperlink && row.chrPos) {
+          dataRow.getCell(chrPosColIdx + 1).value = { text: row.chrPos, hyperlink: row._chrPosHyperlink };
+        }
         if (franklinColIdx >= 0) {
           var fColor = row.franklinColorOverride || franklinColor(row.franklin);
           if (fColor) {
@@ -2179,6 +2194,18 @@
             });
             fWrapper.appendChild(colorPick);
             td.appendChild(fWrapper);
+          } else if (c.key === 'chrPos' && row._chrPosHyperlink) {
+            var cpWrapper = document.createElement('div');
+            cpWrapper.className = 'franklin-cell';
+            cpWrapper.appendChild(input);
+            var cpLink = document.createElement('a');
+            cpLink.href = row._chrPosHyperlink;
+            cpLink.target = '_blank'; cpLink.rel = 'noopener noreferrer';
+            cpLink.className = 'franklin-link';
+            cpLink.textContent = '↗';
+            cpLink.title = 'Open locus link from the source file';
+            cpWrapper.appendChild(cpLink);
+            td.appendChild(cpWrapper);
           } else {
             td.appendChild(input);
           }
