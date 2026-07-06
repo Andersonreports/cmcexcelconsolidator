@@ -1102,68 +1102,70 @@
     { key: 'revel', header: 'REVEL SCORE' },
   ];
 
-  // Couple-mode preview grid — one row per variant with both partners' genotype
-  // fields side by side. At export time buildCoupleVariantExcel() splits this
-  // into two per-sample sections (only the partner who carries the variant
-  // gets their genotype columns filled) to match the couple template.
-  var COUPLE_VARIANT_COLUMNS = [
-    { key: 'sNo', header: 'S.NO' },
-    { key: 'chrPos', header: 'CHR:POS' },
-    { key: 'refAlt', header: 'REF/ALT' },
-    { key: 'gene', header: 'GENE' },
-    { key: 'variant', header: 'HGVS c.' },
-    { key: 'proteinPos', header: 'HGVS p.' },
+  // Flat column list matching the couple reference template exactly — same
+  // order and header text as the target export, used for BOTH the two-section
+  // Excel export (buildCoupleVariantExcel) and the preview grid (below, with
+  // a leading S.NO column added). Keeping one source of truth means the
+  // on-screen grid can never drift out of sync with what gets exported.
+  var COUPLE_EXPORT_COLUMNS = [
+    { key: 'chrPos', header: 'Chr:Pos' },
+    { key: 'refAlt', header: 'Ref/Alt' },
+    { key: 'gene', header: 'Gene Names' },
+    { key: 'variant', header: 'HGVS c. (Clinically Relevant)' },
+    { key: 'proteinPos', header: 'HGVS p. (Clinically Relevant)' },
     { key: 'franklin', header: 'FRANKLIN CLASSIFICATION' },
-    { key: 'zygosity1', header: 'ZYGOSITY (Sample 1)' },
-    { key: 'readDepths1', header: 'DP (Sample 1)' },
-    { key: 'vaf1', header: 'VAF (Sample 1)' },
-    { key: 'alleleDepths1', header: 'AD (Sample 1)' },
-    { key: 'zygosity2', header: 'ZYGOSITY (Sample 2)' },
-    { key: 'readDepths2', header: 'DP (Sample 2)' },
-    { key: 'vaf2', header: 'VAF (Sample 2)' },
-    { key: 'alleleDepths2', header: 'AD (Sample 2)' },
-    { key: 'clinvar', header: 'CLINVAR' },
-    { key: 'inheritance', header: 'INHERITANCE' },
-    { key: 'omimTitle', header: 'TITLE' },
-    { key: 'omimPhenotypes', header: 'PHENOTYPES' },
-    { key: 'seqOntology', header: 'SEQUENCE ONTOLOGY' },
-    { key: 'transcriptName', header: 'TRANSCRIPT NAME' },
-    { key: 'exonNumber', header: 'EXON NUMBER' },
-    { key: 'clinvarVariantId', header: 'VARIANT ID' },
-    { key: 'omimGeneId', header: 'GENE OMIM ID' },
+    { key: 'zygosity1', header: 'Zygosity' },
+    { key: 'readDepths1', header: 'Read Depths (DP)' },
+    { key: 'vaf1', header: 'Variant Allele Freq' },
+    { key: 'alleleDepths1', header: 'Allelic Depths (AD)' },
+    { key: 'zygosity2', header: 'Zygosity' },
+    { key: 'readDepths2', header: 'Read Depths (DP)' },
+    { key: 'vaf2', header: 'Variant Allele Freq' },
+    { key: 'alleleDepths2', header: 'Allelic Depths (AD)' },
+    { key: 'clinvar', header: 'CLINVAR Classification' },
+    { key: 'inheritance', header: 'Inheritance' },
+    { key: 'omimTitle', header: 'Title' },
+    { key: 'omimPhenotypes', header: 'Phenotypes' },
+    { key: 'seqOntology', header: 'Sequence Ontology (Combined)' },
+    { key: 'transcriptName', header: 'Transcript Name (Clinically Relevant)' },
+    { key: 'exonNumber', header: 'Exon Number (Clinically Relevant)' },
+    { key: 'clinvarVariantId', header: 'Variant ID' },
+    { key: 'omimGeneId', header: 'Gene OMIM ID' },
     { key: 'omimIdField', header: 'OMIM ID' },
-    { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
-    { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
-    { key: 'gnomadGenome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
-    { key: 'gnomadGenome4SAMale', header: 'GNOM AD SA V4 - MALE' },
-    { key: 'gnomadExome4Count', header: 'GNOM AD EXOME ALL V4' },
-    { key: 'gnomadExome4SA', header: 'GNOM AD EXOME SA V4' },
-    { key: 'gnomadExome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
-    { key: 'gnomadExome4SAMale', header: 'GNOM AD SA V4 - MALE' },
-    { key: 'gnomadGenome3AC', header: 'GNOM AD all V3' },
-    { key: 'gnomadGenome3Male', header: 'gnomAD(MALE)' },
-    { key: 'gnomadGenome3Female', header: 'Gnom AD FEMALE' },
-    { key: 'genomeAsia', header: 'genome asia' },
-    { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
-    { key: 'inhouse947', header: 'INHOUSE - 947' },
-    { key: 'inhouse595', header: 'INHOUSE - 595' },
-    { key: 'inhouseGM98', header: 'INHOUSE - GM 98' },
-    { key: 'inhouseGM535', header: 'INHOUSE - GM 535' },
-    { key: 'inhouseGM343', header: 'INHOUSE - GM 343' },
-    { key: 'inhouseGM669', header: 'INHOUSE - GM 669' },
-    { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
-    { key: 'spliceGeneSplicer', header: 'GENESPLICER' },
-    { key: 'spliceMaxEntScan', header: 'MAXENTSCAN' },
-    { key: 'spliceNNSplice', header: 'NNSPLICE' },
-    { key: 'splicePWM', header: 'PWM' },
-    { key: 'conservationGerp', header: 'GERP++' },
-    { key: 'conservationPhyloP', header: 'PHYLOP' },
-    { key: 'siftMammals', header: 'SIFT (MAMMALS)' },
-    { key: 'polyphenMammals', header: 'POLYPHEN2 (MAMMALS)' },
-    { key: 'dbnsfpSift', header: 'SIFT PRED' },
-    { key: 'dbnsfpLrt', header: 'LRT PRED' },
-    { key: 'dbnsfpMutTaster', header: 'MUTATIONTASTER PRED' },
+    { key: 'gnomadGenome4Count', header: 'Allele Count' },
+    { key: 'gnomadGenome4SA', header: 'South Asian Allele Count' },
+    { key: 'gnomadGenome4SAHomo', header: 'South Asian Homozygous Count' },
+    { key: 'gnomadGenome4SAMale', header: 'South Asian Male Allele Count' },
+    { key: 'gnomadExome4Count', header: 'Allele Count' },
+    { key: 'gnomadExome4SA', header: 'South Asian Allele Count' },
+    { key: 'gnomadExome4SAHomo', header: 'South Asian Homozygous Count' },
+    { key: 'gnomadExome4SAMale', header: 'South Asian Male Allele Count' },
+    { key: 'gnomadGenome3AC', header: 'Alt Allele Count (AC)' },
+    { key: 'gnomadGenome3Male', header: 'South Asian Male Allele Count (AC_SAS_XY)' },
+    { key: 'gnomadGenome3Female', header: 'South Asian Female Allele Count (AC_SAS_XX)' },
+    { key: 'genomeAsia', header: 'South Asian Alt Allele Counts (AC_SAS)' },
+    { key: 'gnomadExome2', header: 'South Asian Allele Count (AC_SAS)' },
+    { key: 'inhouse947', header: 'Inhouse  947  - Aug2023' },
+    { key: 'inhouse595', header: 'Inhouse  595  ' },
+    { key: 'inhouseGM98', header: 'inhouse - 98 - ' },
+    { key: 'inhouseGM535', header: 'inhouse_535_' },
+    { key: 'inhouseGM343', header: 'Inhouse_343_' },
+    { key: 'inhouseGM669', header: 'Inhouse_669' },
+    { key: 'alphaMissense', header: 'AlphaMissense Classification' },
+    { key: 'spliceGeneSplicer', header: 'GeneSplicer Prediction' },
+    { key: 'spliceMaxEntScan', header: 'MaxEntScan Prediction' },
+    { key: 'spliceNNSplice', header: 'NNSplice Prediction' },
+    { key: 'splicePWM', header: 'PWM Prediction' },
+    { key: 'conservationGerp', header: 'GERP++ Prediction (Mammals)' },
+    { key: 'conservationPhyloP', header: 'PhyloP Prediction (Mammals)' },
+    { key: 'siftMammals', header: 'SIFT Prediction (Mammals)' },
+    { key: 'polyphenMammals', header: 'PolyPhen2 Prediction (Mammals)' },
+    { key: 'dbnsfpSift', header: 'SIFT Pred' },
+    { key: 'dbnsfpLrt', header: 'LRT Pred' },
+    { key: 'dbnsfpMutTaster', header: 'MutationTaster Pred' },
   ];
+
+  var COUPLE_VARIANT_COLUMNS = [{ key: 'sNo', header: 'S.NO' }].concat(COUPLE_EXPORT_COLUMNS);
 
   function getVariantColumns(reportType) {
     if (reportType === 'single') return SINGLE_VARIANT_COLUMNS;
@@ -1350,6 +1352,19 @@
       matches.push(c);
     }
     return matches;
+  }
+
+  // ExcelJS returns rich-text/hyperlink cells as objects (e.g. { richText: [...] }
+  // or { text, hyperlink }) instead of plain strings — normalize those to text
+  // so they don't end up rendered as "[object Object]".
+  function cellText(value) {
+    if (value == null || typeof value !== 'object') return value;
+    if (Array.isArray(value.richText)) {
+      return value.richText.map(function (rt) { return rt.text || ''; }).join('');
+    }
+    if (value.text != null) return value.text;
+    if (value.result != null) return value.result;
+    return String(value);
   }
 
   function splitList(value) {
@@ -1760,7 +1775,7 @@
       debugRowsChecked++;
 
       function get(key) {
-        return cols[key] ? row.getCell(cols[key]).value : null;
+        return cols[key] ? cellText(row.getCell(cols[key]).value) : null;
       }
 
       var genes = splitList(get('geneNames'));
@@ -1870,11 +1885,11 @@
       if (r <= 2) return;
 
       function get(key) {
-        return cols[key] ? row.getCell(cols[key]).value : null;
+        return cols[key] ? cellText(row.getCell(cols[key]).value) : null;
       }
       function getNth(key, index) {
         var matches = colsAll[key] || [];
-        return matches[index] ? row.getCell(matches[index]).value : null;
+        return matches[index] ? cellText(row.getCell(matches[index]).value) : null;
       }
 
       var genes = splitList(get('geneNames'));
@@ -1971,67 +1986,6 @@
       sample2Name: extractSampleName(String(groupRow.getCell(7).value || '')),
     };
   }
-
-  // Flat column list backing the two per-sample sections of the couple Excel
-  // export. Both sections use the exact same columns/order — only the row
-  // subset differs (filtered by which partner carries each variant).
-  var COUPLE_EXPORT_COLUMNS = [
-    { key: 'chrPos', header: 'Chr:Pos' },
-    { key: 'refAlt', header: 'Ref/Alt' },
-    { key: 'gene', header: 'Gene Names' },
-    { key: 'variant', header: 'HGVS c. (Clinically Relevant)' },
-    { key: 'proteinPos', header: 'HGVS p. (Clinically Relevant)' },
-    { key: 'franklin', header: 'FRANKLIN CLASSIFICATION' },
-    { key: 'zygosity1', header: 'Zygosity' },
-    { key: 'readDepths1', header: 'Read Depths (DP)' },
-    { key: 'vaf1', header: 'Variant Allele Freq' },
-    { key: 'alleleDepths1', header: 'Allelic Depths (AD)' },
-    { key: 'zygosity2', header: 'Zygosity' },
-    { key: 'readDepths2', header: 'Read Depths (DP)' },
-    { key: 'vaf2', header: 'Variant Allele Freq' },
-    { key: 'alleleDepths2', header: 'Allelic Depths (AD)' },
-    { key: 'clinvar', header: 'CLINVAR Classification' },
-    { key: 'inheritance', header: 'Inheritance' },
-    { key: 'omimTitle', header: 'Title' },
-    { key: 'omimPhenotypes', header: 'Phenotypes' },
-    { key: 'seqOntology', header: 'Sequence Ontology (Combined)' },
-    { key: 'transcriptName', header: 'Transcript Name (Clinically Relevant)' },
-    { key: 'exonNumber', header: 'Exon Number (Clinically Relevant)' },
-    { key: 'clinvarVariantId', header: 'Variant ID' },
-    { key: 'omimGeneId', header: 'Gene OMIM ID' },
-    { key: 'omimIdField', header: 'OMIM ID' },
-    { key: 'gnomadGenome4Count', header: 'Allele Count' },
-    { key: 'gnomadGenome4SA', header: 'South Asian Allele Count' },
-    { key: 'gnomadGenome4SAHomo', header: 'South Asian Homozygous Count' },
-    { key: 'gnomadGenome4SAMale', header: 'South Asian Male Allele Count' },
-    { key: 'gnomadExome4Count', header: 'Allele Count' },
-    { key: 'gnomadExome4SA', header: 'South Asian Allele Count' },
-    { key: 'gnomadExome4SAHomo', header: 'South Asian Homozygous Count' },
-    { key: 'gnomadExome4SAMale', header: 'South Asian Male Allele Count' },
-    { key: 'gnomadGenome3AC', header: 'Alt Allele Count (AC)' },
-    { key: 'gnomadGenome3Male', header: 'South Asian Male Allele Count (AC_SAS_XY)' },
-    { key: 'gnomadGenome3Female', header: 'South Asian Female Allele Count (AC_SAS_XX)' },
-    { key: 'genomeAsia', header: 'South Asian Alt Allele Counts (AC_SAS)' },
-    { key: 'gnomadExome2', header: 'South Asian Allele Count (AC_SAS)' },
-    { key: 'inhouse947', header: 'Inhouse  947  - Aug2023' },
-    { key: 'inhouse595', header: 'Inhouse  595  ' },
-    { key: 'inhouseGM98', header: 'inhouse - 98 - ' },
-    { key: 'inhouseGM535', header: 'inhouse_535_' },
-    { key: 'inhouseGM343', header: 'Inhouse_343_' },
-    { key: 'inhouseGM669', header: 'Inhouse_669' },
-    { key: 'alphaMissense', header: 'AlphaMissense Classification' },
-    { key: 'spliceGeneSplicer', header: 'GeneSplicer Prediction' },
-    { key: 'spliceMaxEntScan', header: 'MaxEntScan Prediction' },
-    { key: 'spliceNNSplice', header: 'NNSplice Prediction' },
-    { key: 'splicePWM', header: 'PWM Prediction' },
-    { key: 'conservationGerp', header: 'GERP++ Prediction (Mammals)' },
-    { key: 'conservationPhyloP', header: 'PhyloP Prediction (Mammals)' },
-    { key: 'siftMammals', header: 'SIFT Prediction (Mammals)' },
-    { key: 'polyphenMammals', header: 'PolyPhen2 Prediction (Mammals)' },
-    { key: 'dbnsfpSift', header: 'SIFT Pred' },
-    { key: 'dbnsfpLrt', header: 'LRT Pred' },
-    { key: 'dbnsfpMutTaster', header: 'MutationTaster Pred' },
-  ];
 
   // Builds the two-section couple Excel: section 1 lists only variants
   // partner 1 carries (zygosity1 set), section 2 only those partner 2
