@@ -43,7 +43,7 @@
     background: var(--bg-page);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; }
+  html, body { margin: 0; width: 100%; overflow-x: hidden; }
   h1, h2 { font-weight: 600; color: var(--ink); margin: 0; }
   p { margin: 0; }
 
@@ -53,11 +53,13 @@
 
   .top-bar {
     background: #87ceeb; border-bottom: 1px solid var(--border);
-    padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    padding: 16px clamp(16px, 3vw, 24px); display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   }
+  .top-bar-title { font-size: clamp(18px, 2.4vw, 24px); font-weight: 700; color: var(--ink); }
 
   .sidebar {
-    width: 280px; flex: 0 0 280px; border-right: 1px solid var(--border);
+    width: clamp(220px, 22vw, 280px); flex: 0 0 clamp(220px, 22vw, 280px); border-right: 1px solid var(--border);
     background: var(--bg-page);
     padding: 24px 16px; display: flex; flex-direction: column; gap: 32px;
     position: sticky; top: 0; height: calc(100vh - 60px); overflow-y: auto;
@@ -91,7 +93,7 @@
   .nav-item.hidden-report { display: none; }
   .nav-item[hidden], .tools-label[hidden] { display: none !important; }
 
-  .main-content { flex: 1; min-width: 0; padding: 32px 40px 48px; }
+  .main-content { flex: 1; min-width: 0; padding: clamp(20px, 3vw, 32px) clamp(16px, 4vw, 40px) 48px; }
 
   .panel-header {
     margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
@@ -240,7 +242,7 @@
   .batch-item-count.error-text { color: var(--error); }
   .batch-item-title {
     font: 13px/1 var(--sans); padding: 8px 10px; border: 1px solid var(--border);
-    border-radius: 4px; background: var(--bg); color: var(--ink); width: 260px; transition: border-color .2s;
+    border-radius: 4px; background: var(--bg); color: var(--ink); width: 100%; max-width: 260px; transition: border-color .2s;
   }
   .batch-item-title:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--accent-soft); }
   .batch-item-btn {
@@ -301,9 +303,20 @@
       flex-direction: row; align-items: center; justify-content: space-between; gap: 16px;
       padding: 16px 18px;
     }
-    .sidebar-nav { flex-direction: row; }
+    .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
     .sidebar-nav-label { display: none; }
     .main-content { padding: 24px 20px 48px; }
+  }
+
+  @media (max-width: 600px) {
+    .batch-item { grid-template-columns: 1fr; }
+    .batch-item-num { display: none; }
+    .batch-item-title { max-width: 100%; }
+    .mapping-list-row { flex-direction: column; gap: 4px; }
+    .mapping-list-col { flex: 0 0 auto; }
+    .title-builder { gap: 12px; }
+    .action-row button { flex: 1 1 auto; }
+    .report-type-selector { margin-left: 0; }
   }
 </style>
 </head>
@@ -311,7 +324,7 @@
 <div class="app-shell">
   <header class="top-bar">
     <div style="display: flex; align-items: center; gap: 16px;">
-      <span style="font-size: 24px; font-weight: 700; color: var(--ink);">Anderson-Bioinfo Excel Consolidator</span>
+      <span class="top-bar-title">Anderson-Bioinfo Excel Consolidator</span>
     </div>
     <div class="report-type-selector">
       <select id="report-type-select" class="report-type-select">
