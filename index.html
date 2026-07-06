@@ -1085,7 +1085,7 @@
     { key: 'inhouseGM535', header: 'INHOUSE - GM 535' },
     { key: 'inhouseGM343', header: 'INHOUSE - GM 343' },
     { key: 'inhouseGM669', header: 'INHOUSE - GM 669' },
-    { key: 'vaf', header: 'VAF(%)' },
+    { key: 'vafRaw', header: 'VAF(%)' },
     { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
     { key: 'readDepths', header: 'DEP(X)' },
     { key: 'omimTitle', header: 'OMIM PHENOTYPE' },
@@ -1108,8 +1108,73 @@
     { key: 'revel', header: 'REVEL SCORE' },
   ];
 
+  // Couple-mode preview grid — one row per variant with both partners' genotype
+  // fields side by side. At export time buildCoupleVariantExcel() splits this
+  // into two per-sample sections (only the partner who carries the variant
+  // gets their genotype columns filled) to match the couple template.
+  var COUPLE_VARIANT_COLUMNS = [
+    { key: 'sNo', header: 'S.NO' },
+    { key: 'chrPos', header: 'CHR:POS' },
+    { key: 'refAlt', header: 'REF/ALT' },
+    { key: 'gene', header: 'GENE' },
+    { key: 'variant', header: 'HGVS c.' },
+    { key: 'proteinPos', header: 'HGVS p.' },
+    { key: 'franklin', header: 'FRANKLIN CLASSIFICATION' },
+    { key: 'zygosity1', header: 'ZYGOSITY (Sample 1)' },
+    { key: 'readDepths1', header: 'DP (Sample 1)' },
+    { key: 'vaf1', header: 'VAF (Sample 1)' },
+    { key: 'alleleDepths1', header: 'AD (Sample 1)' },
+    { key: 'zygosity2', header: 'ZYGOSITY (Sample 2)' },
+    { key: 'readDepths2', header: 'DP (Sample 2)' },
+    { key: 'vaf2', header: 'VAF (Sample 2)' },
+    { key: 'alleleDepths2', header: 'AD (Sample 2)' },
+    { key: 'clinvar', header: 'CLINVAR' },
+    { key: 'inheritance', header: 'INHERITANCE' },
+    { key: 'omimTitle', header: 'TITLE' },
+    { key: 'omimPhenotypes', header: 'PHENOTYPES' },
+    { key: 'seqOntology', header: 'SEQUENCE ONTOLOGY' },
+    { key: 'transcriptName', header: 'TRANSCRIPT NAME' },
+    { key: 'exonNumber', header: 'EXON NUMBER' },
+    { key: 'clinvarVariantId', header: 'VARIANT ID' },
+    { key: 'omimGeneId', header: 'GENE OMIM ID' },
+    { key: 'omimIdField', header: 'OMIM ID' },
+    { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
+    { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
+    { key: 'gnomadGenome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadGenome4SAMale', header: 'GNOM AD SA V4 - MALE' },
+    { key: 'gnomadExome4Count', header: 'GNOM AD EXOME ALL V4' },
+    { key: 'gnomadExome4SA', header: 'GNOM AD EXOME SA V4' },
+    { key: 'gnomadExome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadExome4SAMale', header: 'GNOM AD SA V4 - MALE' },
+    { key: 'gnomadGenome3AC', header: 'GNOM AD all V3' },
+    { key: 'gnomadGenome3Male', header: 'gnomAD(MALE)' },
+    { key: 'gnomadGenome3Female', header: 'Gnom AD FEMALE' },
+    { key: 'genomeAsia', header: 'genome asia' },
+    { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
+    { key: 'inhouse947', header: 'INHOUSE - 947' },
+    { key: 'inhouse595', header: 'INHOUSE - 595' },
+    { key: 'inhouseGM98', header: 'INHOUSE - GM 98' },
+    { key: 'inhouseGM535', header: 'INHOUSE - GM 535' },
+    { key: 'inhouseGM343', header: 'INHOUSE - GM 343' },
+    { key: 'inhouseGM669', header: 'INHOUSE - GM 669' },
+    { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
+    { key: 'spliceGeneSplicer', header: 'GENESPLICER' },
+    { key: 'spliceMaxEntScan', header: 'MAXENTSCAN' },
+    { key: 'spliceNNSplice', header: 'NNSPLICE' },
+    { key: 'splicePWM', header: 'PWM' },
+    { key: 'conservationGerp', header: 'GERP++' },
+    { key: 'conservationPhyloP', header: 'PHYLOP' },
+    { key: 'siftMammals', header: 'SIFT (MAMMALS)' },
+    { key: 'polyphenMammals', header: 'POLYPHEN2 (MAMMALS)' },
+    { key: 'dbnsfpSift', header: 'SIFT PRED' },
+    { key: 'dbnsfpLrt', header: 'LRT PRED' },
+    { key: 'dbnsfpMutTaster', header: 'MUTATIONTASTER PRED' },
+  ];
+
   function getVariantColumns(reportType) {
-    return reportType === 'single' ? SINGLE_VARIANT_COLUMNS : VARIANT_COLUMNS;
+    if (reportType === 'single') return SINGLE_VARIANT_COLUMNS;
+    if (reportType === 'couple') return COUPLE_VARIANT_COLUMNS;
+    return VARIANT_COLUMNS;
   }
 
   // Reference only - shown in the "Check column mapping" bar so it's easy to
@@ -1233,6 +1298,26 @@
     variantPos: { header: 'Pos' },
     variantRef: { header: 'Ref' },
     variantAlt: { header: 'Alt' },
+    // Couple-mode: some VarSeq exports pre-combine coordinates into one column each.
+    chrPosCombined: { header: 'Chr:Pos' },
+    refAltCombined: { header: 'Ref/Alt' },
+    seqOntology: { header: 'Sequence Ontology (Combined)' },
+    transcriptName: { header: 'Transcript Name (Clinically Relevant)' },
+    exonNumber: { header: 'Exon Number (Clinically Relevant)' },
+    clinvarVariantId: { header: 'Variant ID', groupIncludes: ['ClinVar'] },
+    omimGeneId: { header: 'Gene OMIM ID', groupIncludes: ['OMIM'] },
+    omimIdField: { header: 'OMIM ID', groupIncludes: ['OMIM'] },
+    spliceGeneSplicer: { header: 'GeneSplicer Prediction' },
+    spliceMaxEntScan: { header: 'MaxEntScan Prediction' },
+    spliceNNSplice: { header: 'NNSplice Prediction' },
+    splicePWM: { header: 'PWM Prediction' },
+    conservationGerp: { header: 'GERP++ Prediction (Mammals)' },
+    conservationPhyloP: { header: 'PhyloP Prediction (Mammals)' },
+    siftMammals: { header: 'SIFT Prediction (Mammals)' },
+    polyphenMammals: { header: 'PolyPhen2 Prediction (Mammals)' },
+    dbnsfpSift: { header: 'SIFT Pred', groupIncludes: ['dbNSFP'] },
+    dbnsfpLrt: { header: 'LRT Pred', groupIncludes: ['dbNSFP'] },
+    dbnsfpMutTaster: { header: 'MutationTaster Pred', groupIncludes: ['dbNSFP'] },
   };
 
   // Most clinically severe first. Rows whose winning entry lands on Benign
@@ -1723,6 +1808,7 @@
         inhouseCount: get('inhouseCount'),
         inhouseSampleNames: get('inhouseSampleNames'),
         vaf: formatVafPercent(get('vaf')),
+        vafRaw: get('vaf'),
         alleleDepths: get('alleleDepths'),
         readDepths: get('readDepths'),
         omimTitle: get('omimTitle'),
@@ -1765,16 +1851,19 @@
     return { rows: rows, runName: runName };
   }
 
-  // Consolidate couple VarSeq Excel into separate samples with headers
-  function buildCoupleConsolidatedExcel(workbook, customTitle) {
+  // Couple-mode extraction: one row per variant with both partners' genotype
+  // fields (zygosity/DP/VAF/AD) kept side by side, plus the shared annotation
+  // fields. Sample columns are located by position (first 4-column sample
+  // block, second 4-column sample block) via findVarSeqColumns' carry-forward
+  // group matching, exactly like the couple-file detection already does.
+  function processCoupleVarSeqWorkbook(workbook) {
     var sheet = workbook.worksheets[0];
-    if (!sheet) throw new Error('No worksheet found');
+    if (!sheet) throw new Error('No worksheet found in the uploaded file.');
 
     var groupRow = sheet.getRow(1);
     var headerRow = sheet.getRow(2);
     var colCount = sheet.columnCount;
 
-    // Find shared annotation columns and all sample columns
     var cols = {};
     var colsAll = {};
     Object.keys(VARSEQ_COLUMN_SPECS).forEach(function (key) {
@@ -1782,29 +1871,13 @@
       cols[key] = colsAll[key][0] || null;
     });
 
-    var outbook = new ExcelJS.Workbook();
-    var outsheet = outbook.addWorksheet('Listed Variants');
-
-    // Column widths
-    for (var i = 1; i <= 15; i++) {
-      outsheet.getColumn(i).width = 18;
-    }
-
-    var outputHeaders = [
-      'Chr:Pos', 'Ref/Alt', 'Gene Names', 'HGVS c. (Clinically Relevant)',
-      'HGVS p. (Clinically Relevant)', 'FRANKLIN CLASSIFICATION', 'Zygosity',
-      'Read Depths (DP)', 'Variant Allele Freq', 'Allelic Depths (AD)', 'Zygosity',
-      'Read Depths (DP)', 'Variant Allele Freq', 'Allelic Depths (AD)', 'CLINVAR Classification'
-    ];
-
-    var variants = [];
+    var rows = [];
     sheet.eachRow(function (row, r) {
       if (r <= 2) return;
 
       function get(key) {
         return cols[key] ? row.getCell(cols[key]).value : null;
       }
-
       function getNth(key, index) {
         var matches = colsAll[key] || [];
         return matches[index] ? row.getCell(matches[index]).value : null;
@@ -1813,33 +1886,84 @@
       var genes = splitList(get('geneNames'));
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
-
       var gene = genes[0] || '';
       if (!gene) return;
 
-      variants.push({
-        chrPos: get('variantChr') ? (get('variantChr') + ':' + get('variantPos')) : '',
-        refAlt: (get('variantRef') || '') + '/' + (get('variantAlt') || ''),
+      var rawZygosity1 = getNth('zygosity', 0);
+      var rawZygosity2 = getNth('zygosity', 1);
+      if (!rawZygosity1 && !rawZygosity2) return;
+
+      var variant = stripHgvsPrefix(hgvsCList[0] || '');
+      var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
+
+      var chrPos = get('chrPosCombined');
+      if (!chrPos && get('variantChr')) chrPos = get('variantChr') + ':' + get('variantPos');
+      var refAlt = get('refAltCombined');
+      if (!refAlt && (get('variantRef') || get('variantAlt'))) refAlt = (get('variantRef') || '') + '/' + (get('variantAlt') || '');
+
+      rows.push({
+        sNo: '',
+        chrPos: chrPos || '',
+        refAlt: refAlt || '',
         gene: gene,
-        hgvsC: hgvsCList[0] || '',
-        hgvsP: hgvsPList[0] || '',
+        variant: variant,
+        proteinPos: stripHgvsPrefix(hgvsPList[0] || ''),
+        franklin: lookupFranklin(gene, variant),
+        _franklinUrl: null,
+        zygosity1: abbreviateZygosity(rawZygosity1, inheritanceCodes),
+        readDepths1: getNth('readDepths', 0),
+        vaf1: getNth('vaf', 0),
+        alleleDepths1: getNth('alleleDepths', 0),
+        zygosity2: abbreviateZygosity(rawZygosity2, inheritanceCodes),
+        readDepths2: getNth('readDepths', 1),
+        vaf2: getNth('vaf', 1),
+        alleleDepths2: getNth('alleleDepths', 1),
         clinvar: get('clinvarClass') || '',
-        sample1: {
-          zygosity: getNth('zygosity', 0) || '',
-          vaf: getNth('vaf', 0) || '',
-          dp: getNth('readDepths', 0) || '',
-          ad: getNth('alleleDepths', 0) || ''
-        },
-        sample2: {
-          zygosity: getNth('zygosity', 1) || '',
-          vaf: getNth('vaf', 1) || '',
-          dp: getNth('readDepths', 1) || '',
-          ad: getNth('alleleDepths', 1) || ''
-        }
+        inheritance: inheritanceCodes.join('/'),
+        omimTitle: get('omimTitle'),
+        omimPhenotypes: get('omimPhenotypes'),
+        seqOntology: get('seqOntology'),
+        transcriptName: get('transcriptName'),
+        exonNumber: get('exonNumber'),
+        clinvarVariantId: get('clinvarVariantId'),
+        omimGeneId: get('omimGeneId'),
+        omimIdField: get('omimIdField'),
+        gnomadGenome4Count: get('gnomadGenome4Count'),
+        gnomadGenome4SA: get('gnomadGenome4SA'),
+        gnomadGenome4SAHomo: get('gnomadGenome4SAHomo'),
+        gnomadGenome4SAMale: get('gnomadGenome4SAMale'),
+        gnomadExome4Count: get('gnomadExome4Count'),
+        gnomadExome4SA: get('gnomadExome4SA'),
+        gnomadExome4SAHomo: get('gnomadExome4SAHomo'),
+        gnomadExome4SAMale: get('gnomadExome4SAMale'),
+        gnomadGenome3AC: get('gnomadGenome3AC'),
+        gnomadGenome3Male: get('gnomadGenome3Male'),
+        gnomadGenome3Female: get('gnomadGenome3Female'),
+        genomeAsia: get('genomeAsia'),
+        gnomadExome2: get('gnomadExome2'),
+        inhouse947: get('inhouse947'),
+        inhouse595: get('inhouse595'),
+        inhouseGM98: get('inhouseGM98'),
+        inhouseGM535: get('inhouseGM535'),
+        inhouseGM343: get('inhouseGM343'),
+        inhouseGM669: get('inhouseGM669'),
+        alphaMissense: get('alphaMissense'),
+        spliceGeneSplicer: get('spliceGeneSplicer'),
+        spliceMaxEntScan: get('spliceMaxEntScan'),
+        spliceNNSplice: get('spliceNNSplice'),
+        splicePWM: get('splicePWM'),
+        conservationGerp: get('conservationGerp'),
+        conservationPhyloP: get('conservationPhyloP'),
+        siftMammals: get('siftMammals'),
+        polyphenMammals: get('polyphenMammals'),
+        dbnsfpSift: get('dbnsfpSift'),
+        dbnsfpLrt: get('dbnsfpLrt'),
+        dbnsfpMutTaster: get('dbnsfpMutTaster'),
       });
     });
 
-    // Helper to get sample name from run name
+    rows.forEach(function (row, i) { row.sNo = i + 1; });
+
     function extractSampleName(runName) {
       if (!runName) return 'Sample';
       var match = runName.match(/GEN_T[^_]*_spik_(\d+)[^_]*_(.+?)(?:_\d+)?$/);
@@ -1847,73 +1971,128 @@
       return runName;
     }
 
-    var currentRow = 1;
+    return {
+      rows: rows,
+      sample1Name: extractSampleName(String(groupRow.getCell(3).value || '')),
+      sample2Name: extractSampleName(String(groupRow.getCell(7).value || '')),
+    };
+  }
 
-    // Sample 1 section
-    var title1 = extractSampleName(String(groupRow.getCell(3).value || ''));
-    outsheet.getRow(currentRow).getCell(1).value = 'LISTED VARIANTS FOR ' + title1;
-    outsheet.getRow(currentRow).getCell(1).font = { bold: true, size: 12 };
-    currentRow++;
+  // Flat column list backing the two per-sample sections of the couple Excel
+  // export. Both sections use the exact same columns/order — only the row
+  // subset differs (filtered by which partner carries each variant).
+  var COUPLE_EXPORT_COLUMNS = [
+    { key: 'chrPos', header: 'Chr:Pos' },
+    { key: 'refAlt', header: 'Ref/Alt' },
+    { key: 'gene', header: 'Gene Names' },
+    { key: 'variant', header: 'HGVS c. (Clinically Relevant)' },
+    { key: 'proteinPos', header: 'HGVS p. (Clinically Relevant)' },
+    { key: 'franklin', header: 'FRANKLIN CLASSIFICATION' },
+    { key: 'zygosity1', header: 'Zygosity' },
+    { key: 'readDepths1', header: 'Read Depths (DP)' },
+    { key: 'vaf1', header: 'Variant Allele Freq' },
+    { key: 'alleleDepths1', header: 'Allelic Depths (AD)' },
+    { key: 'zygosity2', header: 'Zygosity' },
+    { key: 'readDepths2', header: 'Read Depths (DP)' },
+    { key: 'vaf2', header: 'Variant Allele Freq' },
+    { key: 'alleleDepths2', header: 'Allelic Depths (AD)' },
+    { key: 'clinvar', header: 'CLINVAR Classification' },
+    { key: 'inheritance', header: 'Inheritance' },
+    { key: 'omimTitle', header: 'Title' },
+    { key: 'omimPhenotypes', header: 'Phenotypes' },
+    { key: 'seqOntology', header: 'Sequence Ontology (Combined)' },
+    { key: 'transcriptName', header: 'Transcript Name (Clinically Relevant)' },
+    { key: 'exonNumber', header: 'Exon Number (Clinically Relevant)' },
+    { key: 'clinvarVariantId', header: 'Variant ID' },
+    { key: 'omimGeneId', header: 'Gene OMIM ID' },
+    { key: 'omimIdField', header: 'OMIM ID' },
+    { key: 'gnomadGenome4Count', header: 'Allele Count' },
+    { key: 'gnomadGenome4SA', header: 'South Asian Allele Count' },
+    { key: 'gnomadGenome4SAHomo', header: 'South Asian Homozygous Count' },
+    { key: 'gnomadGenome4SAMale', header: 'South Asian Male Allele Count' },
+    { key: 'gnomadExome4Count', header: 'Allele Count' },
+    { key: 'gnomadExome4SA', header: 'South Asian Allele Count' },
+    { key: 'gnomadExome4SAHomo', header: 'South Asian Homozygous Count' },
+    { key: 'gnomadExome4SAMale', header: 'South Asian Male Allele Count' },
+    { key: 'gnomadGenome3AC', header: 'Alt Allele Count (AC)' },
+    { key: 'gnomadGenome3Male', header: 'South Asian Male Allele Count (AC_SAS_XY)' },
+    { key: 'gnomadGenome3Female', header: 'South Asian Female Allele Count (AC_SAS_XX)' },
+    { key: 'genomeAsia', header: 'South Asian Alt Allele Counts (AC_SAS)' },
+    { key: 'gnomadExome2', header: 'South Asian Allele Count (AC_SAS)' },
+    { key: 'inhouse947', header: 'Inhouse  947  - Aug2023' },
+    { key: 'inhouse595', header: 'Inhouse  595  ' },
+    { key: 'inhouseGM98', header: 'inhouse - 98 - ' },
+    { key: 'inhouseGM535', header: 'inhouse_535_' },
+    { key: 'inhouseGM343', header: 'Inhouse_343_' },
+    { key: 'inhouseGM669', header: 'Inhouse_669' },
+    { key: 'alphaMissense', header: 'AlphaMissense Classification' },
+    { key: 'spliceGeneSplicer', header: 'GeneSplicer Prediction' },
+    { key: 'spliceMaxEntScan', header: 'MaxEntScan Prediction' },
+    { key: 'spliceNNSplice', header: 'NNSplice Prediction' },
+    { key: 'splicePWM', header: 'PWM Prediction' },
+    { key: 'conservationGerp', header: 'GERP++ Prediction (Mammals)' },
+    { key: 'conservationPhyloP', header: 'PhyloP Prediction (Mammals)' },
+    { key: 'siftMammals', header: 'SIFT Prediction (Mammals)' },
+    { key: 'polyphenMammals', header: 'PolyPhen2 Prediction (Mammals)' },
+    { key: 'dbnsfpSift', header: 'SIFT Pred' },
+    { key: 'dbnsfpLrt', header: 'LRT Pred' },
+    { key: 'dbnsfpMutTaster', header: 'MutationTaster Pred' },
+  ];
 
-    // Sample 1 headers
-    for (var i = 0; i < outputHeaders.length; i++) {
-      var hcell = outsheet.getRow(currentRow).getCell(i + 1);
-      hcell.value = outputHeaders[i];
-      hcell.font = { bold: true };
-      hcell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD3D3D3' } };
+  // Builds the two-section couple Excel: section 1 lists only variants
+  // partner 1 carries (zygosity1 set), section 2 only those partner 2
+  // carries — same column layout for both, per the couple template.
+  function buildCoupleVariantExcel(rows, title1, title2) {
+    var workbook = new ExcelJS.Workbook();
+    var sheet = workbook.addWorksheet('Listed Variants');
+    COUPLE_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
+
+    var franklinColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
+    var homoColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
+      if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
+      return acc;
+    }, []);
+
+    function writeSection(startRow, title, sectionRows) {
+      sheet.getRow(startRow).getCell(1).value = title;
+      sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12 };
+      var headerRowIdx = startRow + 1;
+      var headerRow = sheet.getRow(headerRowIdx);
+      COUPLE_EXPORT_COLUMNS.forEach(function (c, i) {
+        var cell = headerRow.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = { bold: true };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD3D3D3' } };
+      });
+      sectionRows.forEach(function (row, i) {
+        var dataRow = sheet.getRow(headerRowIdx + 1 + i);
+        COUPLE_EXPORT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+        if (franklinColIdx >= 0) {
+          var fColor = row.franklinColorOverride || franklinColor(row.franklin);
+          if (fColor) {
+            dataRow.getCell(franklinColIdx + 1).font = { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } };
+          }
+        }
+        homoColIdxs.forEach(function (colIdx) {
+          var val = row[COUPLE_EXPORT_COLUMNS[colIdx].key];
+          if (val != null && val !== '' && Number(val) > 0) {
+            var cell = dataRow.getCell(colIdx + 1);
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } };
+            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          }
+        });
+      });
+      return headerRowIdx + 1 + sectionRows.length;
     }
-    currentRow++;
 
-    // Sample 1 data rows
-    variants.forEach(function (v) {
-      outsheet.getRow(currentRow).getCell(1).value = v.chrPos;
-      outsheet.getRow(currentRow).getCell(2).value = v.refAlt;
-      outsheet.getRow(currentRow).getCell(3).value = v.gene;
-      outsheet.getRow(currentRow).getCell(4).value = v.hgvsC;
-      outsheet.getRow(currentRow).getCell(5).value = v.hgvsP;
-      outsheet.getRow(currentRow).getCell(6).value = 'P';
-      outsheet.getRow(currentRow).getCell(7).value = abbreviateZygosity(v.sample1.zygosity, []);
-      outsheet.getRow(currentRow).getCell(8).value = v.sample1.dp;
-      outsheet.getRow(currentRow).getCell(9).value = v.sample1.vaf;
-      outsheet.getRow(currentRow).getCell(10).value = v.sample1.ad;
-      outsheet.getRow(currentRow).getCell(15).value = v.clinvar;
-      currentRow++;
-    });
+    var sample1Rows = rows.filter(function (r) { return r.zygosity1; });
+    var sample2Rows = rows.filter(function (r) { return r.zygosity2; });
 
-    currentRow++; // Blank row
+    var nextRow = writeSection(1, title1, sample1Rows);
+    nextRow++; // blank separator row
+    writeSection(nextRow, title2, sample2Rows);
 
-    // Sample 2 section
-    var title2 = extractSampleName(String(groupRow.getCell(7).value || ''));
-    outsheet.getRow(currentRow).getCell(1).value = 'LISTED VARIANTS FOR ' + title2;
-    outsheet.getRow(currentRow).getCell(1).font = { bold: true, size: 12 };
-    currentRow++;
-
-    // Sample 2 headers
-    for (var i = 0; i < outputHeaders.length; i++) {
-      var hcell = outsheet.getRow(currentRow).getCell(i + 1);
-      hcell.value = outputHeaders[i];
-      hcell.font = { bold: true };
-      hcell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD3D3D3' } };
-    }
-    currentRow++;
-
-    // Sample 2 data rows (same variants for consolidation)
-    variants.forEach(function (v) {
-      outsheet.getRow(currentRow).getCell(1).value = v.chrPos;
-      outsheet.getRow(currentRow).getCell(2).value = v.refAlt;
-      outsheet.getRow(currentRow).getCell(3).value = v.gene;
-      outsheet.getRow(currentRow).getCell(4).value = v.hgvsC;
-      outsheet.getRow(currentRow).getCell(5).value = v.hgvsP;
-      outsheet.getRow(currentRow).getCell(6).value = 'P';
-      outsheet.getRow(currentRow).getCell(7).value = abbreviateZygosity(v.sample2.zygosity, []);
-      outsheet.getRow(currentRow).getCell(8).value = v.sample2.dp;
-      outsheet.getRow(currentRow).getCell(9).value = v.sample2.vaf;
-      outsheet.getRow(currentRow).getCell(10).value = v.sample2.ad;
-      outsheet.getRow(currentRow).getCell(15).value = v.clinvar;
-      currentRow++;
-    });
-
-    return outbook.xlsx.writeBuffer();
+    return workbook.xlsx.writeBuffer();
   }
 
   function columnLetter(n) {
@@ -2189,13 +2368,31 @@
       infoDiv.appendChild(countSpan);
       div.appendChild(infoDiv);
 
-      var titleInput = document.createElement('input');
-      titleInput.type = 'text';
-      titleInput.className = 'batch-item-title';
-      titleInput.value = item.title;
-      titleInput.placeholder = 'Report title';
-      titleInput.addEventListener('input', function (e) { variantBatch[idx].title = e.target.value; });
-      div.appendChild(titleInput);
+      if (item.reportType === 'couple') {
+        var title1Input = document.createElement('input');
+        title1Input.type = 'text';
+        title1Input.className = 'batch-item-title';
+        title1Input.value = item.title1 || '';
+        title1Input.placeholder = 'Sample 1 report title';
+        title1Input.addEventListener('input', function (e) { variantBatch[idx].title1 = e.target.value; });
+        div.appendChild(title1Input);
+
+        var title2Input = document.createElement('input');
+        title2Input.type = 'text';
+        title2Input.className = 'batch-item-title';
+        title2Input.value = item.title2 || '';
+        title2Input.placeholder = 'Sample 2 report title';
+        title2Input.addEventListener('input', function (e) { variantBatch[idx].title2 = e.target.value; });
+        div.appendChild(title2Input);
+      } else {
+        var titleInput = document.createElement('input');
+        titleInput.type = 'text';
+        titleInput.className = 'batch-item-title';
+        titleInput.value = item.title;
+        titleInput.placeholder = 'Report title';
+        titleInput.addEventListener('input', function (e) { variantBatch[idx].title = e.target.value; });
+        div.appendChild(titleInput);
+      }
 
       var previewBtn = document.createElement('button');
       previewBtn.className = 'batch-item-btn' + (idx === variantPreviewIdx ? ' active' : '');
@@ -2257,9 +2454,11 @@
     var item = variantBatch[idx];
     if (!item || item.error) return;
 
-    if (item.isCoupleConsolidation && item.excelBuffer) {
-      var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-consolidated.xlsx';
-      downloadBlob(item.excelBuffer, safeName);
+    if (item.reportType === 'couple') {
+      buildCoupleVariantExcel(item.rows, item.title1, item.title2).then(function (buffer) {
+        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
+        downloadBlob(buffer, safeName);
+      });
     } else {
       buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType)).then(function (buffer) {
         var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
@@ -2289,21 +2488,18 @@
                              groupRow.getCell(7).value;
 
           if (isCoupleFile) {
-            // Use couple consolidation
-            var fileName = file.name.replace(/\.[^.]+$/, '');
-            var result = processVarSeqWorkbook(workbook);
-            return buildCoupleConsolidatedExcel(workbook).then(function (buffer) {
-              return {
-                fileName: file.name,
-                rows: result.rows,
-                runName: result.runName,
-                title: 'LISTED VARIANTS FOR ' + fileName,
-                loadedAt: new Date().toLocaleDateString(),
-                error: null,
-                isCoupleConsolidation: true,
-                excelBuffer: buffer
-              };
-            });
+            // Couple mode: one row per variant, both partners' genotype fields
+            // side by side. Export splits this into two per-sample sections.
+            var result = processCoupleVarSeqWorkbook(workbook);
+            return {
+              fileName: file.name,
+              rows: result.rows,
+              runName: '',
+              title1: 'LISTED VARIANTS FOR ' + result.sample1Name,
+              title2: 'LISTED VARIANTS FOR ' + result.sample2Name,
+              loadedAt: new Date().toLocaleDateString(),
+              error: null
+            };
           } else {
             // Use standard VarSeq processing
             var result = processVarSeqWorkbook(workbook);
@@ -2314,8 +2510,7 @@
               runName: result.runName,
               title: autoTitle,
               loadedAt: new Date().toLocaleDateString(),
-              error: null,
-              isCoupleConsolidation: false
+              error: null
             };
           }
         })
@@ -2326,8 +2521,7 @@
             runName: '',
             title: file.name.replace(/\.[^.]+$/, ''),
             loadedAt: new Date().toLocaleDateString(),
-            error: (err && err.message) || 'Failed to read file',
-            isCoupleConsolidation: false
+            error: (err && err.message) || 'Failed to read file'
           };
         });
     });
@@ -2368,7 +2562,7 @@
 
   variantDownloadAllBtn.addEventListener('click', function () {
     var validItems = variantBatch.filter(function (item) {
-      return item.reportType === currentReportType && !item.error && (item.rows.length > 0 || item.excelBuffer);
+      return item.reportType === currentReportType && !item.error && item.rows.length > 0;
     });
     if (!validItems.length) return;
 
@@ -2377,10 +2571,11 @@
 
     var zip = new JSZip();
     Promise.all(validItems.map(function (item) {
-      if (item.isCoupleConsolidation && item.excelBuffer) {
-        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-consolidated.xlsx';
-        zip.file(safeName, item.excelBuffer);
-        return Promise.resolve();
+      if (item.reportType === 'couple') {
+        return buildCoupleVariantExcel(item.rows, item.title1, item.title2).then(function (buffer) {
+          var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
+          zip.file(safeName, buffer);
+        });
       } else {
         return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType)).then(function (buffer) {
           var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
