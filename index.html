@@ -76,14 +76,16 @@
   .report-type-selector {
     display: flex; gap: 6px; align-items: center; margin-left: auto;
   }
-  .report-type-btn {
-    all: unset; box-sizing: border-box; padding: 8px 18px; text-align: center;
-    font: 500 13px/1.2 var(--sans); color: var(--text-secondary); background: transparent;
-    border: none; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap;
-    transition: all 0.2s ease;
+  .report-type-select {
+    box-sizing: border-box; padding: 8px 32px 8px 14px; text-align: left;
+    font: 500 13px/1.2 var(--sans); color: var(--primary); background: #fff;
+    border: 1px solid var(--border, #d8dde3); border-radius: 6px; cursor: pointer;
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%231558A5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat; background-position: right 12px center;
+    transition: border-color 0.2s ease;
   }
-  .report-type-btn:hover { color: var(--primary); }
-  .report-type-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+  .report-type-select:hover, .report-type-select:focus { border-color: var(--primary); outline: none; }
 
   .sidebar-nav { display: flex; flex-direction: column; gap: 1px; }
   .sidebar-nav-label {
@@ -323,9 +325,11 @@
       <span style="font-size: 14px; font-weight: 600; color: var(--ink);">Glacier Lab</span>
     </div>
     <div class="report-type-selector">
-      <button class="report-type-btn active" data-report-type="cmc">CMC</button>
-      <button class="report-type-btn" data-report-type="single">Single</button>
-      <button class="report-type-btn" data-report-type="couple">Couple</button>
+      <select id="report-type-select" class="report-type-select">
+        <option value="cmc">CMC</option>
+        <option value="single">Single</option>
+        <option value="couple">Couple</option>
+      </select>
     </div>
   </header>
 
@@ -550,16 +554,14 @@
 
   // ---------- Report type switching ----------
   var currentReportType = 'cmc';
-  var reportTypeButtons = document.querySelectorAll('.report-type-btn');
+  var reportTypeSelect = document.getElementById('report-type-select');
   var toolsLabels = document.querySelectorAll('.tools-label');
 
   function switchReportType(reportType) {
     currentReportType = reportType;
 
-    // Update report type buttons
-    reportTypeButtons.forEach(function (btn) {
-      btn.classList.toggle('active', btn.dataset.reportType === reportType);
-    });
+    // Update dropdown value
+    if (reportTypeSelect) reportTypeSelect.value = reportType;
 
     // Hide/show tools and labels
     var allNavItems = document.querySelectorAll('.nav-item[data-report-type]');
@@ -581,13 +583,16 @@
     if (firstTabOfType) {
       selectTab(firstTabOfType);
     }
+
+    // Refresh the listed-variant preview/table/mapping list for this report type's own batch
+    if (typeof refreshVariantViewForReportType === 'function') refreshVariantViewForReportType();
   }
 
-  reportTypeButtons.forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      switchReportType(btn.dataset.reportType);
+  if (reportTypeSelect) {
+    reportTypeSelect.addEventListener('change', function () {
+      switchReportType(reportTypeSelect.value);
     });
-  });
+  }
 
   // ---------- Tab switching ----------
   var tabButtons = document.querySelectorAll('.tab-button');
@@ -1060,6 +1065,53 @@
     { key: 'revel', header: 'Revel Score' },
   ];
 
+  // Single-sample report layout — separate named in-house cohort columns instead
+  // of one merged column, plus a couple of extra gnomAD/PhoRank fields CMC drops.
+  // omimTitle/omimPhenotypes are deliberately mapped to different headers than in
+  // VARIANT_COLUMNS: here "Title" (disease names) feeds OMIM PHENOTYPE and
+  // "Phenotypes" (symptom list) feeds CONDITIONS, matching the single template.
+  var SINGLE_VARIANT_COLUMNS = [
+    { key: 'sNo', header: 'S.NO' },
+    { key: 'gene', header: 'GENE' },
+    { key: 'variant', header: 'VARIANT' },
+    { key: 'proteinPos', header: 'PROTEIN POS' },
+    { key: 'franklin', header: 'FRANKLIN CLASS' },
+    { key: 'clinvar', header: 'CLINVAR' },
+    { key: 'zygosity', header: 'ZYGOSITY' },
+    { key: 'inheritance', header: 'INHERITANCE' },
+    { key: 'inhouse947', header: 'INHOUSE - 947 Jun 2023' },
+    { key: 'inhouse595', header: 'INHOUSE - 595 Mar 2024' },
+    { key: 'inhouseGM98', header: 'INHOUSE - GM 98' },
+    { key: 'inhouseGM535', header: 'INHOUSE - GM 535' },
+    { key: 'inhouseGM343', header: 'INHOUSE - GM 343' },
+    { key: 'inhouseGM669', header: 'INHOUSE - GM 669' },
+    { key: 'vaf', header: 'VAF(%)' },
+    { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
+    { key: 'readDepths', header: 'DEP(X)' },
+    { key: 'omimTitle', header: 'OMIM PHENOTYPE' },
+    { key: 'omimPhenotypes', header: 'CONDITIONS' },
+    { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
+    { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
+    { key: 'gnomadGenome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadGenome4SAMale', header: 'GNOM AD SA V4 - MALE' },
+    { key: 'gnomadExome4Count', header: 'GNOM AD EXOME ALL V4' },
+    { key: 'gnomadExome4SA', header: 'GNOM AD EXOME SA V4' },
+    { key: 'gnomadExome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadExome4SAMale', header: 'GNOM AD SA V4 - MALE' },
+    { key: 'gnomadGenome3AC', header: 'GNOM AD all V3' },
+    { key: 'gnomadGenome3Male', header: 'gnomAD(MALE)' },
+    { key: 'gnomadGenome3Female', header: 'Gnom AD FEMALE' },
+    { key: 'genomeAsia', header: 'genome asia' },
+    { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
+    { key: 'phenoRank', header: 'PHENOTYPE RANK' },
+    { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
+    { key: 'revel', header: 'REVEL SCORE' },
+  ];
+
+  function getVariantColumns(reportType) {
+    return reportType === 'single' ? SINGLE_VARIANT_COLUMNS : VARIANT_COLUMNS;
+  }
+
   // Reference only - shown in the "Check column mapping" bar so it's easy to
   // check what feeds each consolidated column. Not used by the actual
   // mapping logic below; safe to delete along with that bar without
@@ -1097,13 +1149,22 @@
     gnomadExome2: 'South Asian Allele Count (AC_SAS), under "gnomAD Exomes" / "2.0.1"',
     alphaMissense: 'Classification, under the "AlphaMissense" group',
     revel: 'REVEL',
+    gnomadGenome4SAMale: 'South Asian Male Allele Count, under "gnomAD Genomes" / "4.1"',
+    gnomadExome4SAMale: 'South Asian Male Allele Count, under "gnomAD Exomes" / "4.1"',
+    inhouse947: '# Samples, under the in-house 947 cohort group',
+    inhouse595: '# Samples, under the in-house 595 cohort group',
+    inhouseGM98: '# Samples, under the in-house GM 98 cohort group',
+    inhouseGM535: '# Samples, under the in-house GM 535 cohort group',
+    inhouseGM343: '# Samples, under the in-house GM 343 cohort group',
+    inhouseGM669: '# Samples, under the in-house GM 669 cohort group',
+    phenoRank: 'Gene Rank, under the "PhoRank" group',
   };
 
   var variantMappingList = document.getElementById('variant-mapping-list');
 
   function renderVariantMappingList() {
     variantMappingList.innerHTML = '';
-    VARIANT_COLUMNS.forEach(function (c, i) {
+    getVariantColumns(currentReportType).forEach(function (c, i) {
       var row = document.createElement('div');
       row.className = 'mapping-list-row';
       var colSpan = document.createElement('span');
@@ -1155,6 +1216,18 @@
     inhouseSampleNames: { header: 'Sample Names' },
     alphaMissense: { header: 'Classification', groupIncludes: ['AlphaMissense'] },
     revel: { header: 'REVEL' },
+    // Single-mode: gnomAD South Asian male allele counts (genome + exome 4.1)
+    gnomadGenome4SAMale: { header: 'South Asian Male Allele Count', groupIncludes: ['gnomAD Genomes', '4.1'] },
+    gnomadExome4SAMale: { header: 'South Asian Male Allele Count', groupIncludes: ['gnomAD Exomes', '4.1'] },
+    // Single-mode: the six named in-house cohort counts, matched by the batch number
+    // embedded in the dataset-group name (survives the group's date/label changing).
+    inhouse947: { header: '# Samples', groupRegex: /(?<!\d)947(?!\d)/ },
+    inhouse595: { header: '# Samples', groupRegex: /(?<!\d)595(?!\d)/ },
+    inhouseGM98: { header: '# Samples', groupRegex: /(?<!\d)98(?!\d)/ },
+    inhouseGM535: { header: '# Samples', groupRegex: /(?<!\d)535(?!\d)/ },
+    inhouseGM343: { header: '# Samples', groupRegex: /(?<!\d)343(?!\d)/ },
+    inhouseGM669: { header: '# Samples', groupRegex: /(?<!\d)669(?!\d)/ },
+    phenoRank: { header: 'Gene Rank', groupIncludes: ['PhoRank'] },
     // Genomic coordinates — used to build direct Franklin links
     variantChr: { header: 'Chr' },
     variantPos: { header: 'Pos' },
@@ -1178,6 +1251,7 @@
       if (spec.header && header !== spec.header) continue;
       if (spec.headerStartsWith && header.indexOf(spec.headerStartsWith) !== 0) continue;
       if (spec.groupIncludes && !spec.groupIncludes.every(function (needle) { return group.indexOf(needle) !== -1; })) continue;
+      if (spec.groupRegex && !spec.groupRegex.test(group)) continue;
       return c;
     }
     return null;
@@ -1667,6 +1741,15 @@
         gnomadGenome3Female: get('gnomadGenome3Female'),
         genomeAsia: get('genomeAsia'),
         gnomadExome2: get('gnomadExome2'),
+        gnomadGenome4SAMale: get('gnomadGenome4SAMale'),
+        gnomadExome4SAMale: get('gnomadExome4SAMale'),
+        inhouse947: get('inhouse947'),
+        inhouse595: get('inhouse595'),
+        inhouseGM98: get('inhouseGM98'),
+        inhouseGM535: get('inhouseGM535'),
+        inhouseGM343: get('inhouseGM343'),
+        inhouseGM669: get('inhouseGM669'),
+        phenoRank: get('phenoRank'),
         alphaMissense: get('alphaMissense'),
         revel: get('revel'),
       });
@@ -1844,12 +1927,13 @@
   }
 
   function renderVariantTable(batchIdx) {
+    var columns = getVariantColumns(currentReportType);
     variantTableHead.innerHTML = '';
 
     var letterRow = document.createElement('tr');
     letterRow.appendChild(document.createElement('th'));
     letterRow.firstChild.className = 'grid-corner';
-    VARIANT_COLUMNS.forEach(function (c, i) {
+    columns.forEach(function (c, i) {
       var th = document.createElement('th');
       th.className = 'grid-col-letter';
       th.textContent = columnLetter(i + 1);
@@ -1861,7 +1945,7 @@
     var cornerTh = document.createElement('th');
     cornerTh.className = 'grid-corner';
     headRow.appendChild(cornerTh);
-    VARIANT_COLUMNS.forEach(function (c) {
+    columns.forEach(function (c) {
       var th = document.createElement('th');
       th.textContent = c.header;
       headRow.appendChild(th);
@@ -1873,7 +1957,7 @@
       var tr = document.createElement('tr');
       var td = document.createElement('td');
       td.className = 'empty-state';
-      td.colSpan = VARIANT_COLUMNS.length + 1;
+      td.colSpan = columns.length + 1;
       td.textContent = 'No data loaded yet. Upload a VarSeq Excel export to preview it here.';
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
@@ -1919,7 +2003,7 @@
         rowNumTd.appendChild(rowNum);
         tr.appendChild(rowNumTd);
 
-        VARIANT_COLUMNS.forEach(function (c) {
+        columns.forEach(function (c) {
           var td = document.createElement('td');
           var input = document.createElement('input');
           input.value = row[c.key] != null ? row[c.key] : '';
@@ -2017,19 +2101,20 @@
   }
 
   // Build an Excel workbook for one batch item and return the ArrayBuffer.
-  function buildVariantExcel(rows, title) {
+  function buildVariantExcel(rows, title, columns) {
+    columns = columns || VARIANT_COLUMNS;
     var workbook = new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
-    VARIANT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
+    columns.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
     var headerRowIndex = 1;
     if (title) {
       sheet.getRow(1).getCell(1).value = title;
-      sheet.mergeCells(1, 1, 1, VARIANT_COLUMNS.length);
+      sheet.mergeCells(1, 1, 1, columns.length);
       sheet.getRow(1).font = { bold: true };
       headerRowIndex = 2;
     }
     var headerRow = sheet.getRow(headerRowIndex);
-    VARIANT_COLUMNS.forEach(function (c, i) {
+    columns.forEach(function (c, i) {
       var cell = headerRow.getCell(i + 1);
       cell.value = c.header;
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -2037,15 +2122,15 @@
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
     headerRow.height = 22;
-    var inheritanceColIdx = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'inheritance'; });
-    var franklinColIdx    = VARIANT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
-    var homoColIdxs = VARIANT_COLUMNS.reduce(function (acc, c, i) {
+    var inheritanceColIdx = columns.findIndex(function (c) { return c.key === 'inheritance'; });
+    var franklinColIdx    = columns.findIndex(function (c) { return c.key === 'franklin'; });
+    var homoColIdxs = columns.reduce(function (acc, c, i) {
       if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
       return acc;
     }, []);
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
-      VARIANT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+      columns.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
       if (isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
       }
@@ -2056,7 +2141,7 @@
         }
       }
       homoColIdxs.forEach(function (colIdx) {
-        var val = row[VARIANT_COLUMNS[colIdx].key];
+        var val = row[columns[colIdx].key];
         if (val != null && val !== '' && Number(val) > 0) {
           var cell = dataRow.getCell(colIdx + 1);
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } };
@@ -2145,6 +2230,29 @@
     renderBatchList();
   }
 
+  // Called on report type switch so the preview table/columns/mapping list
+  // reflect the newly selected template instead of leftover state from another one.
+  function refreshVariantViewForReportType() {
+    if (typeof variantBatch === 'undefined') return; // not initialized yet during initial page setup
+    var currentPreview = variantBatch[variantPreviewIdx];
+    if (currentPreview && currentPreview.reportType === currentReportType) {
+      renderVariantTable(variantPreviewIdx);
+      renderBatchList();
+    } else {
+      var firstOk = variantBatch.findIndex(function (it) { return !it.error && it.reportType === currentReportType; });
+      if (firstOk !== -1) {
+        selectBatchPreview(firstOk);
+      } else {
+        variantPreviewIdx = -1;
+        variantRows = [];
+        if (variantPreviewLabel) variantPreviewLabel.hidden = true;
+        renderVariantTable();
+        renderBatchList();
+      }
+    }
+    if (typeof renderVariantMappingList === 'function') renderVariantMappingList();
+  }
+
   function downloadBatchItem(idx) {
     var item = variantBatch[idx];
     if (!item || item.error) return;
@@ -2153,7 +2261,7 @@
       var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-consolidated.xlsx';
       downloadBlob(item.excelBuffer, safeName);
     } else {
-      buildVariantExcel(item.rows, item.title).then(function (buffer) {
+      buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType)).then(function (buffer) {
         var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
         downloadBlob(buffer, safeName);
       });
@@ -2274,7 +2382,7 @@
         zip.file(safeName, item.excelBuffer);
         return Promise.resolve();
       } else {
-        return buildVariantExcel(item.rows, item.title).then(function (buffer) {
+        return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType)).then(function (buffer) {
           var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
           zip.file(safeName, buffer);
         });
