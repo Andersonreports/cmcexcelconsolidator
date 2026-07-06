@@ -1978,8 +1978,9 @@
         variantTableBody.appendChild(tr);
       });
     }
-    variantClearAllBtn.disabled = variantBatch.length === 0;
-    variantDownloadAllBtn.disabled = variantBatch.length === 0;
+    var currentTypeCount = variantBatch.filter(function (item) { return item.reportType === currentReportType; }).length;
+    variantClearAllBtn.disabled = currentTypeCount === 0;
+    variantDownloadAllBtn.disabled = currentTypeCount === 0;
     if (variantSelectedCount) {
       variantSelectedCount.textContent =
         variantRows.length + ' record' + (variantRows.length !== 1 ? 's' : '');
@@ -2067,19 +2068,25 @@
   }
 
   function renderBatchList() {
-    var hasItems = variantBatch.length > 0;
+    var visibleEntries = [];
+    variantBatch.forEach(function (item, idx) {
+      if (item.reportType === currentReportType) visibleEntries.push({ item: item, idx: idx });
+    });
+    var hasItems = visibleEntries.length > 0;
     variantBatchList.hidden = !hasItems;
     variantClearAllBtn.disabled = !hasItems;
     variantDownloadAllBtn.disabled = !hasItems;
 
     variantBatchList.innerHTML = '';
-    variantBatch.forEach(function (item, idx) {
+    visibleEntries.forEach(function (entry, displayIdx) {
+      var item = entry.item;
+      var idx = entry.idx;
       var div = document.createElement('div');
       div.className = 'batch-item' + (idx === variantPreviewIdx ? ' batch-item-active' : '');
 
       var numSpan = document.createElement('span');
       numSpan.className = 'batch-item-num';
-      numSpan.textContent = idx + 1;
+      numSpan.textContent = displayIdx + 1;
       div.appendChild(numSpan);
 
       var infoDiv = document.createElement('div');
@@ -2218,11 +2225,14 @@
     });
 
     Promise.all(promises).then(function (newItems) {
-      var prevLen = variantBatch.length;
-      newItems.forEach(function (item) { variantBatch.push(item); });
-      // Auto-preview the first successfully loaded file if nothing is previewed yet.
-      if (variantPreviewIdx === -1) {
-        var firstOk = variantBatch.findIndex(function (it) { return !it.error; });
+      newItems.forEach(function (item) {
+        item.reportType = currentReportType;
+        variantBatch.push(item);
+      });
+      // Auto-preview the first successfully loaded file for this report type if none previewed yet.
+      var currentPreview = variantBatch[variantPreviewIdx];
+      if (variantPreviewIdx === -1 || !currentPreview || currentPreview.reportType !== currentReportType) {
+        var firstOk = variantBatch.findIndex(function (it) { return !it.error && it.reportType === currentReportType; });
         if (firstOk !== -1) {
           selectBatchPreview(firstOk);
           return;
@@ -2236,17 +2246,22 @@
   });
 
   variantClearAllBtn.addEventListener('click', function () {
-    variantBatch = [];
-    variantPreviewIdx = -1;
-    variantRows = [];
+    variantBatch = variantBatch.filter(function (item) { return item.reportType !== currentReportType; });
+    var currentPreview = variantBatch[variantPreviewIdx];
+    if (!currentPreview || currentPreview.reportType !== currentReportType) {
+      variantPreviewIdx = -1;
+      variantRows = [];
+      variantPreviewLabel.hidden = true;
+    }
     showVariantError('');
-    variantPreviewLabel.hidden = true;
     renderBatchList();
     renderVariantTable();
   });
 
   variantDownloadAllBtn.addEventListener('click', function () {
-    var validItems = variantBatch.filter(function (item) { return !item.error && (item.rows.length > 0 || item.excelBuffer); });
+    var validItems = variantBatch.filter(function (item) {
+      return item.reportType === currentReportType && !item.error && (item.rows.length > 0 || item.excelBuffer);
+    });
     if (!validItems.length) return;
 
     variantDownloadAllBtn.disabled = true;
@@ -2271,7 +2286,7 @@
     }).catch(function (err) {
       showVariantError((err && err.message) || 'Failed to generate ZIP.');
     }).finally(function () {
-      variantDownloadAllBtn.disabled = variantBatch.length === 0;
+      variantDownloadAllBtn.disabled = !variantBatch.some(function (item) { return item.reportType === currentReportType; });
       variantDownloadAllBtn.textContent = 'Download All (ZIP)';
     });
   });
