@@ -467,6 +467,11 @@
           </table>
         </div>
 
+        <div id="variant-preview-mode-toggle" style="display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border);" hidden>
+          <button type="button" class="batch-item-btn active" id="variant-preview-mode-listed" data-mode="listed">Listed Variants</button>
+          <button type="button" class="batch-item-btn" id="variant-preview-mode-raw" data-mode="raw">VarSeq Data</button>
+        </div>
+
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-secondary);">
           <span style="display: flex; align-items: center; gap: 6px;">
             <span style="width: 8px; height: 8px; background: var(--accent); border-radius: 50%; display: inline-block;"></span>
@@ -1469,11 +1474,15 @@
   var variantBatch = [];
   var variantPreviewIdx = -1;
   var variantRows = [];
+  var variantPreviewMode = 'listed'; // 'listed' | 'raw' - which sheet the preview shows
   var variantTableHead = document.getElementById('variant-table-head');
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFrozenCols = new Set();
   var variantFileInput = document.getElementById('variant-file-input');
   var variantBatchList = document.getElementById('variant-batch-list');
+  var variantPreviewModeToggle = document.getElementById('variant-preview-mode-toggle');
+  var variantPreviewModeListedBtn = document.getElementById('variant-preview-mode-listed');
+  var variantPreviewModeRawBtn = document.getElementById('variant-preview-mode-raw');
   var variantPreviewLabel = document.getElementById('variant-preview-label');
   var variantSelectedCount = document.getElementById('variant-selected-count');
   var variantError = document.getElementById('variant-error');
@@ -2069,6 +2078,7 @@
       sheet.getRow(1).getCell(1).value = title;
       sheet.mergeCells(1, 1, 1, COUPLE_EXPORT_COLUMNS.length);
       sheet.getRow(1).font = { bold: true, size: 13 };
+      sheet.getRow(1).alignment = { horizontal: 'center', vertical: 'middle' };
       sectionStartRow = 3;
     }
 
@@ -2082,6 +2092,7 @@
     function writeSection(startRow, title, sectionRows) {
       sheet.getRow(startRow).getCell(1).value = title;
       sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12 };
+      sheet.getRow(startRow).getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
       var headerRowIdx = startRow + 1;
       var headerRow = sheet.getRow(headerRowIdx);
       COUPLE_EXPORT_COLUMNS.forEach(function (c, i) {
@@ -2089,10 +2100,15 @@
         cell.value = c.header;
         cell.font = { bold: true };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD3D3D3' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
       });
       sectionRows.forEach(function (row, i) {
         var dataRow = sheet.getRow(headerRowIdx + 1 + i);
-        COUPLE_EXPORT_COLUMNS.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+        COUPLE_EXPORT_COLUMNS.forEach(function (c, colIdx) {
+          var cell = dataRow.getCell(colIdx + 1);
+          cell.value = row[c.key];
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        });
         if (chrPosColIdx >= 0 && row._chrPosHyperlink && row.chrPos) {
           dataRow.getCell(chrPosColIdx + 1).value = { text: row.chrPos, hyperlink: row._chrPosHyperlink };
         }
@@ -2350,8 +2366,120 @@
     return tr;
   }
 
+  // Shows/hides the "Listed Variants" / "VarSeq Data" preview toggle - only
+  // relevant for single/couple items, which are the only ones that retain the
+  // original upload (item.rawBuffer) for the 2-sheet export.
+  function updatePreviewModeToggle() {
+    if (!variantPreviewModeToggle) return;
+    var item = variantBatch[variantPreviewIdx];
+    var canShowRaw = item && !item.error && item.rawBuffer &&
+      (item.reportType === 'single' || item.reportType === 'couple');
+    variantPreviewModeToggle.hidden = !canShowRaw;
+    if (!canShowRaw) variantPreviewMode = 'listed';
+    if (variantPreviewModeListedBtn) variantPreviewModeListedBtn.classList.toggle('active', variantPreviewMode === 'listed');
+    if (variantPreviewModeRawBtn) variantPreviewModeRawBtn.classList.toggle('active', variantPreviewMode === 'raw');
+  }
+
+  // Renders the original, unfiltered VarSeq sheet (read-only) for the "VarSeq
+  // Data" preview mode. Cached per item after the first load since the raw
+  // sheet never changes once uploaded.
+  function renderRawVariantPreview(item) {
+    if (item._rawPreviewCache) {
+      paintRawVariantPreview(item._rawPreviewCache);
+      return;
+    }
+    variantTableHead.innerHTML = '';
+    variantTableBody.innerHTML = '';
+    var loadingTr = document.createElement('tr');
+    var loadingTd = document.createElement('td');
+    loadingTd.className = 'empty-state';
+    loadingTd.textContent = 'Loading VarSeq data…';
+    loadingTr.appendChild(loadingTd);
+    variantTableBody.appendChild(loadingTr);
+
+    loadWorkbookFromBuffer(item.rawBuffer).then(function (workbook) {
+      var sheet = workbook.worksheets[0];
+      var colCount = sheet.columnCount;
+      var groupRow = sheet.getRow(1);
+      var headerRow = sheet.getRow(2);
+      var headers = [];
+      for (var c = 1; c <= colCount; c++) {
+        headers.push({
+          group: cellText(groupRow.getCell(c).value) || '',
+          header: cellText(headerRow.getCell(c).value) || '',
+        });
+      }
+      var dataRows = [];
+      sheet.eachRow(function (row, r) {
+        if (r <= 2) return;
+        var vals = [];
+        for (var c = 1; c <= colCount; c++) vals.push(cellText(row.getCell(c).value));
+        dataRows.push(vals);
+      });
+      item._rawPreviewCache = { headers: headers, rows: dataRows };
+      paintRawVariantPreview(item._rawPreviewCache);
+    });
+  }
+
+  function paintRawVariantPreview(data) {
+    variantTableHead.innerHTML = '';
+    var letterRow = document.createElement('tr');
+    letterRow.appendChild(document.createElement('th'));
+    letterRow.firstChild.className = 'grid-corner';
+    data.headers.forEach(function (h, i) {
+      var th = document.createElement('th');
+      th.className = 'grid-col-letter';
+      th.textContent = columnLetter(i + 1);
+      letterRow.appendChild(th);
+    });
+    variantTableHead.appendChild(letterRow);
+
+    var headRow = document.createElement('tr');
+    var cornerTh = document.createElement('th');
+    cornerTh.className = 'grid-corner';
+    headRow.appendChild(cornerTh);
+    data.headers.forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h.header;
+      if (h.group) th.title = h.group;
+      headRow.appendChild(th);
+    });
+    variantTableHead.appendChild(headRow);
+
+    variantTableBody.innerHTML = '';
+    if (data.rows.length === 0) {
+      var tr = document.createElement('tr');
+      var td = document.createElement('td');
+      td.className = 'empty-state';
+      td.colSpan = data.headers.length + 1;
+      td.textContent = 'No rows found in the original VarSeq sheet.';
+      tr.appendChild(td);
+      variantTableBody.appendChild(tr);
+      return;
+    }
+    data.rows.forEach(function (vals, rowIndex) {
+      var tr = document.createElement('tr');
+      var rowNumTd = document.createElement('td');
+      rowNumTd.className = 'grid-row-number';
+      rowNumTd.textContent = rowIndex + 1;
+      tr.appendChild(rowNumTd);
+      vals.forEach(function (v) {
+        var td = document.createElement('td');
+        td.textContent = v == null ? '' : String(v);
+        tr.appendChild(td);
+      });
+      variantTableBody.appendChild(tr);
+    });
+  }
+
   function renderVariantTable(batchIdx) {
+    updatePreviewModeToggle();
     var columns = getVariantColumns(currentReportType);
+
+    if (variantPreviewMode === 'raw') {
+      var rawItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+      if (rawItem) renderRawVariantPreview(rawItem);
+    } else {
     buildGridHeaderRows(variantTableHead, columns, variantFrozenCols, function () { renderVariantTable(batchIdx); });
 
     variantTableBody.innerHTML = '';
@@ -2383,6 +2511,9 @@
         variantTableBody.appendChild(buildVariantDataRow(row, rowIndex, columns, batchIdx));
       });
     }
+    applyFrozenColumns(variantTableHead, variantTableBody, columns, variantFrozenCols);
+    }
+
     var currentTypeCount = variantBatch.filter(function (item) { return item.reportType === currentReportType; }).length;
     variantClearAllBtn.disabled = currentTypeCount === 0;
     variantDownloadAllBtn.disabled = currentTypeCount === 0;
@@ -2390,7 +2521,6 @@
       variantSelectedCount.textContent =
         variantRows.length + ' record' + (variantRows.length !== 1 ? 's' : '');
     }
-    applyFrozenColumns(variantTableHead, variantTableBody, columns, variantFrozenCols);
   }
 
   function showVariantError(message) {
@@ -2433,6 +2563,7 @@
       sheet.getRow(1).getCell(1).value = title;
       sheet.mergeCells(1, 1, 1, columns.length);
       sheet.getRow(1).font = { bold: true };
+      sheet.getRow(1).alignment = { horizontal: 'center', vertical: 'middle' };
       headerRowIndex = 2;
     }
     var headerRow = sheet.getRow(headerRowIndex);
@@ -2452,7 +2583,11 @@
     }, []);
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
-      columns.forEach(function (c, colIdx) { dataRow.getCell(colIdx + 1).value = row[c.key]; });
+      columns.forEach(function (c, colIdx) {
+        var cell = dataRow.getCell(colIdx + 1);
+        cell.value = row[c.key];
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
       if (isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
       }
@@ -2549,6 +2684,7 @@
 
   function selectBatchPreview(idx) {
     variantPreviewIdx = idx;
+    variantPreviewMode = 'listed';
     variantRows = (variantBatch[idx] && variantBatch[idx].rows) || [];
     var item = variantBatch[idx];
     if (item) {
@@ -2590,6 +2726,14 @@
     return workbook.xlsx.load(buffer).then(function () { return workbook; });
   }
 
+  function centerAlignSheet(sheet) {
+    sheet.eachRow({ includeEmpty: false }, function (row) {
+      row.eachCell({ includeEmpty: false }, function (cell) {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+    });
+  }
+
   // Single and couple downloads ship as 2 sheets: the complete, unfiltered
   // VarSeq export (re-loaded fresh from the original upload each time, so
   // repeat downloads never accumulate extra sheets) plus the filtered
@@ -2598,7 +2742,10 @@
   function buildExportWorkbook(item) {
     if ((item.reportType === 'single' || item.reportType === 'couple') && item.rawBuffer) {
       return loadWorkbookFromBuffer(item.rawBuffer).then(function (workbook) {
-        if (workbook.worksheets[0]) workbook.worksheets[0].name = 'Complete Data';
+        if (workbook.worksheets[0]) {
+          workbook.worksheets[0].name = 'Complete Data';
+          centerAlignSheet(workbook.worksheets[0]);
+        }
         return workbook;
       });
     }
@@ -2707,6 +2854,19 @@
       variantFileInput.value = '';
     });
   });
+
+  if (variantPreviewModeListedBtn) {
+    variantPreviewModeListedBtn.addEventListener('click', function () {
+      variantPreviewMode = 'listed';
+      renderVariantTable(variantPreviewIdx);
+    });
+  }
+  if (variantPreviewModeRawBtn) {
+    variantPreviewModeRawBtn.addEventListener('click', function () {
+      variantPreviewMode = 'raw';
+      renderVariantTable(variantPreviewIdx);
+    });
+  }
 
   variantClearAllBtn.addEventListener('click', function () {
     variantBatch = variantBatch.filter(function (item) { return item.reportType !== currentReportType; });
