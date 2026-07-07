@@ -1555,6 +1555,7 @@
       if (code) row.franklin = code;
     });
     renderVariantTable(variantPreviewIdx);
+    resolveFranklinForRows(variantRows, variantPreviewIdx);
   }
 
   // Map ClinVar summary text descriptions to Franklin-style abbreviations.
@@ -1595,15 +1596,24 @@
   // ── Franklin (Genoox) auto-classification ──────────────────────────────────
   var FRANKLIN_PROXY_URL = 'https://script.google.com/macros/s/AKfycbxZho7Jig9dKaCIVZIqwSv6FvUJxU9vx6yLwpqvoRjlt3ZQHKkQljthA8QOG9vYq6E3/exec';
 
+  // A plain "VUS" (no lean) from the ACMG reference-file cross-check is
+  // ambiguous — the reference file only ever records the bare classification
+  // word, not which side of the fence it leans toward. Treat it as
+  // unresolved so the live Franklin lookup below still runs and can upgrade
+  // it to "VUS/LP" or "B/VUS" when Franklin's own classifier has a lean.
+  function isGenericVus(value) {
+    return String(value || '').trim().toUpperCase() === 'VUS';
+  }
+
   function resolveFranklinForRows(rows, batchIdx) {
     rows.forEach(function (row, rowIdx) {
       var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
-      if (row.franklin) {
+      if (row.franklin && !isGenericVus(row.franklin)) {
         if (linkEl) linkEl.textContent = '↗';
         return;
       }
       if (!row.gene && !row.variant) return;
-      if (linkEl) linkEl.textContent = '…';
+      if (linkEl) linkEl.textContent = isGenericVus(row.franklin) ? '↗' : '…';
       (function (r, ri) {
         setTimeout(function () { fetchFranklinForRow(r, ri, batchIdx); }, ri * 250);
       })(row, rowIdx);
@@ -1613,11 +1623,12 @@
   function fetchFranklinForRow(row, rowIdx, batchIdx) {
     var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
     var inputId = 'finput-' + batchIdx + '-' + rowIdx;
+    var refiningGenericVus = isGenericVus(row.franklin);
 
     if (!FRANKLIN_PROXY_URL) {
       var linkElNoProxy = document.getElementById(linkId);
       if (linkElNoProxy) linkElNoProxy.textContent = '↗';
-      fetchClinVarClass(row, rowIdx, batchIdx);
+      if (!row.franklin) fetchClinVarClass(row, rowIdx, batchIdx);
       return;
     }
 
@@ -1635,7 +1646,12 @@
           if (linkEl) linkEl.href = row._franklinUrl;
         }
         if (linkEl) linkEl.textContent = '↗';
-        if (data && data.ok && data.abbr && !row.franklin) {
+        // Only let a live lookup overwrite an existing generic "VUS" when it
+        // actually resolves to a specific lean — never downgrade a real
+        // lookup result, and never touch a non-VUS reference-file verdict.
+        var canRefine = refiningGenericVus && data && data.ok &&
+          (data.abbr === 'VUS/LP' || data.abbr === 'B/VUS');
+        if (data && data.ok && data.abbr && (!row.franklin || canRefine)) {
           row.franklin = data.abbr;
           var inputEl = document.getElementById(inputId);
           if (inputEl) {
@@ -1656,7 +1672,7 @@
       .catch(function () {
         var linkEl2 = document.getElementById(linkId);
         if (linkEl2) linkEl2.textContent = '↗';
-        fetchClinVarClass(row, rowIdx, batchIdx);
+        if (!row.franklin) fetchClinVarClass(row, rowIdx, batchIdx);
       });
   }
 
