@@ -1328,13 +1328,6 @@
     dbnsfpMutTaster: { header: 'MutationTaster Pred', groupIncludes: ['dbNSFP'] },
   };
 
-  // Most clinically severe first. Rows whose winning entry lands on Benign
-  // or Likely Benign are dropped entirely (see isBenignClassification).
-  var SEVERITY_ORDER = [
-    'PATHOGENIC', 'LIKELY PATHOGENIC', 'VUS/WEAK PATHOGENIC', 'VUS/CONFLICTING',
-    'CONFLICTING', 'UNCERTAIN SIGNIFICANCE', 'VUS', 'VUS/WEAK BENIGN',
-    'LIKELY BENIGN', 'BENIGN',
-  ];
   var INHERITANCE_PRIORITY = ['MF', 'AD', 'AR', 'XLR', 'XLD', 'XL'];
 
   function findVarSeqColumn(groupRow, headerRow, colCount, spec) {
@@ -1402,13 +1395,6 @@
     var s = String(value);
     var idx = s.indexOf(':');
     return idx === -1 ? s.trim() : s.slice(idx + 1).trim();
-  }
-
-  function severityRank(classification) {
-    if (!classification) return SEVERITY_ORDER.length;
-    var norm = String(classification).trim().toUpperCase();
-    var idx = SEVERITY_ORDER.indexOf(norm);
-    return idx === -1 ? SEVERITY_ORDER.length - 1 : idx;
   }
 
   function isBenignClassification(classification) {
@@ -1830,7 +1816,7 @@
 
     var rows = [];
     var debugRowsChecked = 0;
-    var debugRowsSkipped = { noGene: 0, noZygOrInherit: 0, benign: 0 };
+    var debugRowsSkipped = { noGene: 0, noZygOrInherit: 0, benign: 0, nonCoding: 0 };
 
     sheet.eachRow(function (row, r) {
       if (r <= 2) return;
@@ -1842,20 +1828,22 @@
 
       var genes = splitList(get('geneNames'));
       var hgvsCList = splitList(get('hgvsC'));
+      var hgvsPList = splitList(get('hgvsP'));
       var acmgList = splitList(get('acmgClass'));
 
-      var winnerIdx = 0, bestRank = Infinity;
-      acmgList.forEach(function (cls, i) {
-        var rank = severityRank(cls);
-        if (rank < bestRank) { bestRank = rank; winnerIdx = i; }
-      });
+      // When a row lists multiple overlapping genes/transcripts, use whichever
+      // entry has a coding ("c.") HGVS notation - not just the first listed -
+      // and drop the row if none of them do (e.g. a non-coding RNA locus with
+      // only an "n." transcript).
+      var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
+      if (codingIdx === -1) { debugRowsSkipped.nonCoding++; return; }
 
-      var winningAcmg = acmgList[winnerIdx] || acmgList[0] || '';
+      var winningAcmg = acmgList[codingIdx] || acmgList[0] || '';
       if (isBenignClassification(winningAcmg)) { debugRowsSkipped.benign++; return; }
 
-      var gene = genes[winnerIdx] || genes[0] || '';
+      var gene = genes[codingIdx] || genes[0] || '';
       if (!gene) { debugRowsSkipped.noGene++; return; }
-      var variant = stripHgvsPrefix(hgvsCList[winnerIdx] || hgvsCList[0] || '');
+      var variant = stripHgvsPrefix(hgvsCList[codingIdx]);
 
       // Skip rows that have neither zygosity nor inheritance — these are
       // typically annotation-only or summary rows, not real variant calls.
@@ -1863,7 +1851,7 @@
       var rawInheritance = get('omimInheritance');
       if (!rawZygosity && !rawInheritance) { debugRowsSkipped.noZygOrInherit++; return; }
 
-      var proteinPos = stripHgvsPrefix(get('hgvsP'));
+      var proteinPos = stripHgvsPrefix(hgvsPList[codingIdx] || hgvsPList[0] || '');
 
       var inheritanceCodes = abbreviateInheritance(splitList(rawInheritance));
 
@@ -1964,16 +1952,24 @@
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
       var acmgList = splitList(get('acmgClass'));
-      if (isBenignClassification(acmgList[0])) return;
 
-      var gene = genes[0] || '';
+      // When a row lists multiple overlapping genes/transcripts, use whichever
+      // entry has a coding ("c.") HGVS notation - not just the first listed -
+      // and drop the row if none of them do (e.g. a non-coding RNA locus with
+      // only an "n." transcript).
+      var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
+      if (codingIdx === -1) return;
+
+      if (isBenignClassification(acmgList[codingIdx] || acmgList[0])) return;
+
+      var gene = genes[codingIdx] || genes[0] || '';
       if (!gene) return;
 
       var rawZygosity1 = getNth('zygosity', 0);
       var rawZygosity2 = getNth('zygosity', 1);
       if (!rawZygosity1 && !rawZygosity2) return;
 
-      var variant = stripHgvsPrefix(hgvsCList[0] || '');
+      var variant = stripHgvsPrefix(hgvsCList[codingIdx]);
       var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
 
       var chrPos = get('chrPosCombined');
@@ -1989,7 +1985,7 @@
         refAlt: refAlt || '',
         gene: gene,
         variant: variant,
-        proteinPos: stripHgvsPrefix(hgvsPList[0] || ''),
+        proteinPos: stripHgvsPrefix(hgvsPList[codingIdx] || hgvsPList[0] || ''),
         franklin: lookupFranklin(gene, variant),
         _franklinUrl: null,
         zygosity1: abbreviateZygosity(rawZygosity1, inheritanceCodes),
