@@ -1720,34 +1720,61 @@
   }
 
   // Extract patient info from VarSeq filename and combine with run name.
-  // Handles variants:
+  // Preferred format: "<code>_<NAME> (<age><unit><gender>) - <run name>"
+  //   e.g. "4323A_SUJAN (1YM) - GEN_T_2.0.spik_4323A_outfastp_R"
+  //     -> LISTED VARIANTS FOR SUJAN (1YM)_GEN_T_2.0.spik_4323A
+  // Falls back to older code-based conventions when that pattern isn't found:
   //   _MR_AL54_Y_499_11YM_    → MR.AL54-Y-499 (11Y/M)
   //   _MRS_AL54_Y_500_11Y_F_  → MRS.AL54-Y-500 (11Y/F)
   //   _MRS_AL54_Y_496_24YF    → MRS.AL54-Y-496 (24Y/F)
   //   _MRS_AL54_4296_30YF     → MRS.AL54-4296 (30Y/F)  (no series letter)
   function extractPatientTitle(filename, runName) {
     var base = filename.replace(/\.[^.]+$/, '');
+
+    // Preferred: name + age/gender lifted straight from the filename.
+    var nameMatch = base.match(/^[^_]+_(.+?)\s*\(([^)]+)\)/);
+    if (nameMatch) {
+      return 'LISTED VARIANTS FOR ' + nameMatch[1].trim().toUpperCase() +
+             ' (' + nameMatch[2].trim().toUpperCase() + ')' + (runName ? '_' + runName : '');
+    }
     // Pattern 1: with series letter (e.g. _Y_) between code and patient number
     var m = base.match(/_?(MR|MRS|MS|MASTER)_([A-Z0-9]+)_([A-Z]{1,3})_(\d+)_(\d+)Y_?([MF])/i);
     if (m) {
       var p = m[1].toUpperCase() + '.' + m[2].toUpperCase() +
               '-' + m[3].toUpperCase() + '-' + m[4] +
               ' (' + m[5] + 'Y/' + m[6].toUpperCase() + ')';
-      return p + (runName || '');
+      return 'LISTED VARIANTS FOR ' + p + (runName ? '_' + runName : '');
     }
     // Pattern 2: no series letter (e.g. _MRS_AL54_4296_30YF)
     var m2 = base.match(/_?(MR|MRS|MS|MASTER)_([A-Z0-9]+)_(\d+)_(\d+)Y_?([MF])/i);
     if (m2) {
       var p2 = m2[1].toUpperCase() + '.' + m2[2].toUpperCase() +
                '-' + m2[3] + ' (' + m2[4] + 'Y/' + m2[5].toUpperCase() + ')';
-      return p2 + (runName || '');
+      return 'LISTED VARIANTS FOR ' + p2 + (runName ? '_' + runName : '');
     }
     // Pattern 3: at least extract title + code (no number or age available)
     var m3 = base.match(/_?(MR|MRS|MS|MASTER)_([A-Z0-9]+)/i);
     if (m3) {
-      return m3[1].toUpperCase() + '.' + m3[2].toUpperCase() + (runName ? '-' + runName : '');
+      return 'LISTED VARIANTS FOR ' + m3[1].toUpperCase() + '.' + m3[2].toUpperCase() + (runName ? '_' + runName : '');
     }
-    return runName || base;
+    return 'LISTED VARIANTS FOR ' + (runName || base);
+  }
+
+  // Parses couple-mode filenames like
+  // "4370_MR_PUSHPARAJ_SADASHIVA_KUNDER44YM_4369_MRS_VAISHALI_LAXMAN.xlsx"
+  // into per-patient "<code>_<SALUTATION>. <FIRST NAME>" labels - keeping only
+  // the sample code, salutation and first name (middle/last name and the
+  // trailing age/gender block are dropped). Returns [] if the filename
+  // doesn't contain any recognizable "<code>_<salutation>_<name>" blocks.
+  function extractCoupleNamesFromFilename(filename) {
+    var base = filename.replace(/\.[^.]+$/, '');
+    var re = /(\d+)_(MR|MRS|MS|MASTER)_([A-Za-z]+)/gi;
+    var names = [];
+    var m;
+    while ((m = re.exec(base))) {
+      names.push(m[1] + '_' + m[2].toUpperCase() + '. ' + m[3].toUpperCase());
+    }
+    return names;
   }
 
   function processVarSeqWorkbook(workbook) {
@@ -1806,6 +1833,9 @@
         var rank = severityRank(cls);
         if (rank < bestRank) { bestRank = rank; winnerIdx = i; }
       });
+
+      var winningAcmg = acmgList[winnerIdx] || acmgList[0] || '';
+      if (isBenignClassification(winningAcmg)) { debugRowsSkipped.benign++; return; }
 
       var gene = genes[winnerIdx] || genes[0] || '';
       if (!gene) { debugRowsSkipped.noGene++; return; }
@@ -1917,6 +1947,9 @@
       var genes = splitList(get('geneNames'));
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
+      var acmgList = splitList(get('acmgClass'));
+      if (isBenignClassification(acmgList[0])) return;
+
       var gene = genes[0] || '';
       if (!gene) return;
 
@@ -2014,8 +2047,8 @@
   // Builds the two-section couple Excel: section 1 lists only variants
   // partner 1 carries (zygosity1 set), section 2 only those partner 2
   // carries — same column layout for both, per the couple template.
-  function buildCoupleVariantExcel(rows, title, title1, title2) {
-    var workbook = new ExcelJS.Workbook();
+  function buildCoupleVariantExcel(rows, title, title1, title2, workbook) {
+    workbook = workbook || new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
     COUPLE_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
 
@@ -2180,6 +2213,131 @@
     });
   }
 
+  // A bold, full-width label row used to separate couple-mode sections in the
+  // preview, mirroring the "LISTED VARIANTS FOR <name>" section headers each
+  // partner gets in the exported Excel (see writeSection in buildCoupleVariantExcel).
+  function buildGridSectionHeaderRow(title, columnCount) {
+    var tr = document.createElement('tr');
+    var td = document.createElement('td');
+    td.colSpan = columnCount + 1;
+    td.textContent = title;
+    td.style.cssText = 'font-weight:700;font-size:13px;padding:8px 10px;background:var(--bg-page);color:var(--ink);';
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function buildVariantDataRow(row, rowIndex, columns, batchIdx) {
+    var tr = document.createElement('tr');
+    var inheritanceInput = null;
+
+    function updateInheritanceColor() {
+      if (inheritanceInput) {
+        var isAR = isHetWithPureAR(variantRows[rowIndex]);
+        inheritanceInput.style.color = isAR ? '#c2293a' : '';
+        inheritanceInput.style.fontWeight = isAR ? '700' : '';
+      }
+    }
+
+    var rowNumTd = document.createElement('td');
+    rowNumTd.className = 'grid-row-number';
+    rowNumTd.style.cssText = 'white-space:nowrap;';
+
+    var delBtn = document.createElement('button');
+    delBtn.textContent = '×';
+    delBtn.title = 'Remove this variant from the list';
+    delBtn.style.cssText = 'font-size:11px;line-height:1;padding:0 3px;margin-right:4px;cursor:pointer;border:1px solid #bbb;background:#fff;border-radius:2px;color:#888;vertical-align:middle;';
+    delBtn.addEventListener('click', (function (capturedIdx) {
+      return function () {
+        variantRows.splice(capturedIdx, 1);
+        variantRows.forEach(function (r, i) { r.sNo = i + 1; });
+        var item = variantBatch[variantPreviewIdx];
+        if (item) {
+          variantPreviewLabel.textContent =
+            'Previewing file ' + (variantPreviewIdx + 1) + ' of ' + variantBatch.length +
+            ': ' + item.fileName +
+            ' (' + variantRows.length + ' variant' + (variantRows.length !== 1 ? 's' : '') + ')';
+        }
+        renderVariantTable(variantPreviewIdx);
+      };
+    })(rowIndex));
+
+    var rowNum = document.createElement('span');
+    rowNum.textContent = rowIndex + 1;
+    rowNumTd.appendChild(delBtn);
+    rowNumTd.appendChild(rowNum);
+    tr.appendChild(rowNumTd);
+
+    columns.forEach(function (c) {
+      var td = document.createElement('td');
+      var input = document.createElement('input');
+      input.value = row[c.key] != null ? row[c.key] : '';
+      input.addEventListener('input', function (e) {
+        variantRows[rowIndex][c.key] = e.target.value;
+        updateInheritanceColor();
+      });
+      if (c.key === 'inheritance') inheritanceInput = input;
+      if (c.key === 'franklin') {
+        var bIdx = batchIdx != null ? batchIdx : 'x';
+        input.id = 'finput-' + bIdx + '-' + rowIndex;
+        var initFColor = row.franklinColorOverride || franklinColor(input.value);
+        input.style.color = initFColor || '';
+        input.style.fontWeight = initFColor ? '700' : '';
+        input.addEventListener('input', function (e) {
+          var fc = row.franklinColorOverride || franklinColor(e.target.value);
+          e.target.style.color = fc || '';
+          e.target.style.fontWeight = fc ? '700' : '';
+        });
+        var fWrapper = document.createElement('div');
+        fWrapper.className = 'franklin-cell';
+        fWrapper.appendChild(input);
+        var fLink = document.createElement('a');
+        fLink.href = row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home';
+        fLink.id = 'flink-' + bIdx + '-' + rowIndex;
+        fLink.target = '_blank'; fLink.rel = 'noopener noreferrer';
+        fLink.className = 'franklin-link';
+        fLink.textContent = row._franklinUrl ? '↗' : '…';
+        fLink.title = 'Open on Franklin by QIAGEN';
+        fWrapper.appendChild(fLink);
+        var colorPick = document.createElement('select');
+        colorPick.className = 'franklin-color-pick';
+        colorPick.id = 'fpick-' + bIdx + '-' + rowIndex;
+        colorPick.title = 'Override Franklin color';
+        [['Black','#000000'],['Blue','#1558A5'],['Red','#c2293a']].forEach(function(opt){
+          var o = document.createElement('option');
+          o.value = opt[1]; o.textContent = opt[0];
+          colorPick.appendChild(o);
+        });
+        var ah = franklinColor(input.value) || '#000000';
+        colorPick.value = row.franklinColorOverride || (ah === '#c2293a' ? '#c2293a' : ah === '#000000' ? '#000000' : '#1558A5');
+        colorPick.addEventListener('change', function() {
+          row.franklinColorOverride = colorPick.value;
+          input.style.color = colorPick.value;
+          input.style.fontWeight = '700';
+        });
+        fWrapper.appendChild(colorPick);
+        td.appendChild(fWrapper);
+      } else if (c.key === 'chrPos' && row._chrPosHyperlink) {
+        var cpWrapper = document.createElement('div');
+        cpWrapper.className = 'franklin-cell';
+        cpWrapper.appendChild(input);
+        var cpLink = document.createElement('a');
+        cpLink.href = row._chrPosHyperlink;
+        cpLink.target = '_blank'; cpLink.rel = 'noopener noreferrer';
+        cpLink.className = 'franklin-link';
+        cpLink.textContent = '↗';
+        cpLink.title = 'Open locus link from the source file';
+        cpWrapper.appendChild(cpLink);
+        td.appendChild(cpWrapper);
+      } else {
+        td.appendChild(input);
+      }
+      tr.appendChild(td);
+    });
+
+    updateInheritanceColor();
+    return tr;
+  }
+
   function renderVariantTable(batchIdx) {
     var columns = getVariantColumns(currentReportType);
     buildGridHeaderRows(variantTableHead, columns, variantFrozenCols, function () { renderVariantTable(batchIdx); });
@@ -2193,117 +2351,24 @@
       td.textContent = 'No data loaded yet. Upload a VarSeq Excel export to preview it here.';
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
+    } else if (currentReportType === 'couple') {
+      var sample1Entries = [], sample2Entries = [];
+      variantRows.forEach(function (row, rowIndex) {
+        if (row.zygosity1) sample1Entries.push({ row: row, idx: rowIndex });
+        if (row.zygosity2) sample2Entries.push({ row: row, idx: rowIndex });
+      });
+      var previewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+      variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title1) || 'Sample 1', columns.length));
+      sample1Entries.forEach(function (entry) {
+        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx));
+      });
+      variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title2) || 'Sample 2', columns.length));
+      sample2Entries.forEach(function (entry) {
+        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx));
+      });
     } else {
       variantRows.forEach(function (row, rowIndex) {
-        var tr = document.createElement('tr');
-        var inheritanceInput = null;
-
-        function updateInheritanceColor() {
-          if (inheritanceInput) {
-            var isAR = isHetWithPureAR(variantRows[rowIndex]);
-            inheritanceInput.style.color = isAR ? '#c2293a' : '';
-            inheritanceInput.style.fontWeight = isAR ? '700' : '';
-          }
-        }
-
-        var rowNumTd = document.createElement('td');
-        rowNumTd.className = 'grid-row-number';
-        rowNumTd.style.cssText = 'white-space:nowrap;';
-
-        var delBtn = document.createElement('button');
-        delBtn.textContent = '×';
-        delBtn.title = 'Remove this variant from the list';
-        delBtn.style.cssText = 'font-size:11px;line-height:1;padding:0 3px;margin-right:4px;cursor:pointer;border:1px solid #bbb;background:#fff;border-radius:2px;color:#888;vertical-align:middle;';
-        delBtn.addEventListener('click', (function (capturedIdx) {
-          return function () {
-            variantRows.splice(capturedIdx, 1);
-            variantRows.forEach(function (r, i) { r.sNo = i + 1; });
-            var item = variantBatch[variantPreviewIdx];
-            if (item) {
-              variantPreviewLabel.textContent =
-                'Previewing file ' + (variantPreviewIdx + 1) + ' of ' + variantBatch.length +
-                ': ' + item.fileName +
-                ' (' + variantRows.length + ' variant' + (variantRows.length !== 1 ? 's' : '') + ')';
-            }
-            renderVariantTable(variantPreviewIdx);
-          };
-        })(rowIndex));
-
-        var rowNum = document.createElement('span');
-        rowNum.textContent = rowIndex + 1;
-        rowNumTd.appendChild(delBtn);
-        rowNumTd.appendChild(rowNum);
-        tr.appendChild(rowNumTd);
-
-        columns.forEach(function (c) {
-          var td = document.createElement('td');
-          var input = document.createElement('input');
-          input.value = row[c.key] != null ? row[c.key] : '';
-          input.addEventListener('input', function (e) {
-            variantRows[rowIndex][c.key] = e.target.value;
-            updateInheritanceColor();
-          });
-          if (c.key === 'inheritance') inheritanceInput = input;
-          if (c.key === 'franklin') {
-            var bIdx = batchIdx != null ? batchIdx : 'x';
-            input.id = 'finput-' + bIdx + '-' + rowIndex;
-            var initFColor = row.franklinColorOverride || franklinColor(input.value);
-            input.style.color = initFColor || '';
-            input.style.fontWeight = initFColor ? '700' : '';
-            input.addEventListener('input', function (e) {
-              var fc = row.franklinColorOverride || franklinColor(e.target.value);
-              e.target.style.color = fc || '';
-              e.target.style.fontWeight = fc ? '700' : '';
-            });
-            var fWrapper = document.createElement('div');
-            fWrapper.className = 'franklin-cell';
-            fWrapper.appendChild(input);
-            var fLink = document.createElement('a');
-            fLink.href = row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home';
-            fLink.id = 'flink-' + bIdx + '-' + rowIndex;
-            fLink.target = '_blank'; fLink.rel = 'noopener noreferrer';
-            fLink.className = 'franklin-link';
-            fLink.textContent = row._franklinUrl ? '↗' : '…';
-            fLink.title = 'Open on Franklin by QIAGEN';
-            fWrapper.appendChild(fLink);
-            var colorPick = document.createElement('select');
-            colorPick.className = 'franklin-color-pick';
-            colorPick.id = 'fpick-' + bIdx + '-' + rowIndex;
-            colorPick.title = 'Override Franklin color';
-            [['Black','#000000'],['Blue','#1558A5'],['Red','#c2293a']].forEach(function(opt){
-              var o = document.createElement('option');
-              o.value = opt[1]; o.textContent = opt[0];
-              colorPick.appendChild(o);
-            });
-            var ah = franklinColor(input.value) || '#000000';
-            colorPick.value = row.franklinColorOverride || (ah === '#c2293a' ? '#c2293a' : ah === '#000000' ? '#000000' : '#1558A5');
-            colorPick.addEventListener('change', function() {
-              row.franklinColorOverride = colorPick.value;
-              input.style.color = colorPick.value;
-              input.style.fontWeight = '700';
-            });
-            fWrapper.appendChild(colorPick);
-            td.appendChild(fWrapper);
-          } else if (c.key === 'chrPos' && row._chrPosHyperlink) {
-            var cpWrapper = document.createElement('div');
-            cpWrapper.className = 'franklin-cell';
-            cpWrapper.appendChild(input);
-            var cpLink = document.createElement('a');
-            cpLink.href = row._chrPosHyperlink;
-            cpLink.target = '_blank'; cpLink.rel = 'noopener noreferrer';
-            cpLink.className = 'franklin-link';
-            cpLink.textContent = '↗';
-            cpLink.title = 'Open locus link from the source file';
-            cpWrapper.appendChild(cpLink);
-            td.appendChild(cpWrapper);
-          } else {
-            td.appendChild(input);
-          }
-          tr.appendChild(td);
-        });
-
-        updateInheritanceColor();
-        variantTableBody.appendChild(tr);
+        variantTableBody.appendChild(buildVariantDataRow(row, rowIndex, columns, batchIdx));
       });
     }
     var currentTypeCount = variantBatch.filter(function (item) { return item.reportType === currentReportType; }).length;
@@ -2346,9 +2411,9 @@
   }
 
   // Build an Excel workbook for one batch item and return the ArrayBuffer.
-  function buildVariantExcel(rows, title, columns) {
+  function buildVariantExcel(rows, title, columns, workbook) {
     columns = columns || VARIANT_COLUMNS;
-    var workbook = new ExcelJS.Workbook();
+    workbook = workbook || new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
     columns.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
     var headerRowIndex = 1;
@@ -2508,21 +2573,39 @@
     if (typeof renderVariantMappingList === 'function') renderVariantMappingList();
   }
 
+  function loadWorkbookFromBuffer(buffer) {
+    var workbook = new ExcelJS.Workbook();
+    return workbook.xlsx.load(buffer).then(function () { return workbook; });
+  }
+
+  // Single and couple downloads ship as 2 sheets: the complete, unfiltered
+  // VarSeq export (re-loaded fresh from the original upload each time, so
+  // repeat downloads never accumulate extra sheets) plus the filtered
+  // "Listed Variants" sheet added by the caller. CMC keeps its original
+  // single-sheet output, so this resolves a blank workbook for it.
+  function buildExportWorkbook(item) {
+    if ((item.reportType === 'single' || item.reportType === 'couple') && item.rawBuffer) {
+      return loadWorkbookFromBuffer(item.rawBuffer).then(function (workbook) {
+        if (workbook.worksheets[0]) workbook.worksheets[0].name = 'Complete Data';
+        return workbook;
+      });
+    }
+    return Promise.resolve(new ExcelJS.Workbook());
+  }
+
   function downloadBatchItem(idx) {
     var item = variantBatch[idx];
     if (!item || item.error) return;
 
-    if (item.reportType === 'couple') {
-      buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2).then(function (buffer) {
-        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
-        downloadBlob(buffer, safeName);
-      });
-    } else {
-      buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType)).then(function (buffer) {
-        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
-        downloadBlob(buffer, safeName);
-      });
-    }
+    buildExportWorkbook(item).then(function (workbook) {
+      if (item.reportType === 'couple') {
+        return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
+      }
+      return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook);
+    }).then(function (buffer) {
+      var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
+      downloadBlob(buffer, safeName);
+    });
   }
 
   variantFileInput.addEventListener('change', function (e) {
@@ -2532,8 +2615,10 @@
     variantFileInput.disabled = true;
 
     var promises = Array.from(files).map(function (file) {
+      var rawBuffer;
       return file.arrayBuffer()
         .then(function (buffer) {
+          rawBuffer = buffer;
           var workbook = new ExcelJS.Workbook();
           return workbook.xlsx.load(buffer).then(function () { return workbook; });
         })
@@ -2549,13 +2634,17 @@
             // Couple mode: one row per variant, both partners' genotype fields
             // side by side. Export splits this into two per-sample sections.
             var result = processCoupleVarSeqWorkbook(workbook);
+            var coupleNames = extractCoupleNamesFromFilename(file.name);
+            var name1 = coupleNames[0] || result.sample1Name;
+            var name2 = coupleNames[1] || result.sample2Name;
             return {
               fileName: file.name,
               rows: result.rows,
+              rawBuffer: rawBuffer,
               runName: '',
-              title: 'LISTED VARIANTS FOR ' + result.sample1Name + ' & ' + result.sample2Name,
-              title1: 'LISTED VARIANTS FOR ' + result.sample1Name,
-              title2: 'LISTED VARIANTS FOR ' + result.sample2Name,
+              title: 'LISTED VARIANTS FOR ' + name1 + '_' + name2,
+              title1: 'LISTED VARIANTS FOR ' + name1,
+              title2: 'LISTED VARIANTS FOR ' + name2,
               loadedAt: new Date().toLocaleDateString(),
               error: null
             };
@@ -2566,6 +2655,7 @@
             return {
               fileName: file.name,
               rows: result.rows,
+              rawBuffer: rawBuffer,
               runName: result.runName,
               title: autoTitle,
               loadedAt: new Date().toLocaleDateString(),
@@ -2630,17 +2720,15 @@
 
     var zip = new JSZip();
     Promise.all(validItems.map(function (item) {
-      if (item.reportType === 'couple') {
-        return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2).then(function (buffer) {
-          var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
-          zip.file(safeName, buffer);
-        });
-      } else {
-        return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType)).then(function (buffer) {
-          var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
-          zip.file(safeName, buffer);
-        });
-      }
+      return buildExportWorkbook(item).then(function (workbook) {
+        if (item.reportType === 'couple') {
+          return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
+        }
+        return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook);
+      }).then(function (buffer) {
+        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
+        zip.file(safeName, buffer);
+      });
     })).then(function () {
       return zip.generateAsync({ type: 'arraybuffer' });
     }).then(function (zipBuffer) {
