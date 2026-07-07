@@ -172,7 +172,7 @@
   .excel-grid .grid-row-number { position: sticky; left: 0; }
   .excel-grid .grid-corner { position: sticky; left: 0; z-index: 2; }
   .excel-grid thead th:not(.grid-corner):not(.grid-col-letter) {
-    background: var(--bg-page); color: var(--ink); text-align: center; padding: 6px 8px;
+    background: #1F4E79; color: #fff; text-align: center; padding: 6px 8px;
   }
   .excel-grid tbody td:not(.grid-row-number) { background: #fff; }
   .excel-grid tbody tr:hover td:not(.grid-row-number) { background: #faf6ec; }
@@ -189,10 +189,11 @@
   #variant-table.raw-preview td, #variant-table.raw-preview th:not(.grid-corner):not(.grid-col-letter) {
     white-space: normal; word-break: break-word; text-align: center; vertical-align: middle;
   }
-  #variant-table.raw-preview td { min-width: 160px; padding: 0; }
+  #variant-table.raw-preview td { padding: 0; }
   #variant-table.raw-preview .raw-cell-wrap {
-    max-height: 72px; overflow-y: auto; padding: 5px 8px;
+    max-height: 72px; overflow-y: auto; padding: 5px 8px; min-width: 70px;
   }
+  #variant-table.raw-preview .grid-row-number { min-width: 32px; width: 40px; }
 
   .grid-freeze-btn {
     cursor: pointer; border: 1px solid var(--border-strong); background: #fff;
@@ -1387,13 +1388,23 @@
   // or { text, hyperlink }) instead of plain strings — normalize those to text
   // so they don't end up rendered as "[object Object]".
   function cellText(value) {
-    if (value == null || typeof value !== 'object') return value;
-    if (Array.isArray(value.richText)) {
-      return value.richText.map(function (rt) { return rt.text || ''; }).join('');
+    var result = value;
+    if (value != null && typeof value === 'object') {
+      if (Array.isArray(value.richText)) {
+        result = value.richText.map(function (rt) { return rt.text || ''; }).join('');
+      } else if (value.text != null) {
+        result = value.text;
+      } else if (value.result != null) {
+        result = value.result;
+      } else {
+        result = String(value);
+      }
     }
-    if (value.text != null) return value.text;
-    if (value.result != null) return value.result;
-    return String(value);
+    // "Ref,Alt"-style depth fields (e.g. Allelic Depths) leave a bare "," when
+    // both sides are missing - treat that (or any comma/whitespace-only value)
+    // as empty rather than displaying the literal punctuation.
+    if (typeof result === 'string' && result !== '' && /^[,\s]*$/.test(result)) return '';
+    return result;
   }
 
   // Returns the hyperlink target of a cell value when ExcelJS parsed it as a
@@ -1866,8 +1877,12 @@
       var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
       if (codingIdx === -1) { debugRowsSkipped.nonCoding++; return; }
 
+      // The ACMG Sample Classifier column isn't present in every VarSeq export,
+      // so also check the (reliably-present) ClinVar classification.
       var winningAcmg = acmgList[codingIdx] || acmgList[0] || '';
-      if (isBenignClassification(winningAcmg)) { debugRowsSkipped.benign++; return; }
+      if (isBenignClassification(winningAcmg) || isBenignClassification(get('clinvarClass'))) {
+        debugRowsSkipped.benign++; return;
+      }
 
       var gene = genes[codingIdx] || genes[0] || '';
       if (!gene) { debugRowsSkipped.noGene++; return; }
@@ -1988,7 +2003,11 @@
       var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
       if (codingIdx === -1) return;
 
-      if (isBenignClassification(acmgList[codingIdx] || acmgList[0])) return;
+      // The ACMG Sample Classifier column isn't present in every VarSeq export,
+      // so also check the (reliably-present) ClinVar classification.
+      if (isBenignClassification(acmgList[codingIdx] || acmgList[0]) || isBenignClassification(get('clinvarClass'))) {
+        return;
+      }
 
       var gene = genes[codingIdx] || genes[0] || '';
       if (!gene) return;
