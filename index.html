@@ -2293,7 +2293,7 @@
     return tr;
   }
 
-  function buildVariantDataRow(row, rowIndex, columns, batchIdx) {
+  function buildVariantDataRow(row, rowIndex, columns, batchIdx, displayNo) {
     var tr = document.createElement('tr');
     var inheritanceInput = null;
 
@@ -2337,7 +2337,12 @@
     columns.forEach(function (c) {
       var td = document.createElement('td');
       var input = document.createElement('input');
-      input.value = row[c.key] != null ? row[c.key] : '';
+      // Couple mode splits one row list into two per-patient sections, so the
+      // stored row.sNo (assigned once, in full-list order) no longer lines up
+      // with what's actually the Nth row shown within each section. Use the
+      // caller-supplied per-section position instead, without touching the
+      // underlying row order or row.sNo itself.
+      input.value = (c.key === 'sNo' && displayNo != null) ? displayNo : (row[c.key] != null ? row[c.key] : '');
       input.addEventListener('input', function (e) {
         variantRows[rowIndex][c.key] = e.target.value;
         updateInheritanceColor();
@@ -2529,16 +2534,16 @@
       });
       var previewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
       variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title1) || 'Sample 1', columns.length));
-      sample1Entries.forEach(function (entry) {
-        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx));
+      sample1Entries.forEach(function (entry, i) {
+        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
       });
       variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title2) || 'Sample 2', columns.length));
-      sample2Entries.forEach(function (entry) {
-        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx));
+      sample2Entries.forEach(function (entry, i) {
+        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
       });
     } else {
       variantRows.forEach(function (row, rowIndex) {
-        variantTableBody.appendChild(buildVariantDataRow(row, rowIndex, columns, batchIdx));
+        variantTableBody.appendChild(buildVariantDataRow(row, rowIndex, columns, batchIdx, rowIndex + 1));
       });
     }
     applyFrozenColumns(variantTableHead, variantTableBody, columns, variantFrozenCols);
