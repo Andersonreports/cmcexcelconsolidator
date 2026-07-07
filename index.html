@@ -172,15 +172,22 @@
   .excel-grid .grid-row-number { position: sticky; left: 0; }
   .excel-grid .grid-corner { position: sticky; left: 0; z-index: 2; }
   .excel-grid thead th:not(.grid-corner):not(.grid-col-letter) {
-    background: var(--bg-page); color: var(--ink); text-align: left; padding: 6px 8px;
+    background: var(--bg-page); color: var(--ink); text-align: center; padding: 6px 8px;
   }
   .excel-grid tbody td:not(.grid-row-number) { background: #fff; }
   .excel-grid tbody tr:hover td:not(.grid-row-number) { background: #faf6ec; }
   .excel-grid tbody td input {
     width: 100%; min-width: 90px; font: 12px/1.4 var(--mono); padding: 5px 8px;
-    border: none; border-radius: 0; background: transparent; color: var(--ink);
+    border: none; border-radius: 0; background: transparent; color: var(--ink); text-align: center;
   }
   .excel-grid tbody td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: #fff; }
+
+  /* VarSeq Data (raw) preview mode: long phenotype/annotation values wrap
+     instead of forcing a single nowrap line per cell. */
+  #variant-table.raw-preview td, #variant-table.raw-preview th:not(.grid-corner):not(.grid-col-letter) {
+    white-space: normal; word-break: break-word; text-align: center; vertical-align: middle;
+  }
+  #variant-table.raw-preview td { min-width: 160px; }
 
   .grid-freeze-btn {
     cursor: pointer; border: 1px solid var(--border-strong); background: #fff;
@@ -459,7 +466,7 @@
         <div id="variant-preview-label" class="batch-preview-label" hidden></div>
 
         <div class="table-wrapper excel-grid-wrapper" style="margin-top: 14px;">
-          <table class="excel-grid">
+          <table class="excel-grid" id="variant-table">
             <thead id="variant-table-head"><tr></tr></thead>
             <tbody id="variant-table-body">
               <tr><td class="empty-state">No data loaded yet. Upload VarSeq Excel files to preview them here.</td></tr>
@@ -647,8 +654,14 @@
   function exportRowsToXlsx(rows, columns, sheetName, fileName) {
     var workbook = new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet(sheetName);
-    sheet.columns = columns.map(function (c) { return { header: c.header, key: c.key, width: 18 }; });
-    sheet.getRow(1).font = { bold: true };
+    sheet.columns = columns.map(function (c) {
+      return { header: c.header, key: c.key, width: 18, style: { alignment: { horizontal: 'center', vertical: 'middle' } } };
+    });
+    var headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.eachCell(function (cell) {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+    });
     rows.forEach(function (row) { sheet.addRow(row); });
     return workbook.xlsx.writeBuffer().then(function (buffer) {
       downloadBlob(buffer, fileName);
@@ -1475,6 +1488,7 @@
   var variantPreviewIdx = -1;
   var variantRows = [];
   var variantPreviewMode = 'listed'; // 'listed' | 'raw' - which sheet the preview shows
+  var variantTableEl = document.getElementById('variant-table');
   var variantTableHead = document.getElementById('variant-table-head');
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFrozenCols = new Set();
@@ -2107,8 +2121,8 @@
       COUPLE_EXPORT_COLUMNS.forEach(function (c, i) {
         var cell = headerRow.getCell(i + 1);
         cell.value = c.header;
-        cell.font = { bold: true };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD3D3D3' } };
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       });
       sectionRows.forEach(function (row, i) {
@@ -2392,6 +2406,7 @@
     if (!canShowRaw) variantPreviewMode = 'listed';
     if (variantPreviewModeListedBtn) variantPreviewModeListedBtn.classList.toggle('active', variantPreviewMode === 'listed');
     if (variantPreviewModeRawBtn) variantPreviewModeRawBtn.classList.toggle('active', variantPreviewMode === 'raw');
+    if (variantTableEl) variantTableEl.classList.toggle('raw-preview', variantPreviewMode === 'raw');
   }
 
   // Renders the original, unfiltered VarSeq sheet (read-only) for the "VarSeq
@@ -2749,6 +2764,16 @@
     });
   }
 
+  // Highlights every cell in a header row with the same blue/white treatment
+  // used across all exported sheets, for a consistent look everywhere.
+  function highlightHeaderRow(row, colCount) {
+    for (var c = 1; c <= colCount; c++) {
+      var cell = row.getCell(c);
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+    }
+  }
+
   // Single and couple downloads ship as 2 sheets: the complete, unfiltered
   // VarSeq export (re-loaded fresh from the original upload each time, so
   // repeat downloads never accumulate extra sheets) plus the filtered
@@ -2760,6 +2785,9 @@
         if (workbook.worksheets[0]) {
           workbook.worksheets[0].name = 'Complete Data';
           centerAlignSheet(workbook.worksheets[0]);
+          // VarSeq exports use a 2-row header (annotation-source group + column name).
+          highlightHeaderRow(workbook.worksheets[0].getRow(1), workbook.worksheets[0].columnCount);
+          highlightHeaderRow(workbook.worksheets[0].getRow(2), workbook.worksheets[0].columnCount);
         }
         return workbook;
       });
@@ -3581,6 +3609,7 @@
         if (isNoPath && colIdx > noPathStart && colIdx <= noPathEnd) return;
 
         var cell = dataRow.getCell(colIdx + 1);
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
 
         // ClinVar column: write as a clickable hyperlink whenever the cell has text.
         // Exact URL from eutils is preferred; falls back to a ClinVar search URL
