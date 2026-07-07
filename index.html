@@ -1439,6 +1439,29 @@
     return norm === 'BENIGN' || norm === 'LIKELY BENIGN';
   }
 
+  function abbreviateInheritanceValue(norm) {
+    if (norm === 'AUTOSOMAL DOMINANT') return 'AD';
+    if (norm === 'AUTOSOMAL RECESSIVE') return 'AR';
+    if (norm === 'X-LINKED DOMINANT') return 'XLD';
+    if (norm === 'X-LINKED RECESSIVE') return 'XLR';
+    if (norm === 'X-LINKED') return 'XL';
+    if (norm === 'MULTIFACTORIAL') return 'MF';
+    return norm;
+  }
+
+  function sortInheritanceCodes(codes) {
+    var hasSpecificXLinked = codes.indexOf('XLD') !== -1 || codes.indexOf('XLR') !== -1;
+    var filtered = hasSpecificXLinked ? codes.filter(function (c) { return c !== 'XL'; }) : codes;
+    filtered.sort(function (a, b) {
+      var ai = INHERITANCE_PRIORITY.indexOf(a), bi = INHERITANCE_PRIORITY.indexOf(b);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+    return filtered;
+  }
+
   function abbreviateInheritance(rawList) {
     var order = [];
     var seen = {};
@@ -1452,24 +1475,35 @@
         abbreviateInheritance(norm.split('/')).forEach(addCode);
         return;
       }
-      if (norm === 'AUTOSOMAL DOMINANT') addCode('AD');
-      else if (norm === 'AUTOSOMAL RECESSIVE') addCode('AR');
-      else if (norm === 'X-LINKED DOMINANT') addCode('XLD');
-      else if (norm === 'X-LINKED RECESSIVE') addCode('XLR');
-      else if (norm === 'X-LINKED') addCode('XL');
-      else if (norm === 'MULTIFACTORIAL') addCode('MF');
-      else addCode(norm);
+      addCode(abbreviateInheritanceValue(norm));
     });
-    var hasSpecificXLinked = order.indexOf('XLD') !== -1 || order.indexOf('XLR') !== -1;
-    var filtered = hasSpecificXLinked ? order.filter(function (c) { return c !== 'XL'; }) : order;
-    filtered.sort(function (a, b) {
-      var ai = INHERITANCE_PRIORITY.indexOf(a), bi = INHERITANCE_PRIORITY.indexOf(b);
-      if (ai === -1 && bi === -1) return 0;
-      if (ai === -1) return 1;
-      if (bi === -1) return -1;
-      return ai - bi;
+    return sortInheritanceCodes(order);
+  }
+
+  // Single/couple templates keep each comma-separated entry as its own group
+  // instead of flattening everything into one merged set — e.g. VarSeq's
+  // "Autosomal dominant/Autosomal recessive,Autosomal recessive" becomes
+  // "AD/AR,AR", not the flattened "AD/AR" that abbreviateInheritance produces
+  // (used by the cmc template, which doesn't distinguish per-entry grouping).
+  // Slash-compounds within a group are still abbreviated/sorted the same way;
+  // only exact-duplicate groups (post-abbreviation) are dropped.
+  function abbreviateInheritanceGrouped(raw) {
+    var groups = String(raw || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    var seenGroups = {};
+    var result = [];
+    groups.forEach(function (group) {
+      var codes = [];
+      var seenCode = {};
+      group.split('/').forEach(function (part) {
+        var norm = part.trim().toUpperCase();
+        if (!norm) return;
+        var code = abbreviateInheritanceValue(norm);
+        if (code && !seenCode[code]) { seenCode[code] = true; codes.push(code); }
+      });
+      var groupStr = sortInheritanceCodes(codes).join('/');
+      if (groupStr && !seenGroups[groupStr]) { seenGroups[groupStr] = true; result.push(groupStr); }
     });
-    return filtered;
+    return result.join(',');
   }
 
   function abbreviateZygosity(value, inheritanceCodes) {
@@ -1909,7 +1943,7 @@
         clinvar: get('clinvarClass') || '',
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
-        inheritance: inheritanceCodes.join('/'),
+        inheritance: currentReportType === 'cmc' ? inheritanceCodes.join('/') : abbreviateInheritanceGrouped(rawInheritance),
         inhouseMerged: get('inhouseSamples2'),
         inhouseCount: get('inhouseCount'),
         inhouseSampleNames: get('inhouseSampleNames'),
@@ -2045,7 +2079,7 @@
         vaf2: getNth('vaf', 1),
         alleleDepths2: getNth('alleleDepths', 1),
         clinvar: get('clinvarClass') || '',
-        inheritance: inheritanceCodes.join('/'),
+        inheritance: abbreviateInheritanceGrouped(get('omimInheritance')),
         omimTitle: get('omimTitle'),
         omimPhenotypes: get('omimPhenotypes'),
         seqOntology: get('seqOntology'),
