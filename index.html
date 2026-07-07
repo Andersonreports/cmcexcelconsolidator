@@ -182,6 +182,18 @@
   }
   .excel-grid tbody td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: #fff; }
 
+  .grid-freeze-btn {
+    cursor: pointer; border: 1px solid var(--border-strong); background: #fff;
+    width: 10px; height: 10px; border-radius: 50%; padding: 0; margin-left: 6px;
+    vertical-align: middle; display: inline-block; flex-shrink: 0;
+  }
+  .grid-freeze-btn:hover { border-color: var(--primary); }
+  .grid-freeze-btn.is-frozen { background: var(--primary); border-color: var(--primary); }
+  .excel-grid .frozen-col { position: sticky; z-index: 3; box-shadow: 1px 0 0 0 var(--border-strong); }
+  .excel-grid thead th.frozen-col { z-index: 4; background: var(--bg-page); }
+  .excel-grid tbody td.frozen-col { background: #fff; }
+  .excel-grid tbody tr:hover td.frozen-col { background: #faf6ec; }
+
   .icon-button {
     border: none; background: none; color: var(--error); cursor: pointer; font-size: 14px;
     padding: 6px 10px; border-radius: 3px; transition: background-color 0.12s ease;
@@ -1473,6 +1485,7 @@
   var variantRows = [];
   var variantTableHead = document.getElementById('variant-table-head');
   var variantTableBody = document.getElementById('variant-table-body');
+  var variantFrozenCols = new Set();
   var variantFileInput = document.getElementById('variant-file-input');
   var variantBatchList = document.getElementById('variant-batch-list');
   var variantPreviewLabel = document.getElementById('variant-preview-label');
@@ -2001,10 +2014,18 @@
   // Builds the two-section couple Excel: section 1 lists only variants
   // partner 1 carries (zygosity1 set), section 2 only those partner 2
   // carries — same column layout for both, per the couple template.
-  function buildCoupleVariantExcel(rows, title1, title2) {
+  function buildCoupleVariantExcel(rows, title, title1, title2) {
     var workbook = new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
     COUPLE_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
+
+    var sectionStartRow = 1;
+    if (title) {
+      sheet.getRow(1).getCell(1).value = title;
+      sheet.mergeCells(1, 1, 1, COUPLE_EXPORT_COLUMNS.length);
+      sheet.getRow(1).font = { bold: true, size: 13 };
+      sectionStartRow = 3;
+    }
 
     var franklinColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
     var chrPosColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'chrPos'; });
@@ -2051,7 +2072,7 @@
     var sample1Rows = rows.filter(function (r) { return r.zygosity1; });
     var sample2Rows = rows.filter(function (r) { return r.zygosity2; });
 
-    var nextRow = writeSection(1, title1, sample1Rows);
+    var nextRow = writeSection(sectionStartRow, title1, sample1Rows);
     nextRow++; // blank separator row
     writeSection(nextRow, title2, sample2Rows);
 
@@ -2068,20 +2089,23 @@
     return letters;
   }
 
-  function renderVariantTable(batchIdx) {
-    var columns = getVariantColumns(currentReportType);
-    variantTableHead.innerHTML = '';
-
+  // Builds the column-letter row and header row for an excel-grid table, with a
+  // small pin button on every header cell to freeze/unfreeze that column.
+  // `frozenCols` is a Set of column keys shared with applyFrozenColumns below;
+  // `onToggle` is called (to trigger a full re-render) whenever a pin is clicked.
+  function buildGridHeaderRows(theadEl, columns, frozenCols, onToggle) {
+    theadEl.innerHTML = '';
     var letterRow = document.createElement('tr');
-    letterRow.appendChild(document.createElement('th'));
-    letterRow.firstChild.className = 'grid-corner';
+    var letterCorner = document.createElement('th');
+    letterCorner.className = 'grid-corner';
+    letterRow.appendChild(letterCorner);
     columns.forEach(function (c, i) {
       var th = document.createElement('th');
       th.className = 'grid-col-letter';
       th.textContent = columnLetter(i + 1);
       letterRow.appendChild(th);
     });
-    variantTableHead.appendChild(letterRow);
+    theadEl.appendChild(letterRow);
 
     var headRow = document.createElement('tr');
     var cornerTh = document.createElement('th');
@@ -2089,10 +2113,76 @@
     headRow.appendChild(cornerTh);
     columns.forEach(function (c) {
       var th = document.createElement('th');
-      th.textContent = c.header;
+      var isFrozen = frozenCols.has(c.key);
+      var label = document.createElement('span');
+      label.textContent = c.header;
+      th.appendChild(label);
+      var freezeBtn = document.createElement('button');
+      freezeBtn.type = 'button';
+      freezeBtn.className = 'grid-freeze-btn' + (isFrozen ? ' is-frozen' : '');
+      freezeBtn.title = isFrozen ? 'Unfreeze this column' : 'Freeze this column';
+      freezeBtn.addEventListener('click', function () {
+        if (frozenCols.has(c.key)) frozenCols.delete(c.key); else frozenCols.add(c.key);
+        onToggle();
+      });
+      th.appendChild(freezeBtn);
       headRow.appendChild(th);
     });
-    variantTableHead.appendChild(headRow);
+    theadEl.appendChild(headRow);
+  }
+
+  // Pins frozen columns to sticky left offsets, stacked left-to-right in their
+  // original column order (skipped/unfrozen columns don't affect the offset math).
+  // Must be called after both header rows and all body rows are in the DOM,
+  // since it measures rendered cell widths to compute each offset.
+  function applyFrozenColumns(theadEl, tbodyEl, columns, frozenCols) {
+    var allRows = [].slice.call(theadEl.rows).concat([].slice.call(tbodyEl.rows));
+    allRows.forEach(function (row) {
+      [].slice.call(row.cells).forEach(function (cell) {
+        if (cell.classList.contains('frozen-col')) {
+          cell.classList.remove('frozen-col');
+          cell.style.left = '';
+        }
+      });
+    });
+    if (!frozenCols.size || theadEl.rows.length < 2) return;
+
+    var cornerCell = theadEl.rows[0].cells[0];
+    var runningLeft = cornerCell ? cornerCell.offsetWidth : 0;
+    var headRow = theadEl.rows[1];
+    columns.forEach(function (c, colIdx) {
+      if (!frozenCols.has(c.key)) return;
+      var headerCell = headRow.cells[colIdx + 1];
+      if (!headerCell) return;
+      var width = headerCell.offsetWidth;
+
+      theadEl.rows[0].cells[colIdx + 1].classList.add('frozen-col');
+      theadEl.rows[0].cells[colIdx + 1].style.left = runningLeft + 'px';
+      headerCell.classList.add('frozen-col');
+      headerCell.style.left = runningLeft + 'px';
+
+      [].slice.call(tbodyEl.rows).forEach(function (row) {
+        // Map column index to the actual cell, accounting for colSpan on merged rows.
+        var cellStart = 0;
+        for (var i = 1; i < row.cells.length; i++) {
+          var cell = row.cells[i];
+          var span = cell.colSpan || 1;
+          if (colIdx >= cellStart && colIdx < cellStart + span) {
+            cell.classList.add('frozen-col');
+            cell.style.left = runningLeft + 'px';
+            break;
+          }
+          cellStart += span;
+        }
+      });
+
+      runningLeft += width;
+    });
+  }
+
+  function renderVariantTable(batchIdx) {
+    var columns = getVariantColumns(currentReportType);
+    buildGridHeaderRows(variantTableHead, columns, variantFrozenCols, function () { renderVariantTable(batchIdx); });
 
     variantTableBody.innerHTML = '';
     if (variantRows.length === 0) {
@@ -2223,6 +2313,7 @@
       variantSelectedCount.textContent =
         variantRows.length + ' record' + (variantRows.length !== 1 ? 's' : '');
     }
+    applyFrozenColumns(variantTableHead, variantTableBody, columns, variantFrozenCols);
   }
 
   function showVariantError(message) {
@@ -2344,21 +2435,13 @@
       div.appendChild(infoDiv);
 
       if (item.reportType === 'couple') {
-        var title1Input = document.createElement('input');
-        title1Input.type = 'text';
-        title1Input.className = 'batch-item-title';
-        title1Input.value = item.title1 || '';
-        title1Input.placeholder = 'Sample 1 report title';
-        title1Input.addEventListener('input', function (e) { variantBatch[idx].title1 = e.target.value; });
-        div.appendChild(title1Input);
-
-        var title2Input = document.createElement('input');
-        title2Input.type = 'text';
-        title2Input.className = 'batch-item-title';
-        title2Input.value = item.title2 || '';
-        title2Input.placeholder = 'Sample 2 report title';
-        title2Input.addEventListener('input', function (e) { variantBatch[idx].title2 = e.target.value; });
-        div.appendChild(title2Input);
+        var coupleTitleInput = document.createElement('input');
+        coupleTitleInput.type = 'text';
+        coupleTitleInput.className = 'batch-item-title';
+        coupleTitleInput.value = item.title || '';
+        coupleTitleInput.placeholder = 'Report title';
+        coupleTitleInput.addEventListener('input', function (e) { variantBatch[idx].title = e.target.value; });
+        div.appendChild(coupleTitleInput);
       } else {
         var titleInput = document.createElement('input');
         titleInput.type = 'text';
@@ -2430,7 +2513,7 @@
     if (!item || item.error) return;
 
     if (item.reportType === 'couple') {
-      buildCoupleVariantExcel(item.rows, item.title1, item.title2).then(function (buffer) {
+      buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2).then(function (buffer) {
         var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
         downloadBlob(buffer, safeName);
       });
@@ -2470,6 +2553,7 @@
               fileName: file.name,
               rows: result.rows,
               runName: '',
+              title: 'LISTED VARIANTS FOR ' + result.sample1Name + ' & ' + result.sample2Name,
               title1: 'LISTED VARIANTS FOR ' + result.sample1Name,
               title2: 'LISTED VARIANTS FOR ' + result.sample2Name,
               loadedAt: new Date().toLocaleDateString(),
@@ -2547,7 +2631,7 @@
     var zip = new JSZip();
     Promise.all(validItems.map(function (item) {
       if (item.reportType === 'couple') {
-        return buildCoupleVariantExcel(item.rows, item.title1, item.title2).then(function (buffer) {
+        return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2).then(function (buffer) {
           var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
           zip.file(safeName, buffer);
         });
@@ -2804,6 +2888,7 @@
   var finalWarning = document.getElementById('final-warning');
   var finalTableHead = document.getElementById('final-table-head');
   var finalTableBody = document.getElementById('final-table-body');
+  var finalFrozenCols = new Set();
   var finalClearAllBtn = document.getElementById('final-clear-all');
   var finalDownloadBtn = document.getElementById('final-download');
 
@@ -2914,29 +2999,7 @@
   }
 
   function renderFinalTable() {
-    finalTableHead.innerHTML = '';
-
-    var letterRow = document.createElement('tr');
-    letterRow.appendChild(document.createElement('th'));
-    letterRow.firstChild.className = 'grid-corner';
-    FINAL_COLUMNS.forEach(function (c, i) {
-      var th = document.createElement('th');
-      th.className = 'grid-col-letter';
-      th.textContent = columnLetter(i + 1);
-      letterRow.appendChild(th);
-    });
-    finalTableHead.appendChild(letterRow);
-
-    var headRow = document.createElement('tr');
-    var cornerTh = document.createElement('th');
-    cornerTh.className = 'grid-corner';
-    headRow.appendChild(cornerTh);
-    FINAL_COLUMNS.forEach(function (c) {
-      var th = document.createElement('th');
-      th.textContent = c.header;
-      headRow.appendChild(th);
-    });
-    finalTableHead.appendChild(headRow);
+    buildGridHeaderRows(finalTableHead, FINAL_COLUMNS, finalFrozenCols, renderFinalTable);
 
     finalTableBody.innerHTML = '';
     if (finalConsolidateRows.length === 0) {
@@ -2994,6 +3057,7 @@
     }
     finalClearAllBtn.disabled = finalConsolidateRows.length === 0;
     finalDownloadBtn.disabled = finalConsolidateRows.length === 0;
+    applyFrozenColumns(finalTableHead, finalTableBody, FINAL_COLUMNS, finalFrozenCols);
   }
 
   finalSummaryInput.addEventListener('change', function (e) {
