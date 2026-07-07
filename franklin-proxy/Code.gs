@@ -32,10 +32,10 @@ function doGet(e) {
   if (!query) return respond({ ok: false, error: 'gene and/or variant required' });
 
   var cache    = CacheService.getScriptCache();
-  // v2 bump: v1 cached raw unmapped strings ("ModeratePathogenicSupport", etc.)
-  // for classifications abbreviate() didn't yet recognize — bumping the key
+  // v3 bump: v2 cached wrong "VUS" abbrs for "...Support" tier classifications
+  // from before the lean-aware abbreviate() logic existed — bumping the key
   // prefix drops those stale entries instantly instead of waiting out the TTL.
-  var cacheKey = 'fr:v2:' + query.toLowerCase();
+  var cacheKey = 'fr:v3:' + query.toLowerCase();
   var cached   = cache.get(cacheKey);
   if (cached) return respond(JSON.parse(cached));
 
