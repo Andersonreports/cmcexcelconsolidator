@@ -3201,12 +3201,6 @@
     // confusing it with the ACMG or AlphaMissense "Classification" columns.
     var clinvarCol  = findVSCol({ header: 'Classification', groupIncludes: ['ClinVar'] })
                       || col('CLINVAR', vcol('clinvar'));
-    // ACMG classification: VarSeq stores it as "Classification" under the
-    // "ACMG Sample Classifier" group; app exports use the "ACMG
-    // Classification" header directly (also matches the old "VARSEQ" header
-    // from before that column was renamed).
-    var acmgCol     = findVSCol({ header: 'Classification', groupIncludes: ['ACMG Sample Classifier'] })
-                      || col('ACMG CLASSIFICATION', 'VARSEQ', vcol('varseq'));
     var zygosityCol = col('ZYGOSITY', 'ZYGOSITY', vcol('zygosity'));
     var inheritCol   = col('INHERTIANCE', 'INHERITANCE', 'INHERTIANCE', vcol('inheritance'));
     var vafCol       = col('VAF(%)', 'VARIANT ALLELE FREQ',    vcol('vaf'));
@@ -3239,7 +3233,6 @@
         proteinPos:   row.getCell(proteinCol).value,
         clinvar:      row.getCell(clinvarCol).value,
         clinvarUrl:   '',
-        acmgClassification: row.getCell(acmgCol).value,
         zygosity:     row.getCell(zygosityCol).value,
         inheritance:  row.getCell(inheritCol).value,
         // Excel auto-converts "100.00%" strings to the numeric 1.0 —
@@ -3335,7 +3328,7 @@
                       (details ? extractMimNumber(details.omimPhenotypes) : ''),
           clinvar: details ? (details.clinvar || '') : '',
           clinvarUrl: details ? (details.clinvarUrl || '') : '',
-          acmgClassification: (gene && variant && lookupFinalAcmg(gene, variant)) || (details ? (details.acmgClassification || '') : ''),
+          acmgClassification: (gene && variant) ? lookupFinalAcmg(gene, variant) : '',
           literatureEvidence: literatureEvidence || '',
           remark: remark || '',
           unmatched: unmatched,
