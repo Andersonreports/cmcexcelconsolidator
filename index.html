@@ -182,19 +182,6 @@
   }
   .excel-grid tbody td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: #fff; }
 
-  /* VarSeq Data (raw) preview mode: long phenotype/annotation values wrap
-     instead of forcing a single nowrap line per cell. Wrapped text is capped
-     to a scrollable inner box so one long cell doesn't blow up the whole
-     row's height for every other (short-value) column in that row. */
-  #variant-table.raw-preview td, #variant-table.raw-preview th:not(.grid-corner):not(.grid-col-letter) {
-    white-space: normal; word-break: break-word; text-align: center; vertical-align: middle;
-  }
-  #variant-table.raw-preview td { padding: 0; }
-  #variant-table.raw-preview .raw-cell-wrap {
-    max-height: 72px; overflow-y: auto; padding: 5px 8px; min-width: 70px;
-  }
-  #variant-table.raw-preview .grid-row-number { min-width: 32px; width: 40px; }
-
   .grid-freeze-btn {
     cursor: pointer; border: 1px solid var(--border-strong); background: #fff;
     width: 10px; height: 10px; border-radius: 50%; padding: 0; margin-left: 6px;
@@ -1540,7 +1527,6 @@
   var variantPreviewIdx = -1;
   var variantRows = [];
   var variantPreviewMode = 'listed'; // 'listed' | 'raw' - which sheet the preview shows
-  var variantTableEl = document.getElementById('variant-table');
   var variantTableHead = document.getElementById('variant-table-head');
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFrozenCols = new Set();
@@ -2444,7 +2430,6 @@
     if (!canShowRaw) variantPreviewMode = 'listed';
     if (variantPreviewModeListedBtn) variantPreviewModeListedBtn.classList.toggle('active', variantPreviewMode === 'listed');
     if (variantPreviewModeRawBtn) variantPreviewModeRawBtn.classList.toggle('active', variantPreviewMode === 'raw');
-    if (variantTableEl) variantTableEl.classList.toggle('raw-preview', variantPreviewMode === 'raw');
   }
 
   // Renders the original, unfiltered VarSeq sheet (read-only) for the "VarSeq
@@ -2532,10 +2517,7 @@
       tr.appendChild(rowNumTd);
       vals.forEach(function (v) {
         var td = document.createElement('td');
-        var wrap = document.createElement('div');
-        wrap.className = 'raw-cell-wrap';
-        wrap.textContent = v == null ? '' : String(v);
-        td.appendChild(wrap);
+        td.textContent = v == null ? '' : String(v);
         tr.appendChild(td);
       });
       variantTableBody.appendChild(tr);
