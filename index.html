@@ -2328,10 +2328,10 @@
       };
     })(rowIndex));
 
-    var rowNum = document.createElement('span');
-    rowNum.textContent = rowIndex + 1;
+    // No separate row-number label here — the "S.NO" data column (present in
+    // every template) already shows the sequential number, so this gutter
+    // only needs to hold the delete button.
     rowNumTd.appendChild(delBtn);
-    rowNumTd.appendChild(rowNum);
     tr.appendChild(rowNumTd);
 
     columns.forEach(function (c) {
