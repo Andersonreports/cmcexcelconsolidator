@@ -1588,6 +1588,15 @@
     return '';
   }
 
+  // "VUS/LP" and "B/VUS" are internal lean codes used only to pick a color
+  // (see franklinColor above) — the cell/input text itself should always
+  // just read "VUS" so the lean is conveyed purely through bold/color.
+  function franklinDisplayText(value) {
+    var v = String(value || '').trim().toUpperCase();
+    if (v === 'VUS/LP' || v === 'B/VUS') return 'VUS';
+    return value;
+  }
+
   // ── Franklin (Genoox) auto-classification ──────────────────────────────────
   var FRANKLIN_PROXY_URL = 'https://script.google.com/macros/s/AKfycbxZho7Jig9dKaCIVZIqwSv6FvUJxU9vx6yLwpqvoRjlt3ZQHKkQljthA8QOG9vYq6E3/exec';
 
@@ -1650,7 +1659,7 @@
           row.franklin = data.abbr;
           var inputEl = document.getElementById(inputId);
           if (inputEl) {
-            inputEl.value = data.abbr;
+            inputEl.value = franklinDisplayText(data.abbr);
             var fetchedColor = row.franklinColorOverride || franklinColor(data.abbr);
             inputEl.style.color = fetchedColor || '';
             inputEl.style.fontWeight = fetchedColor ? '700' : '';
@@ -1715,7 +1724,7 @@
           row.franklin = abbr;
           var inputEl = document.getElementById(inputId);
           if (inputEl) {
-            inputEl.value = abbr;
+            inputEl.value = franklinDisplayText(abbr);
             var cvColor = row.franklinColorOverride || franklinColor(abbr);
             inputEl.style.color = cvColor || '';
             inputEl.style.fontWeight = cvColor ? '700' : '';
@@ -2113,6 +2122,7 @@
           dataRow.getCell(chrPosColIdx + 1).value = { text: row.chrPos, hyperlink: row._chrPosHyperlink };
         }
         if (franklinColIdx >= 0) {
+          dataRow.getCell(franklinColIdx + 1).value = franklinDisplayText(row.franklin);
           var fColor = row.franklinColorOverride || franklinColor(row.franklin);
           if (fColor) {
             dataRow.getCell(franklinColIdx + 1).font = { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } };
@@ -2307,7 +2317,11 @@
       if (c.key === 'franklin') {
         var bIdx = batchIdx != null ? batchIdx : 'x';
         input.id = 'finput-' + bIdx + '-' + rowIndex;
-        var initFColor = row.franklinColorOverride || franklinColor(input.value);
+        // Display text is always plain "VUS" — the lean (VUS/LP vs B/VUS) is
+        // conveyed only through color/bold, computed from the underlying
+        // row.franklin code, not from the text shown in the box.
+        input.value = franklinDisplayText(row.franklin);
+        var initFColor = row.franklinColorOverride || franklinColor(row.franklin);
         input.style.color = initFColor || '';
         input.style.fontWeight = initFColor ? '700' : '';
         input.addEventListener('input', function (e) {
@@ -2335,7 +2349,7 @@
           o.value = opt[1]; o.textContent = opt[0];
           colorPick.appendChild(o);
         });
-        var ah = franklinColor(input.value) || '#000000';
+        var ah = franklinColor(row.franklin) || '#000000';
         colorPick.value = row.franklinColorOverride || (ah === '#c2293a' ? '#c2293a' : ah === '#000000' ? '#000000' : '#1558A5');
         colorPick.addEventListener('change', function() {
           row.franklinColorOverride = colorPick.value;
@@ -2592,6 +2606,7 @@
         dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
       }
       if (franklinColIdx >= 0) {
+        dataRow.getCell(franklinColIdx + 1).value = franklinDisplayText(row.franklin);
         var fColor = row.franklinColorOverride || franklinColor(row.franklin);
         if (fColor) {
           dataRow.getCell(franklinColIdx + 1).font = { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } };
