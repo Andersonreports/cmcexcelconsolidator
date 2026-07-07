@@ -121,6 +121,12 @@
   .upload-row:hover { border-color: var(--accent-2); background: #f3ecd9; }
   .upload-row:last-of-type { margin-bottom: 0; }
   .progress-text { font-size: 13px; color: var(--accent); font-weight: 500; }
+  .upload-remove-btn {
+    display: none; font-size: 11px; line-height: 1; padding: 2px 6px; margin-left: 2px;
+    cursor: pointer; border: 1px solid #bbb; background: #fff; border-radius: 2px; color: #888;
+  }
+  .upload-remove-btn:hover { color: #c2293a; border-color: #c2293a; }
+  .upload-remove-btn.visible { display: inline-block; }
 
   .error-banner {
     display: flex; align-items: flex-start; gap: 10px;
@@ -374,6 +380,7 @@
         <div class="upload-row">
           <input type="file" id="sample-image-input" accept="image/*" multiple />
           <span class="progress-text" id="sample-progress-text"></span>
+          <button type="button" class="upload-remove-btn" id="sample-image-remove" title="Remove uploaded image(s)">×</button>
         </div>
         <div class="error-banner" id="sample-error" hidden></div>
       </div>
@@ -428,6 +435,7 @@
             <input type="file" id="variant-file-input" accept=".xlsx,.xls" multiple />
           </label>
           <span class="progress-text" id="variant-progress-text"></span>
+          <button type="button" class="upload-remove-btn" id="variant-file-remove" title="Remove uploaded VarSeq file(s)">×</button>
         </div>
         <div class="upload-row" id="franklin-upload-row" data-report-type="cmc">
           <label class="upload-label">
@@ -435,6 +443,7 @@
             <input type="file" id="franklin-file-input" accept=".xlsx,.xls" />
           </label>
           <span class="progress-text" id="franklin-progress-text"></span>
+          <button type="button" class="upload-remove-btn" id="franklin-file-remove" title="Remove ACMG reference file">×</button>
         </div>
         <div id="variant-batch-list" class="batch-list" hidden></div>
         <div class="error-banner" id="variant-error" hidden></div>
@@ -502,6 +511,7 @@
             <input type="file" id="final-summary-input" accept=".xlsx,.xls" />
           </label>
           <span class="progress-text" id="final-summary-progress"></span>
+          <button type="button" class="upload-remove-btn" id="final-summary-remove" title="Remove summary file">×</button>
         </div>
         <div class="upload-row">
           <label class="upload-label">
@@ -509,6 +519,15 @@
             <input type="file" id="final-listed-input" accept=".xlsx,.xls,.zip" multiple />
           </label>
           <span class="progress-text" id="final-listed-progress"></span>
+          <button type="button" class="upload-remove-btn" id="final-listed-remove" title="Remove uploaded Listed Variant report(s)">×</button>
+        </div>
+        <div class="upload-row">
+          <label class="upload-label">
+            ACMG Reference Excel (optional — fills ACMG Classification column)
+            <input type="file" id="final-acmg-input" accept=".xlsx,.xls" />
+          </label>
+          <span class="progress-text" id="final-acmg-progress"></span>
+          <button type="button" class="upload-remove-btn" id="final-acmg-remove" title="Remove ACMG reference file">×</button>
         </div>
         <div class="error-banner" id="final-error" hidden></div>
         <div class="error-banner" id="final-warning" hidden></div>
@@ -902,6 +921,7 @@
   var sampleTableBody = document.getElementById('sample-table-body');
   var sampleImageInput = document.getElementById('sample-image-input');
   var sampleProgressText = document.getElementById('sample-progress-text');
+  var sampleImageRemoveBtn = document.getElementById('sample-image-remove');
   var sampleError = document.getElementById('sample-error');
   var sampleAddRowBtn = document.getElementById('sample-add-row');
   var sampleClearAllBtn = document.getElementById('sample-clear-all');
@@ -956,6 +976,7 @@
     }
     sampleClearAllBtn.disabled = sampleRows.length === 0;
     sampleDownloadBtn.disabled = sampleRows.length === 0;
+    sampleImageRemoveBtn.classList.toggle('visible', sampleRows.length > 0);
   }
 
   function showSampleError(message) {
@@ -1034,6 +1055,15 @@
   sampleClearAllBtn.addEventListener('click', function () {
     sampleRows = [];
     sampleRawTextEntries = [];
+    renderSampleTable();
+    renderSampleRawDebug();
+  });
+
+  sampleImageRemoveBtn.addEventListener('click', function () {
+    sampleRows = [];
+    sampleRawTextEntries = [];
+    sampleImageInput.value = '';
+    showSampleError('');
     renderSampleTable();
     renderSampleRawDebug();
   });
@@ -1531,6 +1561,7 @@
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFrozenCols = new Set();
   var variantFileInput = document.getElementById('variant-file-input');
+  var variantFileRemoveBtn = document.getElementById('variant-file-remove');
   var variantBatchList = document.getElementById('variant-batch-list');
   var variantPreviewModeToggle = document.getElementById('variant-preview-mode-toggle');
   var variantPreviewModeListedBtn = document.getElementById('variant-preview-mode-listed');
@@ -1547,6 +1578,7 @@
   var franklinEntries = [];
   var franklinFileInput = document.getElementById('franklin-file-input');
   var franklinProgressText = document.getElementById('franklin-progress-text');
+  var franklinFileRemoveBtn = document.getElementById('franklin-file-remove');
 
   function lookupFranklin(gene, variant) {
     var g = gene.trim().toUpperCase();
@@ -1583,17 +1615,28 @@
         });
         franklinEntries = entries;
         franklinProgressText.textContent = file.name + ' (' + entries.length + ' entries)';
+        franklinFileRemoveBtn.classList.toggle('visible', entries.length > 0);
         if (variantRows.length > 0) reapplyFranklinLookup();
       })
       .catch(function (err) {
         showVariantError((err && err.message) || 'Failed to read the reference file.');
         franklinEntries = [];
         franklinProgressText.textContent = '';
+        franklinFileRemoveBtn.classList.remove('visible');
       })
       .finally(function () {
         franklinFileInput.disabled = false;
         franklinFileInput.value = '';
       });
+  });
+
+  franklinFileRemoveBtn.addEventListener('click', function () {
+    franklinEntries = [];
+    franklinFileInput.value = '';
+    franklinProgressText.textContent = '';
+    franklinFileRemoveBtn.classList.remove('visible');
+    showVariantError('');
+    if (variantRows.length > 0) reapplyFranklinLookup();
   });
 
   function reapplyFranklinLookup() {
@@ -2671,6 +2714,7 @@
     variantBatchList.hidden = !hasItems;
     variantClearAllBtn.disabled = !hasItems;
     variantDownloadAllBtn.disabled = !hasItems;
+    variantFileRemoveBtn.classList.toggle('visible', hasItems);
 
     variantBatchList.innerHTML = '';
     visibleEntries.forEach(function (entry, displayIdx) {
@@ -2947,6 +2991,11 @@
     renderVariantTable();
   });
 
+  variantFileRemoveBtn.addEventListener('click', function () {
+    variantFileInput.value = '';
+    variantClearAllBtn.click();
+  });
+
   variantDownloadAllBtn.addEventListener('click', function () {
     var validItems = variantBatch.filter(function (item) {
       return item.reportType === currentReportType && !item.error && item.rows.length > 0;
@@ -3215,8 +3264,14 @@
   var finalConsolidateRows = [];
   var finalSummaryInput = document.getElementById('final-summary-input');
   var finalSummaryProgress = document.getElementById('final-summary-progress');
+  var finalSummaryRemoveBtn = document.getElementById('final-summary-remove');
   var finalListedInput = document.getElementById('final-listed-input');
   var finalListedProgress = document.getElementById('final-listed-progress');
+  var finalListedRemoveBtn = document.getElementById('final-listed-remove');
+  var finalAcmgEntries = new Map();
+  var finalAcmgInput = document.getElementById('final-acmg-input');
+  var finalAcmgProgress = document.getElementById('final-acmg-progress');
+  var finalAcmgRemoveBtn = document.getElementById('final-acmg-remove');
   var finalError = document.getElementById('final-error');
   var finalWarning = document.getElementById('final-warning');
   var finalTableHead = document.getElementById('final-table-head');
@@ -3241,6 +3296,16 @@
     } else {
       finalWarning.hidden = true;
     }
+  }
+
+  // Looks up the full ACMG calculation string (e.g. "P: PS4, PS3, PM5-Supp,
+  // PP5") from the optional ACMG Reference Excel — unlike Franklin's
+  // reference lookup, this keeps the whole criteria string rather than
+  // collapsing it to a single P/LP/VUS code, matching the ACMG Classification
+  // column's expected format.
+  function lookupFinalAcmg(gene, variant) {
+    if (!gene || !variant) return '';
+    return finalAcmgEntries.get(normalizeGeneVariantKey(gene, variant)) || '';
   }
 
   // Builds one output row per picked variant (the primary SNV Result plus
@@ -3270,7 +3335,7 @@
                       (details ? extractMimNumber(details.omimPhenotypes) : ''),
           clinvar: details ? (details.clinvar || '') : '',
           clinvarUrl: details ? (details.clinvarUrl || '') : '',
-          acmgClassification: details ? (details.acmgClassification || '') : '',
+          acmgClassification: (gene && variant && lookupFinalAcmg(gene, variant)) || (details ? (details.acmgClassification || '') : ''),
           literatureEvidence: literatureEvidence || '',
           remark: remark || '',
           unmatched: unmatched,
@@ -3408,18 +3473,29 @@
       .then(function (workbook) {
         finalSummaryPatients = processFinalSummaryWorkbook(workbook);
         finalSummaryProgress.textContent = file.name + ' (' + finalSummaryPatients.length + ' patients)';
+        finalSummaryRemoveBtn.classList.toggle('visible', finalSummaryPatients.length > 0);
         buildFinalConsolidateRows();
       })
       .catch(function (err) {
         showFinalError((err && err.message) || 'Failed to read the summary file.');
         finalSummaryPatients = [];
         finalSummaryProgress.textContent = '';
+        finalSummaryRemoveBtn.classList.remove('visible');
         buildFinalConsolidateRows();
       })
       .finally(function () {
         finalSummaryInput.disabled = false;
         finalSummaryInput.value = '';
       });
+  });
+
+  finalSummaryRemoveBtn.addEventListener('click', function () {
+    finalSummaryPatients = [];
+    finalSummaryInput.value = '';
+    finalSummaryProgress.textContent = '';
+    finalSummaryRemoveBtn.classList.remove('visible');
+    showFinalError('');
+    buildFinalConsolidateRows();
   });
 
   finalListedInput.addEventListener('change', function (e) {
@@ -3471,6 +3547,7 @@
           finalListedFileCount += xlFiles.length;
           finalListedProgress.textContent =
             finalListedFileCount + ' file(s) loaded (' + finalListedVariantEntries.size + ' variant entries indexed)';
+          finalListedRemoveBtn.classList.toggle('visible', finalListedFileCount > 0);
           buildFinalConsolidateRows();
         });
       })
@@ -3483,13 +3560,81 @@
       });
   });
 
+  finalListedRemoveBtn.addEventListener('click', function () {
+    finalListedVariantEntries = new Map();
+    finalListedFileCount = 0;
+    finalListedInput.value = '';
+    finalListedProgress.textContent = '';
+    finalListedRemoveBtn.classList.remove('visible');
+    showFinalError('');
+    buildFinalConsolidateRows();
+  });
+
+  finalAcmgInput.addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    showFinalError('');
+    finalAcmgInput.disabled = true;
+    finalAcmgProgress.textContent = 'Reading file…';
+
+    file.arrayBuffer()
+      .then(function (buffer) {
+        var workbook = new ExcelJS.Workbook();
+        return workbook.xlsx.load(buffer).then(function () { return workbook; });
+      })
+      .then(function (workbook) {
+        var sheet = workbook.worksheets[0];
+        if (!sheet) throw new Error('No worksheet found in the reference file.');
+        var entries = new Map();
+        sheet.eachRow(function (row, r) {
+          if (r === 1) return;
+          var gene = String(row.getCell(1).value || '').trim();
+          var variant = String(row.getCell(2).value || '').trim();
+          var calc = String(row.getCell(3).value || '').trim();
+          if (!gene || !variant) return;
+          entries.set(normalizeGeneVariantKey(gene, variant), calc);
+        });
+        finalAcmgEntries = entries;
+        finalAcmgProgress.textContent = file.name + ' (' + entries.size + ' entries)';
+        finalAcmgRemoveBtn.classList.toggle('visible', entries.size > 0);
+        buildFinalConsolidateRows();
+      })
+      .catch(function (err) {
+        showFinalError((err && err.message) || 'Failed to read the reference file.');
+        finalAcmgEntries = new Map();
+        finalAcmgProgress.textContent = '';
+        finalAcmgRemoveBtn.classList.remove('visible');
+      })
+      .finally(function () {
+        finalAcmgInput.disabled = false;
+        finalAcmgInput.value = '';
+      });
+  });
+
+  finalAcmgRemoveBtn.addEventListener('click', function () {
+    finalAcmgEntries = new Map();
+    finalAcmgInput.value = '';
+    finalAcmgProgress.textContent = '';
+    finalAcmgRemoveBtn.classList.remove('visible');
+    showFinalError('');
+    buildFinalConsolidateRows();
+  });
+
   finalClearAllBtn.addEventListener('click', function () {
     finalSummaryPatients = [];
     finalListedVariantEntries = new Map();
     finalListedFileCount = 0;
+    finalAcmgEntries = new Map();
     finalConsolidateRows = [];
     finalSummaryProgress.textContent = '';
     finalListedProgress.textContent = '';
+    finalAcmgProgress.textContent = '';
+    finalSummaryInput.value = '';
+    finalListedInput.value = '';
+    finalAcmgInput.value = '';
+    finalSummaryRemoveBtn.classList.remove('visible');
+    finalListedRemoveBtn.classList.remove('visible');
+    finalAcmgRemoveBtn.classList.remove('visible');
     showFinalError('');
     showFinalWarning('');
     renderFinalTable();
