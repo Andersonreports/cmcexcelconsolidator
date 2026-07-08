@@ -47,9 +47,8 @@
   h1, h2 { font-weight: 600; color: var(--ink); margin: 0; }
   p { margin: 0; }
 
-  /* ---------- App shell: header + sidebar + dashboard content ---------- */
+  /* ---------- App shell: header + top tabs + dashboard content ---------- */
   .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
-  .app-shell-content { display: flex; flex: 1; }
 
   .top-bar {
     background: #87ceeb; border-bottom: 1px solid var(--border);
@@ -58,11 +57,10 @@
   }
   .top-bar-title { font-size: clamp(18px, 2.4vw, 24px); font-weight: 700; color: var(--ink); }
 
-  .sidebar {
-    width: clamp(220px, 22vw, 280px); flex: 0 0 clamp(220px, 22vw, 280px); border-right: 1px solid var(--border);
-    background: var(--bg-page);
-    padding: 24px 16px; display: flex; flex-direction: column; gap: 32px;
-    position: sticky; top: 0; height: calc(100vh - 60px); overflow-y: auto;
+  .top-tabs {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 0 clamp(16px, 3vw, 24px); overflow-x: auto;
   }
   .report-type-selector {
     display: flex; gap: 6px; align-items: center; margin-left: auto;
@@ -78,22 +76,17 @@
   }
   .report-type-select:hover, .report-type-select:focus { border-color: var(--primary); outline: none; }
 
-  .sidebar-nav { display: flex; flex-direction: column; gap: 1px; }
-  .sidebar-nav-label {
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-secondary);
-    padding: 12px 12px 8px; margin-bottom: 4px; font-weight: 600;
-  }
   .nav-item {
-    all: unset; box-sizing: border-box; display: block; cursor: pointer;
-    padding: 10px 12px; font: 500 13px/1.3 var(--sans); color: var(--text);
-    border-left: 3px solid transparent; border-radius: 0 4px 4px 0; transition: all 0.2s ease;
+    all: unset; box-sizing: border-box; display: block; cursor: pointer; white-space: nowrap;
+    padding: 14px 16px; font: 500 13px/1.3 var(--sans); color: var(--text);
+    border-bottom: 3px solid transparent; transition: all 0.2s ease;
   }
-  .nav-item:hover { background: var(--bg-secondary); color: var(--primary); }
-  .nav-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; border-left-color: var(--primary); }
+  .nav-item:hover { color: var(--primary); }
+  .nav-item.active { color: var(--primary); font-weight: 600; border-bottom-color: var(--primary); }
   .nav-item.hidden-report { display: none; }
   .nav-item[hidden], .tools-label[hidden] { display: none !important; }
 
-  .main-content { flex: 1; min-width: 0; padding: clamp(20px, 3vw, 32px) clamp(16px, 4vw, 40px) 48px; }
+  .main-content { padding: clamp(20px, 3vw, 32px) clamp(16px, 4vw, 40px) 48px; }
 
   .panel-header {
     margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
@@ -318,16 +311,7 @@
   #franklin-upload-row[style*="display: none"] { display: none !important; }
 
   @media (max-width: 860px) {
-    .app-shell-content { flex-direction: column; }
     .top-bar { flex-direction: column; align-items: flex-start; gap: 12px; }
-    .sidebar {
-      width: 100%; flex: 0 0 auto; height: auto; position: static; overflow-y: visible;
-      border-right: none; border-bottom: 1px solid var(--border);
-      flex-direction: row; align-items: center; justify-content: space-between; gap: 16px;
-      padding: 16px 18px;
-    }
-    .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
-    .sidebar-nav-label { display: none; }
     .main-content { padding: 24px 20px 48px; }
   }
 
@@ -358,23 +342,17 @@
     </div>
   </header>
 
-  <div class="app-shell-content">
-    <aside class="sidebar">
-      <nav class="sidebar-nav">
-        <span class="sidebar-nav-label tools-label" data-report-type="cmc">Steps</span>
-        <button class="nav-item tab-button active" data-tab="sample-list" data-report-type="cmc">Sample List Excel</button>
-        <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cmc">Listed Variant Excel</button>
-        <button class="nav-item tab-button" data-tab="final-consolidate" data-report-type="cmc">Sample Final Consolidate</button>
+  <nav class="top-tabs">
+    <button class="nav-item tab-button active" data-tab="sample-list" data-report-type="cmc">Sample List Excel</button>
+    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cmc">Listed Variant Excel</button>
+    <button class="nav-item tab-button" data-tab="final-consolidate" data-report-type="cmc">Sample Final Consolidate</button>
 
-        <span class="sidebar-nav-label tools-label" data-report-type="single" hidden>Step</span>
-        <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="single" hidden>Listed Variant Excel</button>
+    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="single" hidden>Listed Variant Excel</button>
 
-        <span class="sidebar-nav-label tools-label" data-report-type="couple" hidden>Step</span>
-        <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="couple" hidden>Listed Variant Excel</button>
-      </nav>
-    </aside>
+    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="couple" hidden>Listed Variant Excel</button>
+  </nav>
 
-    <main class="main-content">
+  <main class="main-content">
     <section class="tab-panel" id="panel-sample-list">
       <div class="panel-header">
         <div class="panel-eyebrow">Sample List Excel</div>
@@ -557,7 +535,6 @@
       </div>
     </section>
   </main>
-  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
@@ -2500,18 +2477,6 @@
         fLink.title = 'Open on Franklin by QIAGEN';
         fWrapper.appendChild(fLink);
         td.appendChild(fWrapper);
-      } else if (c.key === 'chrPos' && row._chrPosHyperlink) {
-        var cpWrapper = document.createElement('div');
-        cpWrapper.className = 'franklin-cell';
-        cpWrapper.appendChild(input);
-        var cpLink = document.createElement('a');
-        cpLink.href = row._chrPosHyperlink;
-        cpLink.target = '_blank'; cpLink.rel = 'noopener noreferrer';
-        cpLink.className = 'franklin-link';
-        cpLink.textContent = '↗';
-        cpLink.title = 'Open locus link from the source file';
-        cpWrapper.appendChild(cpLink);
-        td.appendChild(cpWrapper);
       } else {
         td.appendChild(input);
       }
