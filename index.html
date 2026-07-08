@@ -1704,19 +1704,27 @@
     return String(value || '').trim().toUpperCase() === 'VUS';
   }
 
+  // Returns a Promise that resolves once every row's Franklin lookup (live
+  // proxy + ClinVar fallback) has settled, so callers that need the final
+  // classification - like building a download - can wait on it instead of
+  // reading row.franklin while lookups are still in flight or were never
+  // triggered at all (e.g. for a batch item that was never actively previewed).
   function resolveFranklinForRows(rows, batchIdx) {
-    rows.forEach(function (row, rowIdx) {
+    var pending = rows.map(function (row, rowIdx) {
       var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
       if (row.franklin && !isGenericVus(row.franklin)) {
         if (linkEl) linkEl.textContent = '↗';
-        return;
+        return null;
       }
-      if (!row.gene && !row.variant) return;
+      if (!row.gene && !row.variant) return null;
       if (linkEl) linkEl.textContent = isGenericVus(row.franklin) ? '↗' : '…';
-      (function (r, ri) {
-        setTimeout(function () { fetchFranklinForRow(r, ri, batchIdx); }, ri * 250);
-      })(row, rowIdx);
+      return new Promise(function (resolve) {
+        setTimeout(function () {
+          fetchFranklinForRow(row, rowIdx, batchIdx).then(resolve);
+        }, rowIdx * 250);
+      });
     });
+    return Promise.all(pending);
   }
 
   function fetchFranklinForRow(row, rowIdx, batchIdx) {
@@ -1727,15 +1735,14 @@
     if (!FRANKLIN_PROXY_URL) {
       var linkElNoProxy = document.getElementById(linkId);
       if (linkElNoProxy) linkElNoProxy.textContent = '↗';
-      if (!row.franklin) fetchClinVarClass(row, rowIdx, batchIdx);
-      return;
+      return row.franklin ? Promise.resolve() : fetchClinVarClass(row, rowIdx, batchIdx);
     }
 
     var url = FRANKLIN_PROXY_URL +
       '?gene=' + encodeURIComponent(row.gene || '') +
       '&variant=' + encodeURIComponent(row.variant || '');
 
-    fetch(url, { headers: { 'Accept': 'application/json' } })
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var linkEl = document.getElementById(linkId);
@@ -1759,24 +1766,25 @@
             inputEl.style.color = fetchedColor || '';
             inputEl.style.fontWeight = fetchedColor ? '700' : '';
           }
+          return null;
         } else if (!row.franklin) {
-          fetchClinVarClass(row, rowIdx, batchIdx);
+          return fetchClinVarClass(row, rowIdx, batchIdx);
         }
       })
       .catch(function () {
         var linkEl2 = document.getElementById(linkId);
         if (linkEl2) linkEl2.textContent = '↗';
-        if (!row.franklin) fetchClinVarClass(row, rowIdx, batchIdx);
+        return row.franklin ? null : fetchClinVarClass(row, rowIdx, batchIdx);
       });
   }
 
   function fetchClinVarClass(row, rowIdx, batchIdx) {
     var inputId = 'finput-' + batchIdx + '-' + rowIdx;
-    if (row.franklin) return;
+    if (row.franklin) return Promise.resolve();
 
     var gene    = String(row.gene    || '').trim();
     var variant = String(row.variant || '').trim();
-    if (!gene && !variant) return;
+    if (!gene && !variant) return Promise.resolve();
 
     var varForms = [variant];
     var dm = variant.match(/^(c\.[0-9_+\-*]+)del[ACGT]+$/i);
@@ -1788,7 +1796,7 @@
       return '(' + (gene ? gene + '[gene] AND ' : '') + '"' + v + '"[All Fields])';
     });
 
-    fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
+    return fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
           '?db=clinvar&term=' + encodeURIComponent(parts.join(' OR ')) + '&retmax=5&retmode=json')
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -2772,7 +2780,7 @@
       dlBtn.className = 'batch-item-btn';
       dlBtn.textContent = '↓ Excel';
       dlBtn.disabled = !!item.error;
-      dlBtn.addEventListener('click', function () { downloadBatchItem(idx); });
+      dlBtn.addEventListener('click', function () { downloadBatchItem(idx, dlBtn); });
       div.appendChild(dlBtn);
 
       variantBatchList.appendChild(div);
@@ -2862,11 +2870,21 @@
     return Promise.resolve(new ExcelJS.Workbook());
   }
 
-  function downloadBatchItem(idx) {
+  function downloadBatchItem(idx, btn) {
     var item = variantBatch[idx];
     if (!item || item.error) return;
 
-    buildExportWorkbook(item).then(function (workbook) {
+    var originalText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Resolving…'; }
+
+    // Franklin classifications resolve asynchronously and are only ever
+    // triggered for whichever item is actively previewed - wait for (or
+    // kick off, if this item was never previewed) every row's lookup here
+    // so the export always reflects the final classification, not whatever
+    // row.franklin happened to be at the moment Download was clicked.
+    resolveFranklinForRows(item.rows, idx).then(function () {
+      return buildExportWorkbook(item);
+    }).then(function (workbook) {
       if (item.reportType === 'couple') {
         return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
       }
@@ -2874,6 +2892,8 @@
     }).then(function (buffer) {
       var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
       downloadBlob(buffer, safeName);
+    }).finally(function () {
+      if (btn) { btn.disabled = !!item.error; btn.textContent = originalText; }
     });
   }
 
@@ -3007,7 +3027,12 @@
 
     var zip = new JSZip();
     Promise.all(validItems.map(function (item) {
-      return buildExportWorkbook(item).then(function (workbook) {
+      var itemIdx = variantBatch.indexOf(item);
+      // See downloadBatchItem for why this wait is needed: Franklin lookups
+      // are async and only ever auto-triggered for the actively-previewed item.
+      return resolveFranklinForRows(item.rows, itemIdx).then(function () {
+        return buildExportWorkbook(item);
+      }).then(function (workbook) {
         if (item.reportType === 'couple') {
           return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
         }
