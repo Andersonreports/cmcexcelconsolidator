@@ -438,7 +438,6 @@
             <input type="file" id="variant-file-input" accept=".xlsx,.xls" multiple />
           </label>
           <span class="progress-text" id="variant-progress-text"></span>
-          <button type="button" class="upload-remove-btn" id="variant-file-remove" title="Remove uploaded VarSeq file(s)">×</button>
         </div>
         <div class="upload-row" id="franklin-upload-row" data-report-type="cmc">
           <label class="upload-label">
@@ -1575,7 +1574,6 @@
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFrozenCols = new Set();
   var variantFileInput = document.getElementById('variant-file-input');
-  var variantFileRemoveBtn = document.getElementById('variant-file-remove');
   var variantBatchList = document.getElementById('variant-batch-list');
   var variantPreviewModeToggle = document.getElementById('variant-preview-mode-toggle');
   var variantPreviewModeListedBtn = document.getElementById('variant-preview-mode-listed');
@@ -2775,7 +2773,6 @@
     variantBatchList.hidden = !hasItems;
     variantClearAllBtn.disabled = !hasItems;
     variantDownloadAllBtn.disabled = !hasItems;
-    variantFileRemoveBtn.classList.toggle('visible', hasItems);
 
     variantBatchList.innerHTML = '';
     visibleEntries.forEach(function (entry, displayIdx) {
@@ -3092,11 +3089,6 @@
     showVariantError('');
     renderBatchList();
     renderVariantTable();
-  });
-
-  variantFileRemoveBtn.addEventListener('click', function () {
-    variantFileInput.value = '';
-    variantClearAllBtn.click();
   });
 
   variantDownloadAllBtn.addEventListener('click', function () {
