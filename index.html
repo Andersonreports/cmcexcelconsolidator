@@ -195,6 +195,9 @@
   }
   .grid-freeze-btn:hover { border-color: var(--primary); }
   .grid-freeze-btn.is-frozen { background: var(--primary); border-color: var(--primary); }
+  .excel-grid thead th.grid-col-header { cursor: grab; }
+  .excel-grid thead th.grid-col-header.dragging { opacity: 0.4; }
+  .excel-grid thead th.grid-col-header.drag-over { box-shadow: inset 2px 0 0 0 #fff, inset -2px 0 0 0 #fff, inset 0 0 0 2px var(--accent); }
   .excel-grid .frozen-col { position: sticky; z-index: 3; box-shadow: 1px 0 0 0 var(--border-strong); }
   .excel-grid thead th.frozen-col { z-index: 4; background: var(--bg-page); }
   .excel-grid tbody td.frozen-col { background: #fff; }
@@ -1221,6 +1224,17 @@
   ];
 
   var COUPLE_VARIANT_COLUMNS = [{ key: 'sNo', header: 'S.NO' }].concat(COUPLE_EXPORT_COLUMNS);
+
+  // COUPLE_VARIANT_COLUMNS is a separate array from COUPLE_EXPORT_COLUMNS (concat
+  // copies references into a new array), so reordering the preview grid's columns
+  // doesn't automatically reorder the array the couple Excel export reads from.
+  // Call this after any drag-drop reorder while viewing the couple report type so
+  // the export stays in sync with what's on screen.
+  function syncCoupleExportColumns() {
+    var reordered = COUPLE_VARIANT_COLUMNS.filter(function (c) { return c.key !== 'sNo'; });
+    COUPLE_EXPORT_COLUMNS.length = 0;
+    COUPLE_EXPORT_COLUMNS.push.apply(COUPLE_EXPORT_COLUMNS, reordered);
+  }
 
   function getVariantColumns(reportType) {
     if (reportType === 'single') return SINGLE_VARIANT_COLUMNS;
@@ -2262,11 +2276,16 @@
   }
 
   // Builds the column-letter row and header row for an excel-grid table, with a
-  // small pin button on every header cell to freeze/unfreeze that column.
+  // small pin button on every header cell to freeze/unfreeze that column, and
+  // drag-and-drop support to reorder columns.
   // `frozenCols` is a Set of column keys shared with applyFrozenColumns below;
-  // `onToggle` is called (to trigger a full re-render) whenever a pin is clicked.
-  function buildGridHeaderRows(theadEl, columns, frozenCols, onToggle) {
+  // `onToggle` is called (to trigger a full re-render) whenever a pin is clicked
+  // or columns are reordered. `onReorder`, if given, runs right before `onToggle`
+  // after a drag-drop reorder, so callers can sync any derived column list
+  // (e.g. an export-only column array) to match the new order.
+  function buildGridHeaderRows(theadEl, columns, frozenCols, onToggle, onReorder) {
     theadEl.innerHTML = '';
+    var draggedIndex = null;
     var letterRow = document.createElement('tr');
     var letterCorner = document.createElement('th');
     letterCorner.className = 'grid-corner';
@@ -2283,14 +2302,18 @@
     var cornerTh = document.createElement('th');
     cornerTh.className = 'grid-corner';
     headRow.appendChild(cornerTh);
-    columns.forEach(function (c) {
+    columns.forEach(function (c, colIndex) {
       var th = document.createElement('th');
+      th.className = 'grid-col-header';
+      th.draggable = true;
+      th.title = 'Drag to reorder this column';
       var isFrozen = frozenCols.has(c.key);
       var label = document.createElement('span');
       label.textContent = c.header;
       th.appendChild(label);
       var freezeBtn = document.createElement('button');
       freezeBtn.type = 'button';
+      freezeBtn.draggable = false;
       freezeBtn.className = 'grid-freeze-btn' + (isFrozen ? ' is-frozen' : '');
       freezeBtn.title = isFrozen ? 'Unfreeze this column' : 'Freeze this column';
       freezeBtn.addEventListener('click', function () {
@@ -2298,6 +2321,33 @@
         onToggle();
       });
       th.appendChild(freezeBtn);
+      th.addEventListener('dragstart', function (e) {
+        draggedIndex = colIndex;
+        th.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(colIndex));
+      });
+      th.addEventListener('dragend', function () {
+        th.classList.remove('dragging');
+      });
+      th.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        th.classList.add('drag-over');
+      });
+      th.addEventListener('dragleave', function () {
+        th.classList.remove('drag-over');
+      });
+      th.addEventListener('drop', function (e) {
+        e.preventDefault();
+        th.classList.remove('drag-over');
+        var fromIndex = draggedIndex;
+        draggedIndex = null;
+        if (fromIndex == null || fromIndex === colIndex) return;
+        var moved = columns.splice(fromIndex, 1)[0];
+        columns.splice(colIndex, 0, moved);
+        if (onReorder) onReorder();
+        onToggle();
+      });
       headRow.appendChild(th);
     });
     theadEl.appendChild(headRow);
@@ -2578,12 +2628,15 @@
   function renderVariantTable(batchIdx) {
     updatePreviewModeToggle();
     var columns = getVariantColumns(currentReportType);
+    if (typeof renderVariantMappingList === 'function') renderVariantMappingList();
 
     if (variantPreviewMode === 'raw') {
       var rawItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
       if (rawItem) renderRawVariantPreview(rawItem);
     } else {
-    buildGridHeaderRows(variantTableHead, columns, variantFrozenCols, function () { renderVariantTable(batchIdx); });
+    buildGridHeaderRows(variantTableHead, columns, variantFrozenCols, function () { renderVariantTable(batchIdx); }, function () {
+      if (currentReportType === 'couple') syncCoupleExportColumns();
+    });
 
     variantTableBody.innerHTML = '';
     if (variantRows.length === 0) {
@@ -3427,8 +3480,10 @@
       tr.appendChild(td);
       finalTableBody.appendChild(tr);
     } else {
-      var noPathStart = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
-      var noPathEnd   = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
+      var noPathGeneIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
+      var noPathAcmgIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
+      var noPathStart = Math.min(noPathGeneIdx, noPathAcmgIdx);
+      var noPathEnd   = Math.max(noPathGeneIdx, noPathAcmgIdx);
 
       finalConsolidateRows.forEach(function (row, rowIndex) {
         var tr = document.createElement('tr');
@@ -3788,8 +3843,10 @@
     });
     headerRow.height = 22;
 
-    var noPathStart = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
-    var noPathEnd   = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
+    var noPathGeneIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'gene'; });
+    var noPathAcmgIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'acmgClassification'; });
+    var noPathStart = Math.min(noPathGeneIdx, noPathAcmgIdx);
+    var noPathEnd   = Math.max(noPathGeneIdx, noPathAcmgIdx);
     var clinvarColIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
     var litColIdx     = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'literatureEvidence'; });
     var omimColIdx    = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'omimTitle'; });
