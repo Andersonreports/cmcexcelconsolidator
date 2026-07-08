@@ -495,6 +495,7 @@
         <div class="action-row">
           <button id="variant-clear-all" disabled>Clear All</button>
           <button class="primary" id="variant-download-all" disabled>Download All (ZIP)</button>
+          <button class="primary" id="variant-download-all-no-raw" disabled hidden title="Download the Listed Variants sheet only, without the original VarSeq Excel data">Download All (No VarSeq Data)</button>
         </div>
       </div>
     </section>
@@ -607,6 +608,13 @@
     var franklinUploadRow = document.getElementById('franklin-upload-row');
     if (franklinUploadRow) {
       franklinUploadRow.style.display = reportType === 'cmc' ? 'block' : 'none';
+    }
+
+    // The "no VarSeq Data" download only matters for single/couple exports,
+    // which are the only ones that embed the original VarSeq sheet.
+    var downloadAllNoRawBtn = document.getElementById('variant-download-all-no-raw');
+    if (downloadAllNoRawBtn) {
+      downloadAllNoRawBtn.hidden = reportType === 'cmc';
     }
 
     // Reset to first tab of selected report type
@@ -1583,6 +1591,7 @@
   var variantError = document.getElementById('variant-error');
   var variantClearAllBtn = document.getElementById('variant-clear-all');
   var variantDownloadAllBtn = document.getElementById('variant-download-all');
+  var variantDownloadAllNoRawBtn = document.getElementById('variant-download-all-no-raw');
   var variantSampleSelect = document.getElementById('variant-sample-select');
   var variantTitleInput = document.getElementById('variant-title-input');
 
@@ -2671,6 +2680,7 @@
     var currentTypeCount = variantBatch.filter(function (item) { return item.reportType === currentReportType; }).length;
     variantClearAllBtn.disabled = currentTypeCount === 0;
     variantDownloadAllBtn.disabled = currentTypeCount === 0;
+    if (variantDownloadAllNoRawBtn) variantDownloadAllNoRawBtn.disabled = currentTypeCount === 0;
     if (variantSelectedCount) {
       variantSelectedCount.textContent =
         variantRows.length + ' record' + (variantRows.length !== 1 ? 's' : '');
@@ -2773,6 +2783,7 @@
     variantBatchList.hidden = !hasItems;
     variantClearAllBtn.disabled = !hasItems;
     variantDownloadAllBtn.disabled = !hasItems;
+    if (variantDownloadAllNoRawBtn) variantDownloadAllNoRawBtn.disabled = !hasItems;
 
     variantBatchList.innerHTML = '';
     visibleEntries.forEach(function (entry, displayIdx) {
@@ -3091,14 +3102,20 @@
     renderVariantTable();
   });
 
-  variantDownloadAllBtn.addEventListener('click', function () {
+  // Builds the batch ZIP. `includeRawData` controls whether each exported
+  // workbook also gets the original VarSeq "Complete Data" sheet (only
+  // buildExportWorkbook adds that, and only for single/couple report types) -
+  // skipping it just starts each workbook empty before the Listed Variants
+  // sheet is added.
+  function downloadAllZip(includeRawData, btn, zipFileName) {
     var validItems = variantBatch.filter(function (item) {
       return item.reportType === currentReportType && !item.error && item.rows.length > 0;
     });
     if (!validItems.length) return;
 
-    variantDownloadAllBtn.disabled = true;
-    variantDownloadAllBtn.textContent = 'Generating ZIP…';
+    var originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Generating ZIP…';
 
     var zip = new JSZip();
     Promise.all(validItems.map(function (item) {
@@ -3106,7 +3123,7 @@
       // See downloadBatchItem for why this wait is needed: Franklin lookups
       // are async and only ever auto-triggered for the actively-previewed item.
       return resolveFranklinForRows(item.rows, itemIdx).then(function () {
-        return buildExportWorkbook(item);
+        return includeRawData ? buildExportWorkbook(item) : Promise.resolve(new ExcelJS.Workbook());
       }).then(function (workbook) {
         if (item.reportType === 'couple') {
           return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
@@ -3119,14 +3136,24 @@
     })).then(function () {
       return zip.generateAsync({ type: 'arraybuffer' });
     }).then(function (zipBuffer) {
-      downloadBlob(zipBuffer, 'listed-variants-batch.zip');
+      downloadBlob(zipBuffer, zipFileName);
     }).catch(function (err) {
       showVariantError((err && err.message) || 'Failed to generate ZIP.');
     }).finally(function () {
-      variantDownloadAllBtn.disabled = !variantBatch.some(function (item) { return item.reportType === currentReportType; });
-      variantDownloadAllBtn.textContent = 'Download All (ZIP)';
+      btn.disabled = !variantBatch.some(function (item) { return item.reportType === currentReportType; });
+      btn.textContent = originalText;
     });
+  }
+
+  variantDownloadAllBtn.addEventListener('click', function () {
+    downloadAllZip(true, variantDownloadAllBtn, 'listed-variants-batch.zip');
   });
+
+  if (variantDownloadAllNoRawBtn) {
+    variantDownloadAllNoRawBtn.addEventListener('click', function () {
+      downloadAllZip(false, variantDownloadAllNoRawBtn, 'listed-variants-batch-no-varseq-data.zip');
+    });
+  }
 
   // ====================================================================
   // Sample Final Consolidate tab
