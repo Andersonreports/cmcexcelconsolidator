@@ -2259,11 +2259,14 @@
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
         });
         if (franklinColIdx >= 0) {
-          dataRow.getCell(franklinColIdx + 1).value = franklinDisplayText(row.franklin);
+          var fCell = dataRow.getCell(franklinColIdx + 1);
           var fColor = franklinColor(row.franklin);
-          if (fColor) {
-            dataRow.getCell(franklinColIdx + 1).font = { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } };
-          }
+          var fFont = fColor ? { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
+          // Same link the preview's "↗" icon opens - the resolved variant URL
+          // once Franklin lookup finishes, or the generic Franklin home page
+          // as a fallback so the cell is still clickable either way.
+          fCell.value = { text: franklinDisplayText(row.franklin), hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
+          fCell.font = fFont;
         }
         homoColIdxs.forEach(function (colIdx) {
           var val = row[COUPLE_EXPORT_COLUMNS[colIdx].key];
@@ -2790,11 +2793,14 @@
         dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
       }
       if (franklinColIdx >= 0) {
-        dataRow.getCell(franklinColIdx + 1).value = franklinDisplayText(row.franklin);
+        var fCell = dataRow.getCell(franklinColIdx + 1);
         var fColor = franklinColor(row.franklin);
-        if (fColor) {
-          dataRow.getCell(franklinColIdx + 1).font = { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } };
-        }
+        var fFont = fColor ? { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
+        // Same link the preview's "↗" icon opens - the resolved variant URL
+        // once Franklin lookup finishes, or the generic Franklin home page
+        // as a fallback so the cell is still clickable either way.
+        fCell.value = { text: franklinDisplayText(row.franklin), hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
+        fCell.font = fFont;
       }
       homoColIdxs.forEach(function (colIdx) {
         var val = row[columns[colIdx].key];
