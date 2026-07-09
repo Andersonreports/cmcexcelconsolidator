@@ -2378,9 +2378,7 @@
         homoColIdxs.forEach(function (colIdx) {
           var val = row[COUPLE_EXPORT_COLUMNS[colIdx].key];
           if (val != null && val !== '' && Number(val) > 0) {
-            var cell = dataRow.getCell(colIdx + 1);
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } };
-            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
           }
         });
         vafColIdxs.forEach(function (colIdx) {
@@ -2971,9 +2969,7 @@
       homoColIdxs.forEach(function (colIdx) {
         var val = row[columns[colIdx].key];
         if (val != null && val !== '' && Number(val) > 0) {
-          var cell = dataRow.getCell(colIdx + 1);
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF0000' } };
-          cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
         }
       });
       vafColIdxs.forEach(function (colIdx) {
