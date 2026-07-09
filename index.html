@@ -1532,6 +1532,30 @@
     return norm;
   }
 
+  // Some couple VarSeq exports omit the explicit "Zygosity" column and only
+  // carry Allelic Depths (ref,alt read counts) and/or Variant Allele Freq.
+  // Zygosity is conventionally derived from those same numbers anyway (a
+  // near-zero ref count means the alt allele is the only one seen = HOM;
+  // both ref and alt present = HET), so fall back to that when there's no
+  // explicit call to read.
+  function deriveZygosityFromDepths(alleleDepthsRaw, vafRaw, isXLinked) {
+    if (alleleDepthsRaw) {
+      var parts = String(alleleDepthsRaw).split(',');
+      if (parts.length >= 2) {
+        var ref = parseFloat(parts[0]);
+        var alt = parseFloat(parts[1]);
+        if (!isNaN(ref) && !isNaN(alt) && (ref > 0 || alt > 0)) {
+          return ref > 0 ? 'HET' : (isXLinked ? 'HEMI' : 'HOM');
+        }
+      }
+    }
+    if (vafRaw != null && vafRaw !== '') {
+      var vaf = parseFloat(vafRaw);
+      if (!isNaN(vaf)) return vaf >= 0.85 ? (isXLinked ? 'HEMI' : 'HOM') : 'HET';
+    }
+    return '';
+  }
+
   // A heterozygous variant in a gene with strictly autosomal recessive
   // inheritance usually means a carrier, not a manifesting disease allele
   // on its own - flagged in red as a reminder this needs a second variant
@@ -2109,10 +2133,22 @@
 
       var rawZygosity1 = getNth('zygosity', 0);
       var rawZygosity2 = getNth('zygosity', 1);
-      if (!rawZygosity1 && !rawZygosity2) return;
+      var readDepths1 = getNth('readDepths', 0);
+      var readDepths2 = getNth('readDepths', 1);
+      var vaf1 = getNth('vaf', 0);
+      var vaf2 = getNth('vaf', 1);
+      var alleleDepths1 = getNth('alleleDepths', 0);
+      var alleleDepths2 = getNth('alleleDepths', 1);
+      // Some exports skip the "Zygosity" column entirely - fall back to
+      // whether that partner has any read depth/allele depth/VAF at all,
+      // since that's what actually indicates a call was made for them.
+      var hasCall1 = !!(rawZygosity1 || readDepths1 || alleleDepths1 || vaf1);
+      var hasCall2 = !!(rawZygosity2 || readDepths2 || alleleDepths2 || vaf2);
+      if (!hasCall1 && !hasCall2) return;
 
       var variant = stripHgvsPrefix(hgvsCList[codingIdx]);
       var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
+      var isXLinked = inheritanceCodes.indexOf('XLD') !== -1 || inheritanceCodes.indexOf('XLR') !== -1 || inheritanceCodes.indexOf('XL') !== -1;
 
       var chrPos = get('chrPosCombined');
       if (!chrPos && get('variantChr')) chrPos = get('variantChr') + ':' + get('variantPos');
@@ -2128,14 +2164,14 @@
         proteinPos: stripHgvsPrefix(hgvsPList[codingIdx] || hgvsPList[0] || ''),
         franklin: lookupFranklin(gene, variant),
         _franklinUrl: null,
-        zygosity1: abbreviateZygosity(rawZygosity1, inheritanceCodes),
-        readDepths1: getNth('readDepths', 0),
-        vaf1: getNth('vaf', 0),
-        alleleDepths1: getNth('alleleDepths', 0),
-        zygosity2: abbreviateZygosity(rawZygosity2, inheritanceCodes),
-        readDepths2: getNth('readDepths', 1),
-        vaf2: getNth('vaf', 1),
-        alleleDepths2: getNth('alleleDepths', 1),
+        zygosity1: rawZygosity1 ? abbreviateZygosity(rawZygosity1, inheritanceCodes) : (hasCall1 ? (deriveZygosityFromDepths(alleleDepths1, vaf1, isXLinked) || 'HET') : ''),
+        readDepths1: readDepths1,
+        vaf1: vaf1,
+        alleleDepths1: alleleDepths1,
+        zygosity2: rawZygosity2 ? abbreviateZygosity(rawZygosity2, inheritanceCodes) : (hasCall2 ? (deriveZygosityFromDepths(alleleDepths2, vaf2, isXLinked) || 'HET') : ''),
+        readDepths2: readDepths2,
+        vaf2: vaf2,
+        alleleDepths2: alleleDepths2,
         clinvar: get('clinvarClass') || '',
         inheritance: abbreviateInheritanceGrouped(get('omimInheritance')),
         omimTitle: get('omimTitle'),
@@ -2201,10 +2237,27 @@
       return runName;
     }
 
+    // The sample group header (e.g. "GEN_T_2.0.spik_4347_...") sits in
+    // whichever column a merged group header cell anchors at - not
+    // necessarily column 3/7 - so read the group text at each "Read Depths
+    // (DP)" column (forward-filling from the last non-empty group cell, same
+    // as findVarSeqColumns does) instead of assuming fixed columns.
+    function groupHeaderAt(col) {
+      if (!col) return '';
+      var lastGroup = '';
+      for (var c = 1; c <= col; c++) {
+        var v = String(groupRow.getCell(c).value || '');
+        if (v) lastGroup = v;
+      }
+      return lastGroup;
+    }
+
+    var readDepthCols = colsAll.readDepths || [];
+
     return {
       rows: rows,
-      sample1Name: extractSampleName(String(groupRow.getCell(3).value || '')),
-      sample2Name: extractSampleName(String(groupRow.getCell(7).value || '')),
+      sample1Name: extractSampleName(groupHeaderAt(readDepthCols[0])),
+      sample2Name: extractSampleName(groupHeaderAt(readDepthCols[1])),
     };
   }
 
@@ -3052,12 +3105,16 @@
           return workbook.xlsx.load(buffer).then(function () { return workbook; });
         })
         .then(function (workbook) {
-          // Detect if this is a couple file (has multiple sample columns)
+          // Detect if this is a couple file (has multiple sample columns).
+          // Sample group headers can land on any column depending on how many
+          // annotation columns precede them, so check by counting "Read
+          // Depths (DP)" header occurrences rather than assuming fixed
+          // column positions.
           var sheet = workbook.worksheets[0];
           var groupRow = sheet.getRow(1);
-          var isCoupleFile = currentReportType === 'couple' &&
-                             groupRow.getCell(3).value &&
-                             groupRow.getCell(7).value;
+          var headerRow = sheet.getRow(2);
+          var readDepthCols = findVarSeqColumns(groupRow, headerRow, sheet.columnCount, VARSEQ_COLUMN_SPECS.readDepths);
+          var isCoupleFile = currentReportType === 'couple' && readDepthCols.length >= 2;
 
           if (isCoupleFile) {
             // Couple mode: one row per variant, both partners' genotype fields
