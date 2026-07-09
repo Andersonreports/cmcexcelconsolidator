@@ -4014,11 +4014,229 @@
     });
   });
 
-  renderSampleTable();
-  renderVariantTable();
-  renderVariantMappingList();
-  renderFinalTable();
-  populateSampleSelect();
+  // ── Autosave / restore ───────────────────────────────────────────────
+  // Persists in-progress edits (sample rows, uploaded VarSeq batches incl.
+  // their raw source buffers, and the final consolidated report) to
+  // localStorage so an accidental refresh/tab close doesn't force the user
+  // to redo everything from scratch. State is captured via a single
+  // MutationObserver + delegated 'input' listener (below) rather than
+  // hooking every individual button/keystroke handler, so it automatically
+  // covers uploads, edits, row add/remove, and report-type switches alike.
+  var AUTOSAVE_KEY = 'cmcExcelConsolidator.autosave.v1';
+  var AUTOSAVE_DEBOUNCE_MS = 800;
+  var autosaveTimer = null;
+
+  function arrayBufferToBase64(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var binary = '';
+    var chunkSize = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function base64ToArrayBuffer(base64) {
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  // Caches the base64 encoding of a batch item's raw buffer on the item
+  // itself, so autosave ticks that fire after unrelated edits (e.g. typing
+  // in the Sample tab) don't re-encode every uploaded file's buffer again.
+  function getCachedBufferBase64(item) {
+    if (!item.rawBuffer) return null;
+    if (item._b64Cache && item._b64CacheSrc === item.rawBuffer) return item._b64Cache;
+    item._b64Cache = arrayBufferToBase64(item.rawBuffer);
+    item._b64CacheSrc = item.rawBuffer;
+    return item._b64Cache;
+  }
+
+  function collectAutosaveState(includeBuffers) {
+    return {
+      v: 1,
+      currentReportType: currentReportType,
+      sampleRows: sampleRows,
+      variantPreviewIdx: variantPreviewIdx,
+      variantBatch: variantBatch.map(function (item) {
+        var copy = {
+          fileName: item.fileName,
+          rows: item.rows,
+          runName: item.runName,
+          title: item.title,
+          title1: item.title1,
+          title2: item.title2,
+          sample1Name: item.sample1Name,
+          sample2Name: item.sample2Name,
+          loadedAt: item.loadedAt,
+          error: item.error,
+          reportType: item.reportType,
+        };
+        if (includeBuffers) {
+          var b64 = getCachedBufferBase64(item);
+          if (b64) copy.rawBufferB64 = b64;
+        }
+        return copy;
+      }),
+      finalSummaryPatients: finalSummaryPatients,
+      finalConsolidateRows: finalConsolidateRows,
+      finalListedFileCount: finalListedFileCount,
+      finalListedVariantEntries: Array.from(finalListedVariantEntries.entries()),
+      finalAcmgEntries: Array.from(finalAcmgEntries.entries()),
+    };
+  }
+
+  function clearAutosavedState() {
+    try { localStorage.removeItem(AUTOSAVE_KEY); } catch (e) { /* ignore */ }
+  }
+
+  function persistAutosaveState() {
+    try {
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(collectAutosaveState(true)));
+    } catch (e) {
+      // Likely a quota error from large raw buffers - retry without them so
+      // edits/uploads metadata still survive a refresh even if the original
+      // VarSeq files' "Complete Data" sheet can't be restored.
+      try {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(collectAutosaveState(false)));
+      } catch (e2) {
+        console.warn('Autosave failed:', e2);
+      }
+    }
+  }
+
+  function scheduleAutosave() {
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(function () {
+      autosaveTimer = null;
+      persistAutosaveState();
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  function showAutosaveRestoredNotice() {
+    var bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:9999;background:#1f4e79;' +
+      'color:#fff;padding:10px 14px;border-radius:6px;font:500 13px/1.4 var(--sans);' +
+      'box-shadow:0 4px 14px rgba(0,0,0,.25);display:flex;align-items:center;gap:10px;max-width:360px;';
+    var msg = document.createElement('span');
+    msg.textContent = 'Restored your unsaved work from before the last refresh.';
+    bar.appendChild(msg);
+    var discardBtn = document.createElement('button');
+    discardBtn.type = 'button';
+    discardBtn.textContent = 'Discard';
+    discardBtn.title = 'Clear the autosaved data and start fresh';
+    discardBtn.style.cssText = 'flex-shrink:0;background:transparent;border:1px solid rgba(255,255,255,.6);' +
+      'color:#fff;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:12px;';
+    discardBtn.addEventListener('click', function () {
+      clearAutosavedState();
+      location.reload();
+    });
+    bar.appendChild(discardBtn);
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = '✕';
+    closeBtn.title = 'Dismiss';
+    closeBtn.style.cssText = 'flex-shrink:0;background:transparent;border:none;color:#fff;cursor:pointer;font-size:13px;opacity:.8;';
+    closeBtn.addEventListener('click', function () { bar.remove(); });
+    bar.appendChild(closeBtn);
+    document.body.appendChild(bar);
+    setTimeout(function () { if (bar.parentNode) bar.remove(); }, 10000);
+  }
+
+  // Restores everything captured by collectAutosaveState and re-renders
+  // every tab. Returns true if a saved session was actually applied.
+  function restoreAutosavedState() {
+    var raw;
+    try { raw = localStorage.getItem(AUTOSAVE_KEY); } catch (e) { return false; }
+    if (!raw) return false;
+    var state;
+    try { state = JSON.parse(raw); } catch (e) { clearAutosavedState(); return false; }
+    if (!state || state.v !== 1) return false;
+
+    var hasAnyData = (state.sampleRows && state.sampleRows.length) ||
+      (state.variantBatch && state.variantBatch.length) ||
+      (state.finalSummaryPatients && state.finalSummaryPatients.length) ||
+      (state.finalConsolidateRows && state.finalConsolidateRows.length);
+    if (!hasAnyData) return false;
+
+    try {
+      sampleRows = state.sampleRows || [];
+      finalSummaryPatients = state.finalSummaryPatients || [];
+      finalConsolidateRows = state.finalConsolidateRows || [];
+      finalListedFileCount = state.finalListedFileCount || 0;
+      finalListedVariantEntries = new Map(state.finalListedVariantEntries || []);
+      finalAcmgEntries = new Map(state.finalAcmgEntries || []);
+      variantBatch = (state.variantBatch || []).map(function (item) {
+        var restored = Object.assign({}, item);
+        if (restored.rawBufferB64) {
+          try { restored.rawBuffer = base64ToArrayBuffer(restored.rawBufferB64); } catch (e) { /* ignore */ }
+          delete restored.rawBufferB64;
+        }
+        return restored;
+      });
+      variantPreviewIdx = (typeof state.variantPreviewIdx === 'number') ? state.variantPreviewIdx : -1;
+
+      renderSampleTable();
+
+      if (finalListedProgress) {
+        finalListedProgress.textContent = finalListedFileCount
+          ? finalListedFileCount + ' file(s) loaded (' + finalListedVariantEntries.size + ' variant entries indexed)'
+          : '';
+      }
+      if (finalListedRemoveBtn) finalListedRemoveBtn.classList.toggle('visible', finalListedFileCount > 0);
+      if (finalAcmgProgress) {
+        finalAcmgProgress.textContent = finalAcmgEntries.size ? 'Reference file loaded (' + finalAcmgEntries.size + ' entries)' : '';
+      }
+      if (finalAcmgRemoveBtn) finalAcmgRemoveBtn.classList.toggle('visible', finalAcmgEntries.size > 0);
+      if (finalSummaryRemoveBtn) finalSummaryRemoveBtn.classList.toggle('visible', finalSummaryPatients.length > 0);
+      renderFinalTable();
+
+      // switchReportType() sets currentReportType, syncs the dropdown/nav
+      // chrome, and (via refreshVariantViewForReportType) picks the right
+      // preview for that type - including honoring the restored
+      // variantPreviewIdx above when it still matches.
+      if (typeof switchReportType === 'function') {
+        switchReportType(state.currentReportType || currentReportType);
+      } else {
+        renderBatchList();
+        renderVariantTable();
+      }
+
+      populateSampleSelect();
+      renderVariantMappingList();
+      showAutosaveRestoredNotice();
+      return true;
+    } catch (e) {
+      console.warn('Failed to restore autosaved state:', e);
+      return false;
+    }
+  }
+
+  function initAutosaveWatchers() {
+    new MutationObserver(function () { scheduleAutosave(); })
+      .observe(document.body, { childList: true, subtree: true });
+    document.addEventListener('input', function (e) {
+      var tag = e.target && e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') scheduleAutosave();
+    });
+    window.addEventListener('beforeunload', function () {
+      if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+      persistAutosaveState();
+    });
+  }
+
+  var autosaveRestored = false;
+  try { autosaveRestored = restoreAutosavedState(); } catch (e) { console.warn('Autosave restore failed:', e); }
+  if (!autosaveRestored) {
+    renderSampleTable();
+    renderVariantTable();
+    renderVariantMappingList();
+    renderFinalTable();
+    populateSampleSelect();
+  }
+  initAutosaveWatchers();
 })();
 </script>
 </body>
