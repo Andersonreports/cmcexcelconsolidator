@@ -262,6 +262,7 @@
     border-radius: 4px; background: var(--bg); color: var(--ink); width: 100%; max-width: 260px; transition: border-color .2s;
   }
   .batch-item-title:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .couple-title-group { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 260px; }
   .batch-item-btn {
     font: 500 12px/1 var(--sans); padding: 6px 12px; border: 1px solid var(--border);
     border-radius: 4px; background: var(--bg); color: var(--ink); cursor: pointer; white-space: nowrap;
@@ -2942,13 +2943,29 @@
       div.appendChild(infoDiv);
 
       if (item.reportType === 'couple') {
-        var coupleTitleInput = document.createElement('input');
-        coupleTitleInput.type = 'text';
-        coupleTitleInput.className = 'batch-item-title';
-        coupleTitleInput.value = item.title || '';
-        coupleTitleInput.placeholder = 'Report title';
-        coupleTitleInput.addEventListener('input', function (e) { variantBatch[idx].title = e.target.value; });
-        div.appendChild(coupleTitleInput);
+        // Chart ID / age / sex aren't present anywhere in the uploaded VarSeq
+        // file, so they can't be auto-extracted - each section title (shared,
+        // partner 1, partner 2) is editable so that info can be typed in
+        // and appended to the auto-generated name/GEN ID once per report.
+        var coupleTitleGroup = document.createElement('div');
+        coupleTitleGroup.className = 'couple-title-group';
+
+        function makeCoupleTitleInput(field, placeholder) {
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'batch-item-title';
+          input.value = item[field] || '';
+          input.placeholder = placeholder;
+          input.addEventListener('input', function (e) {
+            variantBatch[idx][field] = e.target.value;
+            if (idx === variantPreviewIdx) renderVariantTable(idx);
+          });
+          coupleTitleGroup.appendChild(input);
+        }
+        makeCoupleTitleInput('title', 'Shared section title');
+        makeCoupleTitleInput('title1', 'Partner 1 section title');
+        makeCoupleTitleInput('title2', 'Partner 2 section title');
+        div.appendChild(coupleTitleGroup);
       } else {
         var titleInput = document.createElement('input');
         titleInput.type = 'text';
