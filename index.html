@@ -2252,11 +2252,33 @@
     };
   }
 
-  // Builds the three-section couple Excel: section 1 lists variants where
-  // both partners carry the exact same variant (zygosity1 and zygosity2 both
-  // set on the same row), section 2 lists variants only partner 1 carries,
-  // section 3 only those partner 2 carries — same column layout throughout,
-  // per the couple template.
+  // Splits couple rows into the three sections the target report template
+  // uses: rows for genes where BOTH partners carry at least one variant
+  // (each partner's row listed separately - same gene, not necessarily the
+  // same variant, since two different variants in one AR gene is exactly
+  // the compound-het carrier risk the combined section is meant to flag),
+  // then the remaining partner-1-only and partner-2-only rows. Shared by
+  // the Excel export and the on-screen preview so they never drift apart.
+  function splitCoupleRowsByGene(rows) {
+    var maleGenes = {}, femaleGenes = {};
+    rows.forEach(function (r) {
+      if (r._hasMale) maleGenes[r.gene] = true;
+      if (r._hasFemale) femaleGenes[r.gene] = true;
+    });
+    var sharedGenes = {};
+    Object.keys(maleGenes).forEach(function (g) { if (femaleGenes[g]) sharedGenes[g] = true; });
+
+    return {
+      combinedRows: rows.filter(function (r) { return sharedGenes[r.gene]; }),
+      sample1Rows: rows.filter(function (r) { return r._hasMale && !sharedGenes[r.gene]; }),
+      sample2Rows: rows.filter(function (r) { return r._hasFemale && !sharedGenes[r.gene]; }),
+    };
+  }
+
+  // Builds the three-section couple Excel: section 1 lists rows for genes
+  // where both partners carry a variant (see splitCoupleRowsByGene), section
+  // 2 lists variants only partner 1 carries, section 3 only those partner 2
+  // carries — same column layout throughout, per the couple template.
   function buildCoupleVariantExcel(rows, title, title1, title2, workbook) {
     workbook = workbook || new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
@@ -2321,9 +2343,8 @@
       return headerRowIdx + 1 + sectionRows.length;
     }
 
-    var combinedRows = rows.filter(function (r) { return r._hasMale && r._hasFemale; });
-    var sample1Rows = rows.filter(function (r) { return r._hasMale && !r._hasFemale; });
-    var sample2Rows = rows.filter(function (r) { return r._hasFemale && !r._hasMale; });
+    var split = splitCoupleRowsByGene(rows);
+    var combinedRows = split.combinedRows, sample1Rows = split.sample1Rows, sample2Rows = split.sample2Rows;
 
     var nextRow = writeSection(1, title, combinedRows);
     nextRow++; // blank separator row
@@ -2730,9 +2751,17 @@
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
     } else if (currentReportType === 'couple') {
+      var maleGenes = {}, femaleGenes = {};
+      variantRows.forEach(function (row) {
+        if (row._hasMale) maleGenes[row.gene] = true;
+        if (row._hasFemale) femaleGenes[row.gene] = true;
+      });
+      var sharedGenes = {};
+      Object.keys(maleGenes).forEach(function (g) { if (femaleGenes[g]) sharedGenes[g] = true; });
+
       var combinedEntries = [], sample1Entries = [], sample2Entries = [];
       variantRows.forEach(function (row, rowIndex) {
-        if (row._hasMale && row._hasFemale) combinedEntries.push({ row: row, idx: rowIndex });
+        if (sharedGenes[row.gene]) combinedEntries.push({ row: row, idx: rowIndex });
         else if (row._hasMale) sample1Entries.push({ row: row, idx: rowIndex });
         else if (row._hasFemale) sample2Entries.push({ row: row, idx: rowIndex });
       });
