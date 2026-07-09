@@ -2265,7 +2265,7 @@
           // Same link the preview's "↗" icon opens - the resolved variant URL
           // once Franklin lookup finishes, or the generic Franklin home page
           // as a fallback so the cell is still clickable either way.
-          fCell.value = { text: franklinDisplayText(row.franklin), hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
+          fCell.value = { text: franklinDisplayText(row.franklin) + ' ↗', hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
           fCell.font = fFont;
         }
         homoColIdxs.forEach(function (colIdx) {
@@ -2799,7 +2799,7 @@
         // Same link the preview's "↗" icon opens - the resolved variant URL
         // once Franklin lookup finishes, or the generic Franklin home page
         // as a fallback so the cell is still clickable either way.
-        fCell.value = { text: franklinDisplayText(row.franklin), hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
+        fCell.value = { text: franklinDisplayText(row.franklin) + ' ↗', hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
         fCell.font = fFont;
       }
       homoColIdxs.forEach(function (colIdx) {
