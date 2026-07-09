@@ -1348,8 +1348,12 @@
     // Couple-mode: some VarSeq exports pre-combine coordinates into one column each.
     chrPosCombined: { header: 'Chr:Pos' },
     refAltCombined: { header: 'Ref/Alt' },
-    seqOntology: { header: 'Sequence Ontology (Combined)' },
-    transcriptName: { header: 'Transcript Name (Clinically Relevant)' },
+    // Matched by prefix, not the exact phrase - VarSeq exports have shown
+    // both "(Combined)" and "(Clinically Relevant)" suffixes for Sequence
+    // Ontology, and "Transcript Name" with or without a suffix, across
+    // different runs.
+    seqOntology: { headerStartsWith: 'Sequence Ontology' },
+    transcriptName: { headerStartsWith: 'Transcript Name' },
     exonNumber: { header: 'Exon Number (Clinically Relevant)' },
     clinvarVariantId: { header: 'Variant ID', groupIncludes: ['ClinVar'] },
     omimGeneId: { header: 'Gene OMIM ID', groupIncludes: ['OMIM'] },
