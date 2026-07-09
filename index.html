@@ -1887,11 +1887,16 @@
   // doesn't contain any recognizable "<code>_<salutation>_<name>" blocks.
   function extractCoupleNamesFromFilename(filename) {
     var base = filename.replace(/\.[^.]+$/, '');
-    var re = /(\d+)_(MR|MRS|MS|MASTER)_([A-Za-z]+)/gi;
+    // The name after the salutation can be several underscore-separated words
+    // (e.g. "MR_P_SENE_ALEX_EDWARD") - capture all of them, stopping only at
+    // the next patient's "_<id>_MR|MRS|MS|MASTER_" block or the end of the
+    // filename, instead of just the first word.
+    var re = /(\d+)_(MR|MRS|MS|MASTER)_([A-Za-z_]+?)(?=(?:_\d+_(?:MR|MRS|MS|MASTER)_)|$)/gi;
     var names = [];
     var m;
     while ((m = re.exec(base))) {
-      names.push(m[1] + '_' + m[2].toUpperCase() + '. ' + m[3].toUpperCase());
+      var nameWords = m[3].replace(/_+$/, '').split('_').filter(Boolean).map(function (w) { return w.toUpperCase(); }).join(' ');
+      names.push(m[1] + '_' + m[2].toUpperCase() + '. ' + nameWords);
     }
     return names;
   }
