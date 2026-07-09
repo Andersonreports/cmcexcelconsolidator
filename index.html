@@ -2261,7 +2261,11 @@
         if (franklinColIdx >= 0) {
           var fCell = dataRow.getCell(franklinColIdx + 1);
           var fColor = franklinColor(row.franklin);
-          var fFont = fColor ? { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
+          // Not bold - Excel applies one font to the whole cell, so a bold
+          // colored classification plus arrow reads as one heavy block of
+          // color. Keeping the color (still conveys the lean) but dropping
+          // the bold weight gives a lighter, more link-like result.
+          var fFont = fColor ? { color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
           // Same link the preview's "↗" icon opens - the resolved variant URL
           // once Franklin lookup finishes, or the generic Franklin home page
           // as a fallback so the cell is still clickable either way.
@@ -2795,7 +2799,11 @@
       if (franklinColIdx >= 0) {
         var fCell = dataRow.getCell(franklinColIdx + 1);
         var fColor = franklinColor(row.franklin);
-        var fFont = fColor ? { bold: true, color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
+        // Not bold - Excel applies one font to the whole cell, so a bold
+        // colored classification plus arrow reads as one heavy block of
+        // color. Keeping the color (still conveys the lean) but dropping the
+        // bold weight gives a lighter, more link-like result.
+        var fFont = fColor ? { color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
         // Same link the preview's "↗" icon opens - the resolved variant URL
         // once Franklin lookup finishes, or the generic Franklin home page
         // as a fallback so the cell is still clickable either way.
