@@ -1704,6 +1704,25 @@
     return '';
   }
 
+  // Allelic Depths (AD) is a "ref,alt" pair (e.g. "122,136") - a read depth
+  // below 20 for either allele is low-confidence and worth flagging, but only
+  // that specific number, not the whole cell. Returns an ExcelJS rich-text
+  // value ({ richText: [...] }) with each comma-separated piece kept as its
+  // own run so only the low number(s) get the red font; commas/whitespace
+  // are preserved verbatim as separators between runs.
+  function alleleDepthRichText(value) {
+    if (value == null || value === '') return value;
+    var parts = String(value).split(/([,\s]+)/); // keeps separators as their own array entries
+    var anyColored = false;
+    var richText = parts.map(function (part) {
+      var num = Number(part);
+      var isLow = part !== '' && !isNaN(num) && num < 20;
+      if (isLow) anyColored = true;
+      return isLow ? { text: part, font: { color: { argb: 'FFC2293A' }, bold: true } } : { text: part };
+    });
+    return anyColored ? { richText: richText } : value;
+  }
+
   // "VUS/LP" and "B/VUS" are internal lean codes used only to pick a color
   // (see franklinColor above) — the cell/input text itself should always
   // just read "VUS" so the lean is conveyed purely through bold/color.
@@ -2310,6 +2329,10 @@
       if (c.key === 'vaf1' || c.key === 'vaf2') acc.push(i);
       return acc;
     }, []);
+    var alleleDepthColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
+      if (c.key === 'alleleDepths1' || c.key === 'alleleDepths2') acc.push(i);
+      return acc;
+    }, []);
 
     function writeSection(startRow, title, sectionRows) {
       sheet.getRow(startRow).getCell(1).value = title;
@@ -2365,6 +2388,11 @@
           if (val != null && val !== '' && !isNaN(Number(val)) && Number(val) < 0.3) {
             dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
           }
+        });
+        alleleDepthColIdxs.forEach(function (colIdx) {
+          var cell = dataRow.getCell(colIdx + 1);
+          var richValue = alleleDepthRichText(row[COUPLE_EXPORT_COLUMNS[colIdx].key]);
+          if (richValue && richValue.richText) cell.value = richValue;
         });
       });
       return headerRowIdx + 1 + sectionRows.length;
@@ -2587,12 +2615,23 @@
         var vafNum = Number(input.value);
         input.style.color = (input.value !== '' && !isNaN(vafNum) && vafNum < 0.3) ? '#c2293a' : '';
       }
+      // A plain <input> can't color just the low number within a "ref,alt"
+      // pair like the exported cell does - flag the whole box red instead as
+      // an on-screen approximation of the export's per-number highlight.
+      if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') {
+        var adRich = alleleDepthRichText(input.value);
+        input.style.color = (adRich && adRich.richText) ? '#c2293a' : '';
+      }
       input.addEventListener('input', function (e) {
         variantRows[rowIndex][c.key] = e.target.value;
         updateInheritanceColor();
         if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
           var newVaf = Number(e.target.value);
           e.target.style.color = (e.target.value !== '' && !isNaN(newVaf) && newVaf < 0.3) ? '#c2293a' : '';
+        }
+        if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') {
+          var newAdRich = alleleDepthRichText(e.target.value);
+          e.target.style.color = (newAdRich && newAdRich.richText) ? '#c2293a' : '';
         }
       });
       if (c.key === 'inheritance') inheritanceInput = input;
@@ -2893,6 +2932,10 @@
       if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') acc.push(i);
       return acc;
     }, []);
+    var alleleDepthColIdxs = columns.reduce(function (acc, c, i) {
+      if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') acc.push(i);
+      return acc;
+    }, []);
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       columns.forEach(function (c, colIdx) {
@@ -2938,6 +2981,11 @@
         if (val != null && val !== '' && !isNaN(Number(val)) && Number(val) < 0.3) {
           dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
         }
+      });
+      alleleDepthColIdxs.forEach(function (colIdx) {
+        var cell = dataRow.getCell(colIdx + 1);
+        var richValue = alleleDepthRichText(row[columns[colIdx].key]);
+        if (richValue && richValue.richText) cell.value = richValue;
       });
     });
     return workbook.xlsx.writeBuffer();
