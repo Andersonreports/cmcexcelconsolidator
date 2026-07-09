@@ -1111,9 +1111,6 @@
     { key: 'proteinPos', header: 'PROTEIN POS' },
     { key: 'franklin', header: 'FRANKLIN CLASS' },
     { key: 'clinvar', header: 'CLINVAR' },
-    { key: 'varseq', header: 'ACMG Classification' },
-    { key: 'diseaseLabel', header: 'CLINGEN Disease label' },
-    { key: 'clingenClass', header: 'CLINGEN CLASSIFICATION' },
     { key: 'zygosity', header: 'ZYGOSITY' },
     { key: 'inheritance', header: 'INHERITANCE' },
     { key: 'inhouse947', header: 'INHOUSE - 947 Jun 2023' },
@@ -2499,7 +2496,8 @@
 
     function updateInheritanceColor() {
       if (inheritanceInput) {
-        var isAR = isHetWithPureAR(variantRows[rowIndex]);
+        // Red HET/pure-AR carrier flag is a CMC-only convention.
+        var isAR = currentReportType === 'cmc' && isHetWithPureAR(variantRows[rowIndex]);
         inheritanceInput.style.color = isAR ? '#c2293a' : '';
         inheritanceInput.style.fontWeight = isAR ? '700' : '';
       }
@@ -2805,7 +2803,7 @@
   }
 
   // Build an Excel workbook for one batch item and return the ArrayBuffer.
-  function buildVariantExcel(rows, title, columns, workbook) {
+  function buildVariantExcel(rows, title, columns, workbook, reportType) {
     columns = columns || VARIANT_COLUMNS;
     workbook = workbook || new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
@@ -2847,7 +2845,8 @@
         }
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       });
-      if (isHetWithPureAR(row)) {
+      // Red HET/pure-AR carrier flag is a CMC-only convention.
+      if (reportType === 'cmc' && isHetWithPureAR(row)) {
         dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
       }
       if (franklinColIdx >= 0) {
@@ -3081,7 +3080,7 @@
       if (item.reportType === 'couple') {
         return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
       }
-      return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook);
+      return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook, item.reportType);
     }).then(function (buffer) {
       var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
       downloadBlob(buffer, safeName);
@@ -3233,7 +3232,7 @@
         if (item.reportType === 'couple') {
           return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
         }
-        return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook);
+        return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook, item.reportType);
       }).then(function (buffer) {
         var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
         zip.file(safeName, buffer);
