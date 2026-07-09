@@ -2208,22 +2208,15 @@
     };
   }
 
-  // Builds the two-section couple Excel: section 1 lists only variants
-  // partner 1 carries (zygosity1 set), section 2 only those partner 2
-  // carries — same column layout for both, per the couple template.
+  // Builds the three-section couple Excel: section 1 lists variants where
+  // both partners carry the exact same variant (zygosity1 and zygosity2 both
+  // set on the same row), section 2 lists variants only partner 1 carries,
+  // section 3 only those partner 2 carries — same column layout throughout,
+  // per the couple template.
   function buildCoupleVariantExcel(rows, title, title1, title2, workbook) {
     workbook = workbook || new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
     COUPLE_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
-
-    var sectionStartRow = 1;
-    if (title) {
-      sheet.getRow(1).getCell(1).value = title;
-      sheet.mergeCells(1, 1, 1, COUPLE_EXPORT_COLUMNS.length);
-      sheet.getRow(1).font = { bold: true, size: 13 };
-      sheet.getRow(1).alignment = { horizontal: 'center', vertical: 'middle' };
-      sectionStartRow = 3;
-    }
 
     var franklinColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
     var homoColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
@@ -2284,10 +2277,13 @@
       return headerRowIdx + 1 + sectionRows.length;
     }
 
-    var sample1Rows = rows.filter(function (r) { return r.zygosity1; });
-    var sample2Rows = rows.filter(function (r) { return r.zygosity2; });
+    var combinedRows = rows.filter(function (r) { return r.zygosity1 && r.zygosity2; });
+    var sample1Rows = rows.filter(function (r) { return r.zygosity1 && !r.zygosity2; });
+    var sample2Rows = rows.filter(function (r) { return r.zygosity2 && !r.zygosity1; });
 
-    var nextRow = writeSection(sectionStartRow, title1, sample1Rows);
+    var nextRow = writeSection(1, title, combinedRows);
+    nextRow++; // blank separator row
+    nextRow = writeSection(nextRow, title1, sample1Rows);
     nextRow++; // blank separator row
     writeSection(nextRow, title2, sample2Rows);
 
@@ -2689,12 +2685,17 @@
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
     } else if (currentReportType === 'couple') {
-      var sample1Entries = [], sample2Entries = [];
+      var combinedEntries = [], sample1Entries = [], sample2Entries = [];
       variantRows.forEach(function (row, rowIndex) {
-        if (row.zygosity1) sample1Entries.push({ row: row, idx: rowIndex });
-        if (row.zygosity2) sample2Entries.push({ row: row, idx: rowIndex });
+        if (row.zygosity1 && row.zygosity2) combinedEntries.push({ row: row, idx: rowIndex });
+        else if (row.zygosity1) sample1Entries.push({ row: row, idx: rowIndex });
+        else if (row.zygosity2) sample2Entries.push({ row: row, idx: rowIndex });
       });
       var previewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+      variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title) || 'Both partners', columns.length));
+      combinedEntries.forEach(function (entry, i) {
+        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+      });
       variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title1) || 'Sample 1', columns.length));
       sample1Entries.forEach(function (entry, i) {
         variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
