@@ -1148,61 +1148,44 @@
   // a leading S.NO column added). Keeping one source of truth means the
   // on-screen grid can never drift out of sync with what gets exported.
   var COUPLE_EXPORT_COLUMNS = [
-    { key: 'chrPos', header: 'Chr:Pos' },
-    { key: 'refAlt', header: 'Ref/Alt' },
-    { key: 'gene', header: 'Gene Names' },
-    { key: 'variant', header: 'HGVS c. (Clinically Relevant)' },
-    { key: 'proteinPos', header: 'HGVS p. (Clinically Relevant)' },
-    { key: 'franklin', header: 'FRANKLIN CLASSIFICATION' },
-    { key: 'zygosity1', header: 'Zygosity' },
-    { key: 'readDepths1', header: 'Read Depths (DP)' },
-    { key: 'vaf1', header: 'Variant Allele Freq' },
-    { key: 'alleleDepths1', header: 'Allelic Depths (AD)' },
-    { key: 'zygosity2', header: 'Zygosity' },
-    { key: 'readDepths2', header: 'Read Depths (DP)' },
-    { key: 'vaf2', header: 'Variant Allele Freq' },
-    { key: 'alleleDepths2', header: 'Allelic Depths (AD)' },
-    { key: 'clinvar', header: 'CLINVAR Classification' },
+    { key: 'zygosity1', header: 'MALE' },
+    { key: 'zygosity2', header: 'FEMALE' },
     { key: 'inheritance', header: 'Inheritance' },
-    { key: 'omimTitle', header: 'Title' },
-    { key: 'omimPhenotypes', header: 'Phenotypes' },
-    { key: 'seqOntology', header: 'Sequence Ontology (Combined)' },
-    { key: 'transcriptName', header: 'Transcript Name (Clinically Relevant)' },
-    { key: 'exonNumber', header: 'Exon Number (Clinically Relevant)' },
-    { key: 'clinvarVariantId', header: 'Variant ID' },
-    { key: 'omimGeneId', header: 'Gene OMIM ID' },
-    { key: 'omimIdField', header: 'OMIM ID' },
-    { key: 'gnomadGenome4Count', header: 'Allele Count' },
-    { key: 'gnomadGenome4SA', header: 'South Asian Allele Count' },
-    { key: 'gnomadGenome4SAHomo', header: 'South Asian Homozygous Count' },
-    { key: 'gnomadGenome4SAMale', header: 'South Asian Male Allele Count' },
-    { key: 'gnomadExome4Count', header: 'Allele Count' },
-    { key: 'gnomadExome4SA', header: 'South Asian Allele Count' },
-    { key: 'gnomadExome4SAHomo', header: 'South Asian Homozygous Count' },
-    { key: 'gnomadExome4SAMale', header: 'South Asian Male Allele Count' },
-    { key: 'gnomadGenome3AC', header: 'Alt Allele Count (AC)' },
-    { key: 'gnomadGenome3Male', header: 'South Asian Male Allele Count (AC_SAS_XY)' },
-    { key: 'gnomadGenome3Female', header: 'South Asian Female Allele Count (AC_SAS_XX)' },
-    { key: 'genomeAsia', header: 'South Asian Alt Allele Counts (AC_SAS)' },
-    { key: 'gnomadExome2', header: 'South Asian Allele Count (AC_SAS)' },
-    { key: 'inhouse947', header: 'Inhouse  947  - Aug2023' },
-    { key: 'inhouse595', header: 'Inhouse  595  ' },
-    { key: 'inhouseGM98', header: 'inhouse - 98 - ' },
-    { key: 'inhouseGM535', header: 'inhouse_535_' },
-    { key: 'inhouseGM343', header: 'Inhouse_343_' },
-    { key: 'inhouseGM669', header: 'Inhouse_669' },
-    { key: 'alphaMissense', header: 'AlphaMissense Classification' },
-    { key: 'spliceGeneSplicer', header: 'GeneSplicer Prediction' },
-    { key: 'spliceMaxEntScan', header: 'MaxEntScan Prediction' },
-    { key: 'spliceNNSplice', header: 'NNSplice Prediction' },
-    { key: 'splicePWM', header: 'PWM Prediction' },
-    { key: 'conservationGerp', header: 'GERP++ Prediction (Mammals)' },
-    { key: 'conservationPhyloP', header: 'PhyloP Prediction (Mammals)' },
-    { key: 'siftMammals', header: 'SIFT Prediction (Mammals)' },
-    { key: 'polyphenMammals', header: 'PolyPhen2 Prediction (Mammals)' },
-    { key: 'dbnsfpSift', header: 'SIFT Pred' },
-    { key: 'dbnsfpLrt', header: 'LRT Pred' },
-    { key: 'dbnsfpMutTaster', header: 'MutationTaster Pred' },
+    { key: 'gene', header: 'GENE' },
+    { key: 'variant', header: 'VARIANT' },
+    { key: 'proteinPos', header: 'PROTEIN POS' },
+    { key: 'acmg', header: 'ACMG' },
+    { key: 'franklin', header: 'FRA CLASS' },
+    { key: 'clinvar', header: 'CLINVAR CLASSIFICATION' },
+    { key: 'inhouse947', header: 'INHOUSE - 947 Jun 2023' },
+    { key: 'inhouse595', header: 'INHOUSE - 595 Mar 2024' },
+    { key: 'inhouseGM98', header: 'INHOUSE - GM 98' },
+    { key: 'inhouseGM535', header: 'Genemind_inhouse_535_june_2024' },
+    { key: 'inhouseGM343', header: 'Genemind_inhouse_Jan2025_to_Mar2025_343' },
+    { key: 'inhouseGM669', header: 'Genemind_inhouse_Mar2025_to_June2025_669' },
+    { key: 'readDepths1', header: 'READ DEPTH' },
+    { key: 'vaf1', header: 'VAF(%)' },
+    { key: 'alleleDepths1', header: 'ALLELIC DEPTH' },
+    { key: 'readDepths2', header: 'READ DEPTH' },
+    { key: 'vaf2', header: 'VAF(%)' },
+    { key: 'alleleDepths2', header: 'ALLELIC DEPTH' },
+    { key: 'omimTitle', header: 'OMIM PHENOTYPE' },
+    { key: 'omimPhenotypes', header: 'CONDITIONS' },
+    { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
+    { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
+    { key: 'gnomadGenome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadGenome4SAMale', header: 'Male' },
+    { key: 'gnomadExome4Count', header: 'GNOM AD EXOME ALL V4' },
+    { key: 'gnomadExome4SA', header: 'GNOM AD EXOME SA V4' },
+    { key: 'gnomadExome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadExome4SAMale', header: 'Male' },
+    { key: 'gnomadGenome3AC', header: 'GNOM AD all V3' },
+    { key: 'gnomadGenome3Male', header: 'gnomAD(MALE)' },
+    { key: 'gnomadGenome3Female', header: 'Gnom AD FEMALE' },
+    { key: 'genomeAsia', header: 'genome asia' },
+    { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
+    { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
+    { key: 'phenoRank', header: 'RANK' },
   ];
 
   var COUPLE_VARIANT_COLUMNS = [{ key: 'sNo', header: 'S.NO' }].concat(COUPLE_EXPORT_COLUMNS);
@@ -1305,7 +1288,10 @@
     alleleDepths: { header: 'Allelic Depths (AD)' },
     readDepths: { header: 'Read Depths (DP)' },
     clinvarClass: { header: 'Classification', groupIncludes: ['ClinVar'] },
-    acmgClass: { header: 'Classification', groupIncludes: ['ACMG Sample Classifier'] },
+    // Different VarSeq exports label this group slightly differently
+    // ("ACMG Sample Classifier" vs "Variant Site ACMG Classifier") - match on
+    // both key words rather than the exact phrase so either form is found.
+    acmgClass: { header: 'Classification', groupIncludes: ['ACMG', 'Classifier'] },
     omimInheritance: { header: 'Inheritance', groupIncludes: ['OMIM'] },
     omimTitle: { header: 'Title', groupIncludes: ['OMIM'] },
     omimPhenotypes: { header: 'Phenotypes', groupIncludes: ['OMIM'] },
@@ -2152,6 +2138,10 @@
       var refAlt = get('refAltCombined');
       if (!refAlt && (get('variantRef') || get('variantAlt'))) refAlt = (get('variantRef') || '') + '/' + (get('variantAlt') || '');
 
+      // Missing-partner cells render as "-" in the target report template
+      // rather than blank - _hasMale/_hasFemale keep the real presence signal
+      // around (separately from the displayed "-" placeholder) so section
+      // filtering below isn't fooled into treating every row as shared.
       rows.push({
         sNo: '',
         chrPos: chrPos || '',
@@ -2159,18 +2149,22 @@
         gene: gene,
         variant: variant,
         proteinPos: stripHgvsPrefix(hgvsPList[codingIdx] || hgvsPList[0] || ''),
+        acmg: acmgList[codingIdx] || acmgList[0] || '',
         franklin: lookupFranklin(gene, variant),
         _franklinUrl: null,
-        zygosity1: rawZygosity1 ? abbreviateZygosity(rawZygosity1, inheritanceCodes) : (hasCall1 ? (deriveZygosityFromDepths(alleleDepths1, vaf1, isXLinked) || 'HET') : ''),
-        readDepths1: readDepths1,
-        vaf1: vaf1,
-        alleleDepths1: alleleDepths1,
-        zygosity2: rawZygosity2 ? abbreviateZygosity(rawZygosity2, inheritanceCodes) : (hasCall2 ? (deriveZygosityFromDepths(alleleDepths2, vaf2, isXLinked) || 'HET') : ''),
-        readDepths2: readDepths2,
-        vaf2: vaf2,
-        alleleDepths2: alleleDepths2,
+        _hasMale: hasCall1,
+        _hasFemale: hasCall2,
+        zygosity1: hasCall1 ? (rawZygosity1 ? abbreviateZygosity(rawZygosity1, inheritanceCodes) : (deriveZygosityFromDepths(alleleDepths1, vaf1, isXLinked) || 'HET')) : '-',
+        readDepths1: hasCall1 ? readDepths1 : '-',
+        vaf1: hasCall1 ? vaf1 : '-',
+        alleleDepths1: hasCall1 ? alleleDepths1 : '-',
+        zygosity2: hasCall2 ? (rawZygosity2 ? abbreviateZygosity(rawZygosity2, inheritanceCodes) : (deriveZygosityFromDepths(alleleDepths2, vaf2, isXLinked) || 'HET')) : '-',
+        readDepths2: hasCall2 ? readDepths2 : '-',
+        vaf2: hasCall2 ? vaf2 : '-',
+        alleleDepths2: hasCall2 ? alleleDepths2 : '-',
         clinvar: get('clinvarClass') || '',
         inheritance: abbreviateInheritanceGrouped(get('omimInheritance')),
+        phenoRank: get('phenoRank'),
         omimTitle: get('omimTitle'),
         omimPhenotypes: get('omimPhenotypes'),
         seqOntology: get('seqOntology'),
@@ -2327,9 +2321,9 @@
       return headerRowIdx + 1 + sectionRows.length;
     }
 
-    var combinedRows = rows.filter(function (r) { return r.zygosity1 && r.zygosity2; });
-    var sample1Rows = rows.filter(function (r) { return r.zygosity1 && !r.zygosity2; });
-    var sample2Rows = rows.filter(function (r) { return r.zygosity2 && !r.zygosity1; });
+    var combinedRows = rows.filter(function (r) { return r._hasMale && r._hasFemale; });
+    var sample1Rows = rows.filter(function (r) { return r._hasMale && !r._hasFemale; });
+    var sample2Rows = rows.filter(function (r) { return r._hasFemale && !r._hasMale; });
 
     var nextRow = writeSection(1, title, combinedRows);
     nextRow++; // blank separator row
@@ -2738,9 +2732,9 @@
     } else if (currentReportType === 'couple') {
       var combinedEntries = [], sample1Entries = [], sample2Entries = [];
       variantRows.forEach(function (row, rowIndex) {
-        if (row.zygosity1 && row.zygosity2) combinedEntries.push({ row: row, idx: rowIndex });
-        else if (row.zygosity1) sample1Entries.push({ row: row, idx: rowIndex });
-        else if (row.zygosity2) sample2Entries.push({ row: row, idx: rowIndex });
+        if (row._hasMale && row._hasFemale) combinedEntries.push({ row: row, idx: rowIndex });
+        else if (row._hasMale) sample1Entries.push({ row: row, idx: rowIndex });
+        else if (row._hasFemale) sample2Entries.push({ row: row, idx: rowIndex });
       });
       var previewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
       variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title) || 'Both partners', columns.length));
