@@ -2333,6 +2333,10 @@
       if (c.key === 'alleleDepths1' || c.key === 'alleleDepths2') acc.push(i);
       return acc;
     }, []);
+    var zygosityColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
+      if (c.key === 'zygosity1' || c.key === 'zygosity2') acc.push(i);
+      return acc;
+    }, []);
 
     function writeSection(startRow, title, sectionRows) {
       sheet.getRow(startRow).getCell(1).value = title;
@@ -2391,6 +2395,12 @@
           var cell = dataRow.getCell(colIdx + 1);
           var richValue = alleleDepthRichText(row[COUPLE_EXPORT_COLUMNS[colIdx].key]);
           if (richValue && richValue.richText) cell.value = richValue;
+        });
+        zygosityColIdxs.forEach(function (colIdx) {
+          var val = String(row[COUPLE_EXPORT_COLUMNS[colIdx].key] || '').trim().toUpperCase();
+          if (val === 'HOM' || val === 'HEMI') {
+            dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
+          }
         });
       });
       return headerRowIdx + 1 + sectionRows.length;
@@ -2620,6 +2630,10 @@
         var adRich = alleleDepthRichText(input.value);
         input.style.color = (adRich && adRich.richText) ? '#c2293a' : '';
       }
+      if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') {
+        var zygUp = String(input.value || '').trim().toUpperCase();
+        input.style.color = (zygUp === 'HOM' || zygUp === 'HEMI') ? '#c2293a' : '';
+      }
       input.addEventListener('input', function (e) {
         variantRows[rowIndex][c.key] = e.target.value;
         updateInheritanceColor();
@@ -2630,6 +2644,10 @@
         if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') {
           var newAdRich = alleleDepthRichText(e.target.value);
           e.target.style.color = (newAdRich && newAdRich.richText) ? '#c2293a' : '';
+        }
+        if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') {
+          var newZygUp = String(e.target.value || '').trim().toUpperCase();
+          e.target.style.color = (newZygUp === 'HOM' || newZygUp === 'HEMI') ? '#c2293a' : '';
         }
       });
       if (c.key === 'inheritance') inheritanceInput = input;
@@ -2934,6 +2952,10 @@
       if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') acc.push(i);
       return acc;
     }, []);
+    var zygosityColIdxs = columns.reduce(function (acc, c, i) {
+      if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') acc.push(i);
+      return acc;
+    }, []);
     rows.forEach(function (row, i) {
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       columns.forEach(function (c, colIdx) {
@@ -2982,6 +3004,12 @@
         var cell = dataRow.getCell(colIdx + 1);
         var richValue = alleleDepthRichText(row[columns[colIdx].key]);
         if (richValue && richValue.richText) cell.value = richValue;
+      });
+      zygosityColIdxs.forEach(function (colIdx) {
+        var val = String(row[columns[colIdx].key] || '').trim().toUpperCase();
+        if (val === 'HOM' || val === 'HEMI') {
+          dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
+        }
       });
     });
     return workbook.xlsx.writeBuffer();
