@@ -1716,7 +1716,9 @@
     var anyColored = false;
     var richText = parts.map(function (part) {
       var num = Number(part);
-      var isLow = part !== '' && !isNaN(num) && num < 20;
+      // A literal 0 means no reads at all (missing data), not a low-but-real
+      // depth - only 1-19 gets flagged.
+      var isLow = part !== '' && !isNaN(num) && num > 0 && num < 20;
       if (isLow) anyColored = true;
       return isLow ? { text: part, font: { color: { argb: 'FFC2293A' }, bold: true } } : { text: part };
     });
@@ -1915,24 +1917,39 @@
 
   // Parses couple-mode filenames like
   // "4370_MR_PUSHPARAJ_SADASHIVA_KUNDER44YM_4369_MRS_VAISHALI_LAXMAN.xlsx"
-  // into per-patient "<code>_<SALUTATION>. <FIRST NAME>" labels - keeping only
-  // the sample code, salutation and first name (middle/last name and the
-  // trailing age/gender block are dropped). Returns [] if the filename
-  // doesn't contain any recognizable "<code>_<salutation>_<name>" blocks.
+  // into per-patient "<code>_<SALUTATION>. <FULL NAME>" labels. The name
+  // block (every underscore-separated word up to the next patient's
+  // "_<id>_MR|MRS|MS|MASTER_" block or end of string) is found by locating
+  // where each patient block *starts* rather than matching the name itself
+  // with a restrictive character class - a class like [A-Za-z_]+ can't cross
+  // a trailing age/gender suffix glued onto the last word (e.g. "KUNDER44YM"
+  // has digits in the middle), which silently failed the whole match before.
+  // A trailing Windows duplicate-download suffix like " (4)" is stripped
+  // first since it isn't part of the semantic filename.
   function extractCoupleNamesFromFilename(filename) {
-    var base = filename.replace(/\.[^.]+$/, '');
-    // The name after the salutation can be several underscore-separated words
-    // (e.g. "MR_P_SENE_ALEX_EDWARD") - capture all of them, stopping only at
-    // the next patient's "_<id>_MR|MRS|MS|MASTER_" block or the end of the
-    // filename, instead of just the first word.
-    var re = /(\d+)_(MR|MRS|MS|MASTER)_([A-Za-z_]+?)(?=(?:_\d+_(?:MR|MRS|MS|MASTER)_)|$)/gi;
-    var names = [];
+    var base = filename.replace(/\.[^.]+$/, '').replace(/\s*\(\d+\)\s*$/, '');
+    var starts = [];
+    var re = /(\d+)_(MR|MRS|MS|MASTER)_/gi;
     var m;
     while ((m = re.exec(base))) {
-      var nameWords = m[3].replace(/_+$/, '').split('_').filter(Boolean).map(function (w) { return w.toUpperCase(); }).join(' ');
-      names.push(m[1] + '_' + m[2].toUpperCase() + '. ' + nameWords);
+      starts.push({ code: m[1], sal: m[2].toUpperCase(), matchStart: m.index, nameStart: re.lastIndex });
     }
-    return names;
+    return starts.map(function (entry, i) {
+      var nameEnd = (i + 1 < starts.length) ? starts[i + 1].matchStart : base.length;
+      var nameBlock = base.slice(entry.nameStart, nameEnd).replace(/^_+|_+$/g, '');
+      var words = nameBlock ? nameBlock.split('_').filter(Boolean) : [];
+      // Strip an age/gender suffix glued onto the last word (e.g.
+      // "KUNDER44YM" -> name word "KUNDER", age/gender dropped) so it
+      // isn't shown as part of the name.
+      if (words.length) {
+        var ageMatch = words[words.length - 1].match(/^([A-Za-z]*)\d{1,3}Y[MF]?$/i);
+        if (ageMatch) {
+          if (ageMatch[1]) words[words.length - 1] = ageMatch[1]; else words.pop();
+        }
+      }
+      var fullName = words.map(function (w) { return w.toUpperCase(); }).join(' ');
+      return entry.code + '_' + entry.sal + '. ' + fullName;
+    });
   }
 
   function processVarSeqWorkbook(workbook) {
