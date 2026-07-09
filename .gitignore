@@ -5,4 +5,7 @@
 *.heic
 *.xlsx
 *.xls
+*.xlt
+*.ods
+.~lock.*#
 desktop.ini

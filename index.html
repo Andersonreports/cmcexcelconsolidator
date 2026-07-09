@@ -1110,16 +1110,17 @@
     { key: 'gene', header: 'GENE' },
     { key: 'variant', header: 'VARIANT' },
     { key: 'proteinPos', header: 'PROTEIN POS' },
-    { key: 'franklin', header: 'FRANKLIN CLASS' },
+    { key: 'varseq', header: 'ACMG' },
+    { key: 'franklin', header: 'FRANKLIN' },
     { key: 'clinvar', header: 'CLINVAR' },
     { key: 'zygosity', header: 'ZYGOSITY' },
     { key: 'inheritance', header: 'INHERITANCE' },
-    { key: 'inhouse947', header: 'INHOUSE - 947 Jun 2023' },
+    { key: 'inhouse947', header: 'INHOUSE - 947 Mar 2024' },
     { key: 'inhouse595', header: 'INHOUSE - 595 Mar 2024' },
     { key: 'inhouseGM98', header: 'INHOUSE - GM 98' },
     { key: 'inhouseGM535', header: 'INHOUSE - GM 535' },
-    { key: 'inhouseGM343', header: 'INHOUSE - GM 343' },
-    { key: 'inhouseGM669', header: 'INHOUSE - GM 669' },
+    { key: 'inhouseGM343', header: 'Inhouse_343 Jan2025_to_Mar2025' },
+    { key: 'inhouseGM669', header: 'Inhouse__669_Mar2025_to_June2025' },
     { key: 'vafRaw', header: 'VAF(%)' },
     { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
     { key: 'readDepths', header: 'DEP(X)' },
@@ -1128,19 +1129,21 @@
     { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
     { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
     { key: 'gnomadGenome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
-    { key: 'gnomadGenome4SAMale', header: 'GNOM AD SA V4 - MALE' },
+    { key: 'gnomadGenome4SAMale', header: 'gnomAD(MALE)' },
     { key: 'gnomadExome4Count', header: 'GNOM AD EXOME ALL V4' },
     { key: 'gnomadExome4SA', header: 'GNOM AD EXOME SA V4' },
     { key: 'gnomadExome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
-    { key: 'gnomadExome4SAMale', header: 'GNOM AD SA V4 - MALE' },
+    { key: 'gnomadExome4SAMale', header: 'gnomAD(MALE)' },
     { key: 'gnomadGenome3AC', header: 'GNOM AD all V3' },
     { key: 'gnomadGenome3Male', header: 'gnomAD(MALE)' },
     { key: 'gnomadGenome3Female', header: 'Gnom AD FEMALE' },
     { key: 'genomeAsia', header: 'genome asia' },
     { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
-    { key: 'phenoRank', header: 'PHENOTYPE RANK' },
     { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
-    { key: 'revel', header: 'REVEL SCORE' },
+    { key: 'phenoRank', header: 'RANK' },
+    { key: 'revel', header: 'REVEL' },
+    { key: 'diseaseLabel', header: 'Disease Label' },
+    { key: 'clingenClass', header: 'Classification' },
   ];
 
   // Flat column list matching the couple reference template exactly — same
@@ -1156,8 +1159,8 @@
     { key: 'variant', header: 'VARIANT' },
     { key: 'proteinPos', header: 'PROTEIN POS' },
     { key: 'acmg', header: 'ACMG' },
-    { key: 'franklin', header: 'FRA CLASS' },
-    { key: 'clinvar', header: 'CLINVAR CLASSIFICATION' },
+    { key: 'franklin', header: 'FRANKLIN' },
+    { key: 'clinvar', header: 'CLINVAR' },
     { key: 'inhouse947', header: 'INHOUSE - 947 Jun 2023' },
     { key: 'inhouse595', header: 'INHOUSE - 595 Mar 2024' },
     { key: 'inhouseGM98', header: 'INHOUSE - GM 98' },
@@ -1175,11 +1178,11 @@
     { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
     { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
     { key: 'gnomadGenome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
-    { key: 'gnomadGenome4SAMale', header: 'Male' },
+    { key: 'gnomadGenome4SAMale', header: 'gnomAD(MALE)' },
     { key: 'gnomadExome4Count', header: 'GNOM AD EXOME ALL V4' },
     { key: 'gnomadExome4SA', header: 'GNOM AD EXOME SA V4' },
     { key: 'gnomadExome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
-    { key: 'gnomadExome4SAMale', header: 'Male' },
+    { key: 'gnomadExome4SAMale', header: 'gnomAD(MALE)' },
     { key: 'gnomadGenome3AC', header: 'GNOM AD all V3' },
     { key: 'gnomadGenome3Male', header: 'gnomAD(MALE)' },
     { key: 'gnomadGenome3Female', header: 'Gnom AD FEMALE' },
@@ -1187,6 +1190,16 @@
     { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
     { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
     { key: 'phenoRank', header: 'RANK' },
+    { key: 'revel', header: 'REVEL' },
+    { key: 'diseaseLabel', header: 'CLINGEN' },
+    { key: 'clingenClass', header: 'CLINGEN CLASSIFICATION' },
+    { key: 'chrPos', header: 'Chromosomal Position' },
+    { key: 'refAlt', header: 'Ref/Alt' },
+    { key: 'transcriptName', header: 'NM ID' },
+    { key: 'seqOntology', header: 'Sequence Ontology' },
+    { key: 'exonNumber', header: 'Exon' },
+    { key: 'clinvarVariantId', header: 'ClinVar' },
+    { key: 'omimIdField', header: 'OMIM ID' },
   ];
 
   var COUPLE_VARIANT_COLUMNS = [{ key: 'sNo', header: 'S.NO' }].concat(COUPLE_EXPORT_COLUMNS);
@@ -1357,13 +1370,20 @@
   var INHERITANCE_PRIORITY = ['MF', 'AD', 'AR', 'XLR', 'XLD', 'XL'];
 
   function findVarSeqColumn(groupRow, headerRow, colCount, spec) {
+    var lastGroup = '';
     for (var c = 1; c <= colCount; c++) {
       var group = String(groupRow.getCell(c).value || '');
+      if (group) lastGroup = group;
+      // VarSeq only writes the group label on the first column of a
+      // multi-column block - later columns in that same block (e.g. ACMG
+      // Sample Classifier's "Classification" column, when "Score" or similar
+      // precedes it) have a blank group cell, so carry the label forward.
+      var groupText = group || lastGroup;
       var header = String(headerRow.getCell(c).value || '');
       if (spec.header && header !== spec.header) continue;
       if (spec.headerStartsWith && header.indexOf(spec.headerStartsWith) !== 0) continue;
-      if (spec.groupIncludes && !spec.groupIncludes.every(function (needle) { return group.indexOf(needle) !== -1; })) continue;
-      if (spec.groupRegex && !spec.groupRegex.test(group)) continue;
+      if (spec.groupIncludes && !spec.groupIncludes.every(function (needle) { return groupText.indexOf(needle) !== -1; })) continue;
+      if (spec.groupRegex && !spec.groupRegex.test(groupText)) continue;
       return c;
     }
     return null;
@@ -1431,12 +1451,6 @@
     var s = String(value);
     var idx = s.indexOf(':');
     return idx === -1 ? s.trim() : s.slice(idx + 1).trim();
-  }
-
-  function isBenignClassification(classification) {
-    if (!classification) return false;
-    var norm = String(classification).trim().toUpperCase();
-    return norm === 'BENIGN' || norm === 'LIKELY BENIGN';
   }
 
   function abbreviateInheritanceValue(norm) {
@@ -1939,7 +1953,7 @@
 
     var rows = [];
     var debugRowsChecked = 0;
-    var debugRowsSkipped = { noGene: 0, noZygOrInherit: 0, benign: 0, nonCoding: 0 };
+    var debugRowsSkipped = { noGene: 0, noZygOrInherit: 0, nonCoding: 0 };
 
     sheet.eachRow(function (row, r) {
       if (r <= 2) return;
@@ -1957,7 +1971,6 @@
       var genes = splitList(get('geneNames'));
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
-      var acmgList = splitList(get('acmgClass'));
 
       // When a row lists multiple overlapping genes/transcripts, use whichever
       // entry has a coding ("c.") HGVS notation - not just the first listed -
@@ -1966,13 +1979,10 @@
       var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
       if (codingIdx === -1) { debugRowsSkipped.nonCoding++; return; }
 
-      // The ACMG Sample Classifier column isn't present in every VarSeq export,
-      // so also check the (reliably-present) ClinVar classification.
-      var winningAcmg = acmgList[codingIdx] || acmgList[0] || '';
-      if (isBenignClassification(winningAcmg) || isBenignClassification(get('clinvarClass'))) {
-        debugRowsSkipped.benign++; return;
-      }
-
+      // Every gene/variant is carried over regardless of classification -
+      // Benign/Likely Benign is flagged with a green Franklin font (see
+      // franklinColor) instead of being dropped. The analyst reviews and
+      // removes unwanted rows manually via the delete button.
       var gene = genes[codingIdx] || genes[0] || '';
       if (!gene) { debugRowsSkipped.noGene++; return; }
       var variant = stripHgvsPrefix(hgvsCList[codingIdx]);
@@ -2111,12 +2121,10 @@
       var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
       if (codingIdx === -1) return;
 
-      // The ACMG Sample Classifier column isn't present in every VarSeq export,
-      // so also check the (reliably-present) ClinVar classification.
-      if (isBenignClassification(acmgList[codingIdx] || acmgList[0]) || isBenignClassification(get('clinvarClass'))) {
-        return;
-      }
-
+      // Every gene/variant is carried over regardless of classification -
+      // Benign/Likely Benign is flagged with a green Franklin font (see
+      // franklinColor) instead of being dropped. The analyst reviews and
+      // removes unwanted rows manually via the delete button.
       var gene = genes[codingIdx] || genes[0] || '';
       if (!gene) return;
 
@@ -2179,6 +2187,9 @@
         clinvarVariantId: get('clinvarVariantId'),
         omimGeneId: get('omimGeneId'),
         omimIdField: get('omimIdField'),
+        revel: get('revel'),
+        diseaseLabel: get('clingenDiseaseLabel'),
+        clingenClass: get('clingenClassification'),
         gnomadGenome4Count: get('gnomadGenome4Count'),
         gnomadGenome4SA: get('gnomadGenome4SA'),
         gnomadGenome4SAHomo: get('gnomadGenome4SAHomo'),
