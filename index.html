@@ -1878,6 +1878,106 @@
       .catch(function () {});
   }
 
+  // ── "Conflicting" ClinVar resolution (most recent submission) ──────────────
+  // The uploaded VarSeq file's own CLINVAR CLASSIFICATION column sometimes
+  // just says "Conflicting" with no lean. That's the aggregate call across
+  // every submitter ClinVar has on file - it doesn't say which way the most
+  // up-to-date evidence points. To answer that, look up the variant's ClinVar
+  // record and read the individual submissions' classifications/dates (the
+  // VCV XML, not the esummary aggregate), and use whichever one was
+  // evaluated most recently.
+
+  function clinVarSearchTerm(gene, variant) {
+    var norm = normVariant(variant);
+    var termA = '(' + gene + '[gene] AND "' + variant + '"[All Fields])';
+    var termB = norm !== variant ? ' OR (' + gene + '[gene] AND "' + norm + '"[All Fields])' : '';
+    return termA + termB;
+  }
+
+  function findClinVarVariationId(gene, variant) {
+    var url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
+      '?db=clinvar&term=' + encodeURIComponent(clinVarSearchTerm(gene, variant)) + '&retmax=1&retmode=json';
+    return fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var ids = (data.esearchresult && data.esearchresult.idlist) || [];
+        return ids[0] || null;
+      });
+  }
+
+  // Parses ClinVar's VCV record XML (one <ClinicalAssertion> per submitter)
+  // and returns the classification text of whichever assertion has the most
+  // recent DateLastEvaluated, or null if none can be found/parsed.
+  function parseMostRecentClinVarAssertion(xmlText) {
+    if (!xmlText || typeof DOMParser === 'undefined') return null;
+    try {
+      var doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+      if (doc.getElementsByTagName('parsererror').length) return null;
+      var assertions = doc.getElementsByTagName('ClinicalAssertion');
+      var bestDesc = null, bestDate = null;
+      for (var i = 0; i < assertions.length; i++) {
+        var classificationEl = assertions[i].getElementsByTagName('Classification')[0];
+        if (!classificationEl) continue;
+        var descEl = classificationEl.getElementsByTagName('GermlineClassification')[0] ||
+                     classificationEl.getElementsByTagName('Description')[0];
+        var desc = descEl ? descEl.textContent : '';
+        if (!desc) continue;
+        var dateAttr = classificationEl.getAttribute('DateLastEvaluated');
+        var date = dateAttr ? new Date(dateAttr) : null;
+        if (bestDate == null || (date && date > bestDate)) {
+          bestDesc = desc;
+          bestDate = date || bestDate;
+        }
+      }
+      return bestDesc;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function fetchMostRecentClinVarClassification(gene, variant) {
+    return findClinVarVariationId(gene, variant).then(function (uid) {
+      if (!uid) return null;
+      var url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi' +
+        '?db=clinvar&id=' + uid + '&rettype=vcv&is_variationid=true&retmode=xml';
+      return fetch(url)
+        .then(function (r) { return r.text(); })
+        .then(function (xmlText) { return parseMostRecentClinVarAssertion(xmlText); });
+    });
+  }
+
+  // Resolves every row whose CLINVAR CLASSIFICATION is a bare "Conflicting"
+  // (no lean already appended) to "Conflicting - <most recent lean>", e.g.
+  // "Conflicting - VUS". Leaves the value alone if the lookup fails or the
+  // most recent submission's text can't be mapped to an abbreviation -
+  // silent best-effort, same as the other live ClinVar/Franklin lookups.
+  function resolveConflictingClinVarForRows(rows) {
+    var targets = (rows || []).filter(function (r) {
+      var v = String(r.clinvar || '').trim();
+      return r.gene && r.variant && /conflicting/i.test(v) && !/conflicting\s*-/i.test(v);
+    });
+    if (!targets.length) return Promise.resolve();
+
+    return new Promise(function (resolve) {
+      var i = 0;
+      function next() {
+        if (i >= targets.length) { resolve(); return; }
+        var row = targets[i];
+        fetchMostRecentClinVarClassification(String(row.gene).trim(), String(row.variant).trim())
+          .then(function (desc) {
+            var abbr = desc ? abbreviateClinSigText(desc) : null;
+            if (abbr && abbr !== 'Conflicting') row.clinvar = 'Conflicting - ' + abbr;
+          })
+          .catch(function () {})
+          .then(function () {
+            i++;
+            setTimeout(next, 350); // stay within NCBI's free-tier rate limit
+          });
+      }
+      next();
+    });
+  }
+
   // Extract patient info from VarSeq filename and combine with run name.
   // Preferred format: "<code>_<NAME> (<age><unit><gender>) - <run name>"
   //   e.g. "4323A_SUJAN (1YM) - GEN_T_2.0.spik_4323A_outfastp_R"
@@ -3169,6 +3269,9 @@
     }
     renderVariantTable(idx);
     resolveFranklinForRows(variantRows, idx);
+    resolveConflictingClinVarForRows(variantRows).then(function () {
+      if (variantPreviewIdx === idx) renderVariantTable(idx);
+    });
     renderBatchList();
   }
 
@@ -3251,7 +3354,10 @@
     // kick off, if this item was never previewed) every row's lookup here
     // so the export always reflects the final classification, not whatever
     // row.franklin happened to be at the moment Download was clicked.
-    resolveFranklinForRows(item.rows, idx).then(function () {
+    Promise.all([
+      resolveFranklinForRows(item.rows, idx),
+      resolveConflictingClinVarForRows(item.rows),
+    ]).then(function () {
       return buildExportWorkbook(item);
     }).then(function (workbook) {
       if (item.reportType === 'couple') {
@@ -3401,9 +3507,13 @@
     var zip = new JSZip();
     Promise.all(validItems.map(function (item) {
       var itemIdx = variantBatch.indexOf(item);
-      // See downloadBatchItem for why this wait is needed: Franklin lookups
-      // are async and only ever auto-triggered for the actively-previewed item.
-      return resolveFranklinForRows(item.rows, itemIdx).then(function () {
+      // See downloadBatchItem for why this wait is needed: Franklin/ClinVar
+      // lookups are async and only ever auto-triggered for the
+      // actively-previewed item.
+      return Promise.all([
+        resolveFranklinForRows(item.rows, itemIdx),
+        resolveConflictingClinVarForRows(item.rows),
+      ]).then(function () {
         return includeRawData ? buildExportWorkbook(item) : Promise.resolve(new ExcelJS.Workbook());
       }).then(function (workbook) {
         if (item.reportType === 'couple') {
