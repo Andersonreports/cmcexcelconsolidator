@@ -276,6 +276,11 @@
   .franklin-cell input { flex: 1; min-width: 60px; }
   .franklin-link { flex-shrink:0; margin-left:4px; font:600 11px/1 var(--sans); color:var(--primary); text-decoration:none; opacity:.7; transition:opacity .12s; }
   .franklin-link:hover { opacity:1; text-decoration:underline; }
+  .cell-link-wrap { display: flex; align-items: center; }
+  .cell-link-wrap input { flex: 1; min-width: 60px; }
+  .cell-link { flex-shrink:0; margin-left:4px; font:600 11px/1 var(--sans); color:var(--primary); text-decoration:none; opacity:.7; transition:opacity .12s; }
+  .cell-link:hover { opacity:1; text-decoration:underline; }
+  .raw-cell-link { color: var(--primary); text-decoration: underline; }
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
   .raw-text-debug summary:hover { color: var(--ink); }
@@ -1927,8 +1932,13 @@
       if (r <= 2) return;
       debugRowsChecked++;
 
+      var hyperlinks = {};
       function get(key) {
-        return cols[key] ? cellText(row.getCell(cols[key]).value) : null;
+        if (!cols[key]) return null;
+        var raw = row.getCell(cols[key]).value;
+        var link = cellHyperlink(raw);
+        if (link) hyperlinks[key] = link;
+        return cellText(raw);
       }
 
       var genes = splitList(get('geneNames'));
@@ -2009,6 +2019,23 @@
         phenoRank: get('phenoRank'),
         alphaMissense: get('alphaMissense'),
         revel: get('revel'),
+        // Preserve any hyperlinks the source VarSeq cells carried (e.g. rsID,
+        // OMIM, ClinVar links) so preview/export can render them as real
+        // links instead of flattening to plain text. Most keys already match
+        // the row field name directly; the handful that get renamed on the
+        // way into the row are re-mapped here explicitly.
+        _hyperlinks: Object.assign({}, hyperlinks, {
+          gene: hyperlinks.geneNames,
+          variant: hyperlinks.hgvsC,
+          proteinPos: hyperlinks.hgvsP,
+          clinvar: hyperlinks.clinvarClass,
+          varseq: hyperlinks.acmgClass,
+          inheritance: hyperlinks.omimInheritance,
+          inhouseMerged: hyperlinks.inhouseSamples2,
+          diseaseLabel: hyperlinks.clingenDiseaseLabel,
+          clingenClass: hyperlinks.clingenClassification,
+          vafRaw: hyperlinks.vaf,
+        }),
       });
     });
 
@@ -2046,11 +2073,13 @@
     sheet.eachRow(function (row, r) {
       if (r <= 2) return;
 
+      var hyperlinks = {};
       function get(key) {
-        return cols[key] ? cellText(row.getCell(cols[key]).value) : null;
-      }
-      function getRaw(key) {
-        return cols[key] ? row.getCell(cols[key]).value : null;
+        if (!cols[key]) return null;
+        var raw = row.getCell(cols[key]).value;
+        var link = cellHyperlink(raw);
+        if (link) hyperlinks[key] = link;
+        return cellText(raw);
       }
       function getNth(key, index) {
         var matches = colsAll[key] || [];
@@ -2086,7 +2115,6 @@
       var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
 
       var chrPos = get('chrPosCombined');
-      var chrPosHyperlink = cellHyperlink(getRaw('chrPosCombined'));
       if (!chrPos && get('variantChr')) chrPos = get('variantChr') + ':' + get('variantPos');
       var refAlt = get('refAltCombined');
       if (!refAlt && (get('variantRef') || get('variantAlt'))) refAlt = (get('variantRef') || '') + '/' + (get('variantAlt') || '');
@@ -2094,7 +2122,6 @@
       rows.push({
         sNo: '',
         chrPos: chrPos || '',
-        _chrPosHyperlink: chrPosHyperlink,
         refAlt: refAlt || '',
         gene: gene,
         variant: variant,
@@ -2150,6 +2177,18 @@
         dbnsfpSift: get('dbnsfpSift'),
         dbnsfpLrt: get('dbnsfpLrt'),
         dbnsfpMutTaster: get('dbnsfpMutTaster'),
+        // Preserve any hyperlinks the source VarSeq cells carried so
+        // preview/export can render them as real links. Most keys already
+        // match the row field name; the renamed ones are re-mapped here.
+        _hyperlinks: Object.assign({}, hyperlinks, {
+          chrPos: hyperlinks.chrPosCombined,
+          refAlt: hyperlinks.refAltCombined,
+          gene: hyperlinks.geneNames,
+          variant: hyperlinks.hgvsC,
+          proteinPos: hyperlinks.hgvsP,
+          clinvar: hyperlinks.clinvarClass,
+          inheritance: hyperlinks.omimInheritance,
+        }),
       });
     });
 
@@ -2187,7 +2226,6 @@
     }
 
     var franklinColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
-    var chrPosColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'chrPos'; });
     var homoColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
       if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
       return acc;
@@ -2210,12 +2248,16 @@
         var dataRow = sheet.getRow(headerRowIdx + 1 + i);
         COUPLE_EXPORT_COLUMNS.forEach(function (c, colIdx) {
           var cell = dataRow.getCell(colIdx + 1);
-          cell.value = row[c.key];
+          var link = row._hyperlinks && row._hyperlinks[c.key];
+          var val = row[c.key];
+          if (link && val != null && val !== '') {
+            cell.value = { text: val, hyperlink: link };
+            cell.font = { color: { argb: 'FF0563C1' }, underline: true };
+          } else {
+            cell.value = val;
+          }
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
         });
-        if (chrPosColIdx >= 0 && row._chrPosHyperlink && row.chrPos) {
-          dataRow.getCell(chrPosColIdx + 1).value = { text: row.chrPos, hyperlink: row._chrPosHyperlink };
-        }
         if (franklinColIdx >= 0) {
           dataRow.getCell(franklinColIdx + 1).value = franklinDisplayText(row.franklin);
           var fColor = franklinColor(row.franklin);
@@ -2477,6 +2519,18 @@
         fLink.title = 'Open on Franklin by QIAGEN';
         fWrapper.appendChild(fLink);
         td.appendChild(fWrapper);
+      } else if (row._hyperlinks && row._hyperlinks[c.key]) {
+        var linkWrapper = document.createElement('div');
+        linkWrapper.className = 'cell-link-wrap';
+        linkWrapper.appendChild(input);
+        var cellLink = document.createElement('a');
+        cellLink.href = row._hyperlinks[c.key];
+        cellLink.target = '_blank'; cellLink.rel = 'noopener noreferrer';
+        cellLink.className = 'cell-link';
+        cellLink.textContent = '↗';
+        cellLink.title = 'Open source link';
+        linkWrapper.appendChild(cellLink);
+        td.appendChild(linkWrapper);
       } else {
         td.appendChild(input);
       }
@@ -2533,7 +2587,10 @@
       sheet.eachRow(function (row, r) {
         if (r <= 2) return;
         var vals = [];
-        for (var c = 1; c <= colCount; c++) vals.push(cellText(row.getCell(c).value));
+        for (var c = 1; c <= colCount; c++) {
+          var raw = row.getCell(c).value;
+          vals.push({ text: cellText(raw), link: cellHyperlink(raw) });
+        }
         dataRows.push(vals);
       });
       item._rawPreviewCache = { headers: headers, rows: dataRows };
@@ -2585,7 +2642,17 @@
       tr.appendChild(rowNumTd);
       vals.forEach(function (v) {
         var td = document.createElement('td');
-        td.textContent = v == null ? '' : String(v);
+        var text = (v && v.text != null) ? v.text : (v == null ? '' : String(v));
+        if (v && v.link) {
+          var a = document.createElement('a');
+          a.href = v.link;
+          a.target = '_blank'; a.rel = 'noopener noreferrer';
+          a.className = 'raw-cell-link';
+          a.textContent = text || v.link;
+          td.appendChild(a);
+        } else {
+          td.textContent = text;
+        }
         tr.appendChild(td);
       });
       variantTableBody.appendChild(tr);
@@ -2709,7 +2776,14 @@
       var dataRow = sheet.getRow(headerRowIndex + 1 + i);
       columns.forEach(function (c, colIdx) {
         var cell = dataRow.getCell(colIdx + 1);
-        cell.value = row[c.key];
+        var link = row._hyperlinks && row._hyperlinks[c.key];
+        var val = row[c.key];
+        if (link && val != null && val !== '') {
+          cell.value = { text: val, hyperlink: link };
+          cell.font = { color: { argb: 'FF0563C1' }, underline: true };
+        } else {
+          cell.value = val;
+        }
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       });
       if (isHetWithPureAR(row)) {
