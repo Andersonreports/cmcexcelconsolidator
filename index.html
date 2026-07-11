@@ -194,9 +194,10 @@
   }
 
   .grid-freeze-btn {
-    cursor: pointer; border: 1px solid var(--border-strong); background: #fff;
-    width: 10px; height: 10px; border-radius: 50%; padding: 0; margin-left: 6px;
+    cursor: pointer; border: 1.5px solid var(--border-strong); background: #fff;
+    box-sizing: border-box; width: 15px; height: 15px; border-radius: 50%; padding: 0; margin-left: 6px;
     vertical-align: middle; display: inline-block; flex-shrink: 0;
+    -webkit-user-drag: none; user-select: none;
   }
   .grid-freeze-btn:hover { border-color: var(--primary); }
   .grid-freeze-btn.is-frozen { background: var(--primary); border-color: var(--primary); }
@@ -823,6 +824,12 @@
       if (state === 'granted') return true;
       if (!allowPrompt) return false;
       return handle.requestPermission({ mode: 'readwrite' }).then(function (s) { return s === 'granted'; });
+    }).catch(function () {
+      // requestPermission() throws if called without a live user gesture
+      // (e.g. if too much async work happened first) - treat that the same
+      // as "not granted" so the caller falls back to a one-time picker
+      // instead of the whole download failing with an error banner.
+      return false;
     });
   }
   // Writes one buffer directly into the given directory handle under `name`.
@@ -2410,16 +2417,23 @@
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
 
+      // CMC keeps every row the VarSeq export lists, letting the analyst
+      // manually remove whatever isn't wanted - so none of the three skips
+      // below apply there. Single (which shares this function) and couple
+      // (its own function) keep their existing behavior unchanged.
       var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
-      if (codingIdx === -1) { debugRowsSkipped.nonCoding++; return; }
+      if (codingIdx === -1) {
+        if (currentReportType !== 'cmc') { debugRowsSkipped.nonCoding++; return; }
+        codingIdx = 0; // CMC: no coding transcript - fall back to whichever is first
+      }
 
       var gene = genes[codingIdx] || genes[0] || '';
-      if (!gene) { debugRowsSkipped.noGene++; return; }
-      var variant = stripHgvsPrefix(hgvsCList[codingIdx]);
+      if (!gene && currentReportType !== 'cmc') { debugRowsSkipped.noGene++; return; }
+      var variant = stripHgvsPrefix(hgvsCList[codingIdx] || hgvsCList[0] || '');
 
       var rawZygosity    = get('zygosity');
       var rawInheritance = get('omimInheritance');
-      if (!rawZygosity && !rawInheritance) { debugRowsSkipped.noZygOrInherit++; return; }
+      if (!rawZygosity && !rawInheritance && currentReportType !== 'cmc') { debugRowsSkipped.noZygOrInherit++; return; }
 
       var proteinPos = stripHgvsPrefix(hgvsPList[codingIdx] || hgvsPList[0] || '');
 
@@ -2922,7 +2936,15 @@
       freezeBtn.draggable = false;
       freezeBtn.className = 'grid-freeze-btn' + (isFrozen ? ' is-frozen' : '');
       freezeBtn.title = isFrozen ? 'Unfreeze this column' : 'Freeze this column';
-      freezeBtn.addEventListener('click', function () {
+      // The header cell itself is draggable="true" (for column reordering).
+      // Without this, the browser's native drag-and-drop can "arm" on
+      // mousedown anywhere within it - including over this button - and
+      // swallow the click that would otherwise toggle freeze, which is why
+      // clicking it only sometimes worked. Stopping propagation here keeps
+      // the mousedown from ever reaching the th's drag handling.
+      freezeBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+      freezeBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
         if (frozenCols.has(c.key)) frozenCols.delete(c.key); else frozenCols.add(c.key);
         onToggle();
       });
@@ -3759,6 +3781,68 @@
     }
   }
 
+  // Lighter styling for the VarSeq "group" header row (row 1 - the annotation
+  // source label, e.g. "ClinVar 2026-06-04, NCBI"), visually distinct from the
+  // bold navy column-name row (row 2, see highlightHeaderRow) directly below
+  // it - otherwise both rows read as one flat blue bar with no hierarchy.
+  function highlightGroupHeaderRow(row, colCount) {
+    for (var c = 1; c <= colCount; c++) {
+      var cell = row.getCell(c);
+      cell.font = { bold: true, color: { argb: 'FF1F4E79' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E2F3' } };
+    }
+  }
+
+  function colLettersToNum(letters) {
+    var n = 0;
+    for (var i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64);
+    return n;
+  }
+
+  // Addresses of every cell within a merge that spans MORE THAN ONE column -
+  // VarSeq's row-1 group label (e.g. the sample name merged across
+  // Filter/VAF/AD/DP/Genotype/Zygosity) is one of these. ExcelJS returns the
+  // merge's value on every cell in the range (not just the top-left one), so
+  // all of them - not only the anchor - must be excluded from per-column
+  // length counting; otherwise the same long label inflates every column it's
+  // merged across, not just the first one. The merge's display width is the
+  // SUM of all those columns anyway, which the other rows in each column
+  // (the real per-column header/data) already drive independently.
+  function multiColumnMergeCells(sheet) {
+    var skip = {};
+    (sheet.model.merges || []).forEach(function (range) {
+      var parts = range.split(':');
+      var m1 = parts[0] && parts[0].match(/^([A-Z]+)(\d+)$/);
+      var m2 = parts[1] && parts[1].match(/^([A-Z]+)(\d+)$/);
+      if (!m1 || !m2) return;
+      var c1 = colLettersToNum(m1[1]), c2 = colLettersToNum(m2[1]);
+      if (c2 <= c1) return; // single-column merge - counts normally, not excluded
+      for (var c = c1; c <= c2; c++) skip[columnLetter(c) + m1[2]] = true;
+    });
+    return skip;
+  }
+
+  // Approximates Excel's "AutoFit Column Width" for a whole sheet: sizes each
+  // column to its longest visible value (header or data), clamped to a
+  // sensible min/max so a single very long free-text cell (e.g. an OMIM
+  // phenotype list) can't blow the column out - readable without wrapping,
+  // matching the flat-width look of the Listed Variants sheet but tuned per
+  // column instead of one fixed width for every column.
+  function autoFitColumnWidths(sheet, minWidth, maxWidth) {
+    var skipCells = multiColumnMergeCells(sheet);
+    var colCount = sheet.columnCount;
+    for (var c = 1; c <= colCount; c++) {
+      var maxLen = 0;
+      sheet.getColumn(c).eachCell({ includeEmpty: false }, function (cell) {
+        if (skipCells[cell.address]) return; // shared across several columns, not just this one
+        var text = cellText(cell.value);
+        var len = (text == null) ? 0 : String(text).length;
+        if (len > maxLen) maxLen = len;
+      });
+      sheet.getColumn(c).width = Math.max(minWidth, Math.min(maxWidth, maxLen + 2));
+    }
+  }
+
   // Downloads ship as 2 sheets: the complete, unfiltered VarSeq export
   // (re-loaded fresh from the original upload each time, so repeat downloads
   // never accumulate extra sheets) plus the filtered "Listed Variants" sheet
@@ -3767,12 +3851,20 @@
   function buildExportWorkbook(item) {
     if (item.rawBuffer) {
       return loadWorkbookFromBuffer(item.rawBuffer).then(function (workbook) {
-        if (workbook.worksheets[0]) {
-          workbook.worksheets[0].name = 'Complete Data';
-          centerAlignSheet(workbook.worksheets[0]);
-          // VarSeq exports use a 2-row header (annotation-source group + column name).
-          highlightHeaderRow(workbook.worksheets[0].getRow(1), workbook.worksheets[0].columnCount);
-          highlightHeaderRow(workbook.worksheets[0].getRow(2), workbook.worksheets[0].columnCount);
+        var sheet = workbook.worksheets[0];
+        if (sheet) {
+          sheet.name = 'Complete Data';
+          // Give every column breathing room (matching the Listed Variants
+          // sheet's readable, uncongested look) before centering content.
+          autoFitColumnWidths(sheet, 12, 42);
+          centerAlignSheet(sheet);
+          // VarSeq exports use a 2-row header: row 1 is the annotation-source
+          // group label, row 2 the actual column name - style them
+          // differently so that distinction is visible, not one flat bar.
+          highlightGroupHeaderRow(sheet.getRow(1), sheet.columnCount);
+          highlightHeaderRow(sheet.getRow(2), sheet.columnCount);
+          sheet.getRow(1).height = 20;
+          sheet.getRow(2).height = 22;
         }
         return workbook;
       });
@@ -3957,17 +4049,25 @@
 
     var originalText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'Generating ZIP…';
+    btn.textContent = 'Preparing…';
 
-    var zip = new JSZip();
-    Promise.all(validItems.map(function (item) {
-      return buildItemBuffer(item, includeRawData).then(function (buffer) {
-        zip.file(autoExportBaseName(item) + '.xlsx', buffer);
-      });
-    })).then(function () {
-      return zip.generateAsync({ type: 'arraybuffer' });
-    }).then(function (zipBuffer) {
-      return resolveSaveDirHandle().then(function (dirHandle) {
+    // Resolve (and, if needed, request permission for) the save folder FIRST,
+    // while this click's user activation is still fresh. requestPermission()
+    // on a remembered folder handle throws "User activation is required" if
+    // it's not called practically immediately within the gesture - building
+    // every item's buffer below involves Franklin/ClinVar network lookups
+    // that can take several seconds, which is more than enough to consume
+    // that activation if this ran afterward instead.
+    resolveSaveDirHandle().then(function (dirHandle) {
+      btn.textContent = 'Generating ZIP…';
+      var zip = new JSZip();
+      return Promise.all(validItems.map(function (item) {
+        return buildItemBuffer(item, includeRawData).then(function (buffer) {
+          zip.file(autoExportBaseName(item) + '.xlsx', buffer);
+        });
+      })).then(function () {
+        return zip.generateAsync({ type: 'arraybuffer' });
+      }).then(function (zipBuffer) {
         if (dirHandle) return writeBufferToDir(dirHandle, zipFileName, zipBuffer);
         return saveBufferWithPicker(zipBuffer, zipFileName, ZIP_MIME); // no folder set/available - one-off picker
       });
