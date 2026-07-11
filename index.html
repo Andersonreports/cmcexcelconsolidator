@@ -66,12 +66,13 @@
     display: flex; gap: 6px; align-items: center; margin-left: auto;
   }
   .report-type-select {
-    box-sizing: border-box; padding: 8px 32px 8px 14px; text-align: left;
-    font: 500 13px/1.2 var(--sans); color: var(--primary); background: #fff;
-    border: 1px solid var(--border, #d8dde3); border-radius: 6px; cursor: pointer;
+    box-sizing: border-box; padding: 11px 40px 11px 18px; text-align: left;
+    min-width: 130px;
+    font: 600 clamp(14px, 1.1vw, 17px)/1.2 var(--sans); color: var(--primary); background: #fff;
+    border: 1px solid var(--border, #d8dde3); border-radius: 8px; cursor: pointer;
     appearance: none; -webkit-appearance: none; -moz-appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%231558A5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat: no-repeat; background-position: right 12px center;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='7' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%231558A5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat; background-position: right 14px center;
     transition: border-color 0.2s ease;
   }
   .report-type-select:hover, .report-type-select:focus { border-color: var(--primary); outline: none; }
@@ -180,17 +181,16 @@
     border: none; border-radius: 0; background: transparent; color: var(--ink); text-align: center;
   }
   .excel-grid tbody td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: #fff; }
-  /* Click/focus a truncated cell to read its full value - pops the cell out
-     over its narrow column instead of requiring the column to be resized. */
-  .excel-grid tbody td input.grid-cell-expanded {
-    position: absolute; top: 0; left: 0; z-index: 50;
-    width: max-content; min-width: 100%; max-width: 420px;
-    background: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.3);
-  }
-  .excel-grid .raw-cell-text.grid-cell-expanded {
-    position: absolute; top: 0; left: 0; z-index: 50;
-    width: max-content; max-width: 420px; white-space: normal; word-break: break-word;
-    background: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.3); text-align: left; padding: 8px 10px;
+  /* Floating popover that shows a truncated cell's FULL value, wrapped over
+     multiple lines, when the cell is clicked/focused. Anchored via fixed
+     positioning (JS) so it isn't clipped by the grid's own overflow scroll,
+     and it wraps - unlike a single-line <input>, which just clips long text. */
+  .cell-fulltext-popover {
+    position: fixed; z-index: 1000; max-width: 460px;
+    background: #fff; color: var(--ink);
+    border: 1px solid var(--border-strong); border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.28); padding: 10px 12px;
+    font: 13px/1.5 var(--sans); white-space: pre-wrap; word-break: break-word;
   }
 
   .grid-freeze-btn {
@@ -1646,17 +1646,71 @@
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFrozenCols = new Set();
 
-  // Raw-preview cells aren't focusable inputs, so give them a click-to-expand
-  // toggle instead (the "Variants" grid's editable cells get the same
-  // full-text view for free via the focus/blur handlers on each <input>).
+  // ── Full-text popover ──────────────────────────────────────────────────
+  // A single shared floating panel that shows a truncated cell's complete,
+  // wrapped value. Used by both the editable "Variants" grid (on input focus)
+  // and the read-only raw VarSeq preview (on cell click). Fixed-positioned so
+  // the grid's overflow scroll can't clip it.
+  var cellFullTextPopover = null;
+  var cellPopoverAnchor = null;
+
+  function ensureCellPopover() {
+    if (!cellFullTextPopover) {
+      cellFullTextPopover = document.createElement('div');
+      cellFullTextPopover.className = 'cell-fulltext-popover';
+      cellFullTextPopover.hidden = true;
+      document.body.appendChild(cellFullTextPopover);
+    }
+    return cellFullTextPopover;
+  }
+
+  function positionCellPopover(anchorEl) {
+    var pop = ensureCellPopover();
+    var r = anchorEl.getBoundingClientRect();
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8));
+    var top = r.bottom + 4;
+    if (top + pop.offsetHeight > window.innerHeight - 8) {
+      top = Math.max(8, r.top - pop.offsetHeight - 4); // flip above if no room below
+    }
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+
+  function showCellPopover(anchorEl, text) {
+    text = (text == null) ? '' : String(text);
+    if (text === '') { hideCellPopover(); return; }
+    var pop = ensureCellPopover();
+    pop.textContent = text;
+    pop.hidden = false;
+    cellPopoverAnchor = anchorEl;
+    positionCellPopover(anchorEl);
+  }
+
+  function hideCellPopover() {
+    if (cellFullTextPopover) cellFullTextPopover.hidden = true;
+    cellPopoverAnchor = null;
+  }
+
+  // Only worth a popover when the cell's content is actually clipped.
+  function isCellTruncated(el) {
+    return !!el && el.scrollWidth > el.clientWidth + 1;
+  }
+
+  // Raw-preview cells aren't focusable inputs, so toggle the popover on click.
+  // Anchor <a> links are left alone so clicking them still opens the link.
   variantTableBody.addEventListener('click', function (e) {
-    var cell = e.target.closest('.raw-cell-text');
-    var alreadyOpen = cell && cell.classList.contains('grid-cell-expanded');
-    variantTableBody.querySelectorAll('.raw-cell-text.grid-cell-expanded').forEach(function (el) {
-      el.classList.remove('grid-cell-expanded');
-    });
-    if (cell && !alreadyOpen) cell.classList.add('grid-cell-expanded');
+    var cell = e.target.closest('span.raw-cell-text');
+    if (!cell) return;
+    if (cellPopoverAnchor === cell) { hideCellPopover(); return; }
+    showCellPopover(cell, cell.textContent);
   });
+
+  // Dismiss the popover on anything that would move the anchor out from under
+  // it: scrolling any container (capture catches inner scrollers too), window
+  // resize, or Escape.
+  document.addEventListener('scroll', hideCellPopover, true);
+  window.addEventListener('resize', hideCellPopover);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') hideCellPopover(); });
   var variantFileInput = document.getElementById('variant-file-input');
   var variantBatchList = document.getElementById('variant-batch-list');
   var variantPreviewModeToggle = document.getElementById('variant-preview-mode-toggle');
@@ -2833,12 +2887,14 @@
       // caller-supplied per-section position instead, without touching the
       // underlying row order or row.sNo itself.
       input.value = (c.key === 'sNo' && displayNo != null) ? displayNo : (row[c.key] != null ? row[c.key] : '');
-      // Full text on hover, and pop the cell out to full width on click/focus
-      // so a long value that's clipped by the column's narrow width can
-      // still be read (and edited) without resizing the column.
+      // Full text on hover, plus a wrapped full-text popover when a clipped
+      // cell is focused/clicked - so a long value that's too wide for its
+      // column can still be read in full while it's edited beneath.
       input.title = input.value;
-      input.addEventListener('focus', function (e) { e.target.classList.add('grid-cell-expanded'); });
-      input.addEventListener('blur', function (e) { e.target.classList.remove('grid-cell-expanded'); });
+      input.addEventListener('focus', function (e) {
+        if (isCellTruncated(e.target)) showCellPopover(e.target, e.target.value);
+      });
+      input.addEventListener('blur', hideCellPopover);
       if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
         var vafNum = Number(input.value);
         input.style.color = (input.value !== '' && !isNaN(vafNum) && vafNum < 0.3) ? '#c2293a' : '';
@@ -2857,6 +2913,7 @@
       input.addEventListener('input', function (e) {
         variantRows[rowIndex][c.key] = e.target.value;
         e.target.title = e.target.value;
+        if (cellPopoverAnchor === e.target) showCellPopover(e.target, e.target.value);
         updateInheritanceColor();
         if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
           var newVaf = Number(e.target.value);
