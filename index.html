@@ -217,6 +217,11 @@
   .preview-mode-toggle { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
   .preview-mode-toggle[hidden] { display: none; }
 
+  .save-folder-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; font: 13px/1.4 var(--sans); color: var(--text-secondary); }
+  .save-folder-row strong { color: var(--ink); font-weight: 600; }
+  .save-folder-row button { font: 500 12px var(--sans); padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border-strong, #bbb); background: var(--bg); color: var(--ink); }
+  .save-folder-row button:hover { border-color: var(--primary); color: var(--primary); }
   .action-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
   .action-row button {
     font: 500 13px/1 var(--sans); letter-spacing: .02em; padding: 10px 20px; border-radius: 4px;
@@ -519,6 +524,11 @@
           </span>
         </div>
 
+        <div class="save-folder-row" id="save-folder-row" hidden>
+          <span class="save-folder-label">Save folder: <strong id="save-folder-name">Not set</strong></span>
+          <button type="button" id="save-folder-choose">Choose folder…</button>
+        </div>
+
         <div class="action-row">
           <button id="variant-clear-all" disabled>Clear All</button>
           <button class="primary" id="variant-download-all" disabled>Download All (ZIP)</button>
@@ -527,15 +537,15 @@
       </div>
     </section>
 
-    <!-- Pre-download dialog for single/couple: edit filenames, then pick a folder. -->
+    <!-- Pre-download dialog for single/couple: edit filenames, then save into the chosen save folder. -->
     <div class="dl-modal" id="download-modal" hidden>
       <div class="dl-modal-box">
         <div class="dl-modal-title" id="dl-modal-title">Download</div>
-        <div class="dl-modal-hint">File names are auto-filled from each uploaded file — edit if needed, then choose a folder to save into.</div>
+        <div class="dl-modal-hint">File names are auto-filled from each uploaded file — edit if needed, then save. Files go into your chosen save folder (see the "Save folder" control below).</div>
         <div class="dl-modal-list" id="dl-modal-list"></div>
         <div class="dl-modal-actions">
           <button type="button" id="dl-modal-cancel">Cancel</button>
-          <button type="button" class="primary" id="dl-modal-save">Choose folder &amp; save</button>
+          <button type="button" class="primary" id="dl-modal-save">Save</button>
         </div>
       </div>
     </div>
@@ -744,6 +754,72 @@
   // uploaded input file's name - the base every download name defaults to.
   function autoExportBaseName(item) {
     return String(item.fileName || 'listed-variants').replace(/\.[^.]+$/, '') + '-listed-variants';
+  }
+
+  // ── Persisted "Save folder" ─────────────────────────────────────────────
+  // Lets the user pick a save folder ONCE (via a standalone control, not tied
+  // to any particular download click); it's remembered in IndexedDB (a
+  // FileSystemDirectoryHandle survives structured-clone storage there) so
+  // every later download writes straight into it - no repeated folder-picker
+  // dialog - until the user explicitly changes it.
+  var SAVE_DIR_DB = 'cmc-save-folder', SAVE_DIR_STORE = 'handles', SAVE_DIR_KEY = 'dir';
+  var savedDirHandle = null; // FileSystemDirectoryHandle currently in use, or null
+
+  function openSaveDirDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(SAVE_DIR_DB, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(SAVE_DIR_STORE); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function idbGet(db, key) {
+    return new Promise(function (resolve, reject) {
+      var req = db.transaction(SAVE_DIR_STORE, 'readonly').objectStore(SAVE_DIR_STORE).get(key);
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  function idbSet(db, key, val) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(SAVE_DIR_STORE, 'readwrite');
+      tx.objectStore(SAVE_DIR_STORE).put(val, key);
+      tx.oncomplete = function () { resolve(); };
+      tx.onerror = function () { reject(tx.error); };
+    });
+  }
+  function saveFolderSupported() {
+    return !!(window.showDirectoryPicker && window.indexedDB);
+  }
+  function persistDirHandle(handle) {
+    if (!window.indexedDB) return Promise.resolve();
+    return openSaveDirDb().then(function (db) { return idbSet(db, SAVE_DIR_KEY, handle); }).catch(function () {});
+  }
+  // Silent check only (no permission prompt) - safe to call outside a user
+  // gesture, e.g. on page load, to restore the remembered folder's display.
+  function loadPersistedDirHandle() {
+    if (!saveFolderSupported()) return Promise.resolve(null);
+    return openSaveDirDb().then(function (db) { return idbGet(db, SAVE_DIR_KEY); })
+      .then(function (handle) { return handle || null; })
+      .catch(function () { return null; });
+  }
+  // Verifies (and, only if allowed, requests) readwrite permission on a
+  // directory handle. Requesting permission needs a user gesture, so pass
+  // `allowPrompt: true` only when called directly from a click handler.
+  function ensureDirPermission(handle, allowPrompt) {
+    return handle.queryPermission({ mode: 'readwrite' }).then(function (state) {
+      if (state === 'granted') return true;
+      if (!allowPrompt) return false;
+      return handle.requestPermission({ mode: 'readwrite' }).then(function (s) { return s === 'granted'; });
+    });
+  }
+  // Writes one buffer directly into the given directory handle under `name`.
+  function writeBufferToDir(dirHandle, name, buffer) {
+    return dirHandle.getFileHandle(name, { create: true }).then(function (fh) {
+      return fh.createWritable().then(function (w) {
+        return w.write(buffer).then(function () { return w.close(); });
+      });
+    });
   }
 
   function exportRowsToXlsx(rows, columns, sheetName, fileName) {
@@ -1795,6 +1871,38 @@
   var variantClearAllBtn = document.getElementById('variant-clear-all');
   var variantDownloadAllBtn = document.getElementById('variant-download-all');
   var variantDownloadAllNoRawBtn = document.getElementById('variant-download-all-no-raw');
+  var saveFolderRow = document.getElementById('save-folder-row');
+  var saveFolderNameEl = document.getElementById('save-folder-name');
+  var saveFolderChooseBtn = document.getElementById('save-folder-choose');
+
+  function updateSaveFolderUI() {
+    if (!saveFolderRow) return;
+    saveFolderRow.hidden = !saveFolderSupported();
+    saveFolderNameEl.textContent = savedDirHandle ? savedDirHandle.name : 'Not set (you\'ll be asked on first download)';
+    saveFolderChooseBtn.textContent = savedDirHandle ? 'Change folder…' : 'Choose folder…';
+  }
+
+  if (saveFolderChooseBtn) {
+    saveFolderChooseBtn.addEventListener('click', function () {
+      window.showDirectoryPicker().then(function (handle) {
+        savedDirHandle = handle;
+        updateSaveFolderUI();
+        return persistDirHandle(handle);
+      }).catch(function (err) {
+        if (!err || err.name !== 'AbortError') showVariantError((err && err.message) || 'Failed to set the save folder.');
+      });
+    });
+  }
+
+  // Restore the remembered folder on load (silent permission check only - no
+  // prompt - so this doesn't need a user gesture).
+  loadPersistedDirHandle().then(function (handle) {
+    if (!handle) { updateSaveFolderUI(); return; }
+    return ensureDirPermission(handle, false).then(function (granted) {
+      savedDirHandle = handle; // keep it either way; permission is re-requested on next use if needed
+      updateSaveFolderUI();
+    });
+  });
   var variantSampleSelect = document.getElementById('variant-sample-select');
   var variantTitleInput = document.getElementById('variant-title-input');
 
@@ -3807,6 +3915,30 @@
   // pick the folder + zip name via the native Save dialog. `includeRawData`
   // controls whether each workbook also carries the original VarSeq
   // "Complete Data" sheet.
+  // Resolves the directory to save into for this download click, without ever
+  // prompting more than once per "set folder" action: if a folder was already
+  // chosen via the standalone "Save folder" control (or a previous download),
+  // reuse it - (re-)requesting permission here since we're in a click handler.
+  // Only prompts with the native folder picker if nothing has been set yet,
+  // and remembers whatever the user picks for every download after.
+  function resolveSaveDirHandle() {
+    if (!saveFolderSupported()) return Promise.resolve(null);
+    if (savedDirHandle) {
+      return ensureDirPermission(savedDirHandle, true).then(function (granted) {
+        return granted ? savedDirHandle : null;
+      });
+    }
+    return window.showDirectoryPicker().then(function (handle) {
+      savedDirHandle = handle;
+      updateSaveFolderUI();
+      persistDirHandle(handle);
+      return handle;
+    }).catch(function (err) {
+      if (err && err.name === 'AbortError') return null; // user cancelled the one-time picker
+      return null;
+    });
+  }
+
   function downloadAllZip(includeRawData, btn, zipFileName) {
     var validItems = currentValidBatchItems();
     if (!validItems.length) return;
@@ -3823,7 +3955,10 @@
     })).then(function () {
       return zip.generateAsync({ type: 'arraybuffer' });
     }).then(function (zipBuffer) {
-      return saveBufferWithPicker(zipBuffer, zipFileName, ZIP_MIME);
+      return resolveSaveDirHandle().then(function (dirHandle) {
+        if (dirHandle) return writeBufferToDir(dirHandle, zipFileName, zipBuffer);
+        return saveBufferWithPicker(zipBuffer, zipFileName, ZIP_MIME); // no folder set/available - one-off picker
+      });
     }).catch(function (err) {
       showVariantError((err && err.message) || 'Failed to generate ZIP.');
     }).finally(function () {
@@ -3883,10 +4018,11 @@
     });
   }
 
-  // Runs inside the Save click (so showDirectoryPicker has the required user
-  // activation): reads the edited names, picks ONE folder, then builds and
-  // writes every file into it sequentially. Falls back to individual browser
-  // downloads when the File System Access API isn't available.
+  // Saves every file in the dialog straight into the already-resolved save
+  // folder (the standalone "Save folder" control, or a one-time picker if
+  // nothing's been set yet - see resolveSaveDirHandle) - no folder dialog
+  // inside this flow itself. Falls back to individual browser downloads when
+  // the File System Access API isn't available at all.
   function performModalDownload() {
     if (!dlModalItems.length) { closeDownloadModal(); return; }
     var names = modalDownloadNames();
@@ -3904,36 +4040,22 @@
       dlModalSaveBtn.textContent = originalText;
     }
 
-    var dirPromise = window.showDirectoryPicker
-      ? window.showDirectoryPicker().catch(function (err) {
-          if (err && err.name === 'AbortError') return null; // user cancelled folder pick
-          return undefined; // API present but failed -> fall back to plain downloads
-        })
-      : Promise.resolve(undefined); // API absent -> fall back
-
-    return dirPromise.then(function (dirHandle) {
-      if (dirHandle === null) { resetButtons(); return; } // cancelled: keep dialog open
+    return resolveSaveDirHandle().then(function (dirHandle) {
       // Build + write each file sequentially so we don't hold many workbooks
       // in memory at once.
       var chain = Promise.resolve();
       items.forEach(function (item, i) {
         chain = chain.then(function () {
           return buildItemBuffer(item, includeRaw).then(function (buffer) {
-            if (dirHandle) {
-              return dirHandle.getFileHandle(names[i], { create: true }).then(function (fh) {
-                return fh.createWritable().then(function (w) {
-                  return w.write(buffer).then(function () { return w.close(); });
-                });
-              });
-            }
-            downloadBlob(buffer, names[i]); // fallback: Downloads folder
+            if (dirHandle) return writeBufferToDir(dirHandle, names[i], buffer);
+            downloadBlob(buffer, names[i]); // no folder available - plain download
           });
         });
       });
       return chain.then(function () { resetButtons(); closeDownloadModal(); });
     }).catch(function (err) {
       showVariantError((err && err.message) || 'Failed to save files.');
-      resetButtons(); closeDownloadModal();
+      resetButtons();
     });
   }
 
