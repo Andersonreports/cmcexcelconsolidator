@@ -695,6 +695,18 @@
     if (btn.dataset.tab === 'listed-variant') populateSampleSelect();
   }
 
+  // Which tab ('sample-list' | 'listed-variant' | 'final-consolidate') is
+  // currently visible - used so autosave restore can put the user back on the
+  // tab they were actually working in, instead of always landing on the first
+  // tab (which switchReportType() does by default and may well be empty).
+  function getActiveTabKey() {
+    var keys = Object.keys(panels);
+    for (var i = 0; i < keys.length; i++) {
+      if (panels[keys[i]] && !panels[keys[i]].hidden) return keys[i];
+    }
+    return null;
+  }
+
   tabButtons.forEach(function (btn) {
     btn.addEventListener('click', function () {
       selectTab(btn);
@@ -4967,6 +4979,7 @@
     return {
       v: 1,
       currentReportType: currentReportType,
+      currentTab: (typeof getActiveTabKey === 'function') ? getActiveTabKey() : null,
       sampleRows: sampleRows,
       variantPreviewIdx: variantPreviewIdx,
       variantBatch: variantBatch.map(function (item) {
@@ -5105,9 +5118,20 @@
       // switchReportType() sets currentReportType, syncs the dropdown/nav
       // chrome, and (via refreshVariantViewForReportType) picks the right
       // preview for that type - including honoring the restored
-      // variantPreviewIdx above when it still matches.
+      // variantPreviewIdx above when it still matches. It always lands on
+      // that report type's FIRST tab though, so if the user was on a
+      // different tab (e.g. "Listed Variant Excel") when they refreshed,
+      // re-select it afterward - otherwise the restore looks broken even
+      // though the data came back, because the visible tab is a different,
+      // legitimately-empty one.
       if (typeof switchReportType === 'function') {
         switchReportType(state.currentReportType || currentReportType);
+        if (state.currentTab) {
+          var savedTabBtn = document.querySelector(
+            '.tab-button[data-tab="' + state.currentTab + '"][data-report-type="' + currentReportType + '"]'
+          );
+          if (savedTabBtn && !savedTabBtn.hidden) selectTab(savedTabBtn);
+        }
       } else {
         renderBatchList();
         renderVariantTable();
