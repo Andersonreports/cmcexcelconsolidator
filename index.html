@@ -2611,6 +2611,8 @@
       // around (separately from the displayed "-" placeholder) so section
       // filtering below isn't fooled into treating every row as shared.
       var clinvarValue = get('clinvarClass') || '';
+      var omimIdValue = get('omimIdField') || '';
+      var diseaseLabelValue = get('clingenDiseaseLabel') || '';
 
       rows.push({
         sNo: '',
@@ -2642,9 +2644,9 @@
         exonNumber: get('exonNumber'),
         clinvarVariantId: get('clinvarVariantId'),
         omimGeneId: get('omimGeneId'),
-        omimIdField: get('omimIdField'),
+        omimIdField: omimIdValue,
         revel: get('revel'),
-        diseaseLabel: get('clingenDiseaseLabel'),
+        diseaseLabel: diseaseLabelValue,
         clingenClass: get('clingenClassification'),
         gnomadGenome4Count: get('gnomadGenome4Count'),
         gnomadGenome4SA: get('gnomadGenome4SA'),
@@ -2692,14 +2694,16 @@
           inheritance: hyperlinks.omimInheritance,
           // Gene-search links, not carried over from the source file. Only
           // OMIM ID gets the OMIM link and only CLINGEN Disease label gets
-          // the ClinGen link - OMIM TITLE/CONDITIONS/CLINGEN CLASSIFICATION
-          // are text-only (explicitly nulled so a source-file hyperlink on
-          // those cells, if any, doesn't leak through the base `hyperlinks`
-          // spread above).
-          omimIdField: gene ? omimSearchUrl(gene) : null,
+          // the ClinGen link - and only when that cell actually has a value,
+          // since an empty OMIM ID/Disease label means nothing was found for
+          // this variant and a link icon there would be misleading. OMIM
+          // TITLE/CONDITIONS/CLINGEN CLASSIFICATION are always text-only
+          // (explicitly nulled so a source-file hyperlink on those cells, if
+          // any, doesn't leak through the base `hyperlinks` spread above).
+          omimIdField: (omimIdValue && gene) ? omimSearchUrl(gene) : null,
           omimTitle: null,
           omimPhenotypes: null,
-          diseaseLabel: gene ? clingenSearchUrl(gene) : null,
+          diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
           clingenClass: null,
         }),
       });
