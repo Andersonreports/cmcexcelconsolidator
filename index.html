@@ -282,6 +282,15 @@
   .cell-link { flex-shrink:0; margin-left:4px; font:600 11px/1 var(--sans); color:var(--primary); text-decoration:none; opacity:.7; transition:opacity .12s; }
   .cell-link:hover { opacity:1; text-decoration:underline; }
   .raw-cell-link { color: var(--primary); text-decoration: underline; }
+  /* Raw "VarSeq Data" preview cells - matches the padding/centering the
+     processed grid gets for free from its <input> cells (see "tbody td
+     input" above), plus an ellipsis cap so one long value (e.g. an OMIM
+     phenotype list) can't blow out the column width for the whole table. */
+  .excel-grid .raw-cell-text {
+    display: block; padding: 5px 8px; min-width: 90px; max-width: 320px;
+    text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .excel-grid .raw-cell-link.raw-cell-text { text-align: center; }
   .raw-text-debug { margin-top: 16px; font-size: 13px; }
   .raw-text-debug summary { cursor: pointer; color: var(--text); font-weight: 500; }
   .raw-text-debug summary:hover { color: var(--ink); }
@@ -1064,33 +1073,41 @@
   // ====================================================================
   // Listed Variant Excel tab
   // ====================================================================
+  // Column order below mirrors the raw VarSeq CMC export's own header-row
+  // sequence (see column-order-cmc.xlsx) rather than being hand-curated —
+  // S.NO (generated, not in the source) leads and FRANKLIN (a lookup, not in
+  // the source) sits next to the other classification columns; every other
+  // column follows the source file's left-to-right order exactly. This
+  // order applies to the CMC layout only — SINGLE_VARIANT_COLUMNS and
+  // COUPLE_EXPORT_COLUMNS keep their own existing order.
   var VARIANT_COLUMNS = [
     { key: 'sNo', header: 'S.NO' },
+    { key: 'filter', header: 'FILTER' },
+    { key: 'vaf', header: 'VAF(%)' },
+    { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
+    { key: 'readDepths', header: 'READ DEPTH' },
+    { key: 'genotype', header: 'GENOTYPE' },
+    { key: 'zygosity', header: 'ZYGOSITY' },
     { key: 'gene', header: 'GENE' },
     { key: 'variant', header: 'VARIANT' },
     { key: 'proteinPos', header: 'PROTEIN POS' },
     { key: 'franklin', header: 'FRANKLIN' },
     { key: 'clinvar', header: 'CLINVAR' },
     { key: 'varseq', header: 'ACMG Classification' },
-    { key: 'zygosity', header: 'ZYGOSITY' },
+    { key: 'diseaseLabel', header: 'CLINGEN Disease label' },
+    { key: 'clingenClass', header: 'CLINGEN CLASSIFICATION' },
     { key: 'inheritance', header: 'INHERTIANCE' },
-    { key: 'inhouseMerged', header: 'Inhouse merged' },
-    { key: 'inhouseCount', header: 'Hematology Inhouse count' },
-    { key: 'inhouseSampleNames', header: 'Hematology inhouse sample name' },
-    { key: 'vaf', header: 'VAF(%)' },
-    { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
-    { key: 'readDepths', header: 'READ DEPTH' },
     { key: 'omimTitle', header: 'OMIM TITLE' },
     { key: 'omimPhenotypes', header: 'OMIM PHENOTYPE' },
     { key: 'omimDescription', header: 'CONDITIONS' },
-    { key: 'diseaseLabel', header: 'CLINGEN Disease label' },
-    { key: 'clingenClass', header: 'CLINGEN CLASSIFICATION' },
     { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
     { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
     { key: 'gnomadGenome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadGenome4SAMale', header: 'gnomAD(MALE)' },
     { key: 'gnomadExome4Count', header: 'GNOM AD EXOME ALL V4' },
     { key: 'gnomadExome4SA', header: 'GNOM AD EXOME SA V4' },
     { key: 'gnomadExome4SAHomo', header: 'GNOM AD SA V4 - HOMO' },
+    { key: 'gnomadExome4SAMale', header: 'gnomAD(MALE)' },
     { key: 'gnomadGenome3AC', header: 'GNOM AD all V3' },
     { key: 'gnomadGenome3Male', header: 'gnomAD(MALE)' },
     { key: 'gnomadGenome3Female', header: 'Gnom AD FEMALE' },
@@ -1098,6 +1115,9 @@
     { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
     { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
     { key: 'revel', header: 'Revel Score' },
+    { key: 'inhouseMerged', header: 'Inhouse merged' },
+    { key: 'inhouseCount', header: 'Hematology Inhouse count' },
+    { key: 'inhouseSampleNames', header: 'Hematology inhouse sample name' },
   ];
 
   // Single-sample report layout — separate named in-house cohort columns instead
@@ -1124,7 +1144,8 @@
     { key: 'vafRaw', header: 'VAF(%)' },
     { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
     { key: 'readDepths', header: 'DEP(X)' },
-    { key: 'omimTitle', header: 'OMIM PHENOTYPE' },
+    { key: 'omimIdField', header: 'OMIM ID' },
+    { key: 'omimTitle', header: 'OMIM TITLE' },
     { key: 'omimPhenotypes', header: 'CONDITIONS' },
     { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
     { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
@@ -1173,7 +1194,8 @@
     { key: 'readDepths2', header: 'READ DEPTH' },
     { key: 'vaf2', header: 'VAF(%)' },
     { key: 'alleleDepths2', header: 'ALLELIC DEPTH' },
-    { key: 'omimTitle', header: 'OMIM PHENOTYPE' },
+    { key: 'omimIdField', header: 'OMIM ID' },
+    { key: 'omimTitle', header: 'OMIM TITLE' },
     { key: 'omimPhenotypes', header: 'CONDITIONS' },
     { key: 'gnomadGenome4Count', header: 'GNOM AD GENOME ALL V4' },
     { key: 'gnomadGenome4SA', header: 'GNOM AD GENOME SA V4' },
@@ -1199,7 +1221,6 @@
     { key: 'seqOntology', header: 'Sequence Ontology' },
     { key: 'exonNumber', header: 'Exon' },
     { key: 'clinvarVariantId', header: 'ClinVar' },
-    { key: 'omimIdField', header: 'OMIM ID' },
   ];
 
   var COUPLE_VARIANT_COLUMNS = [{ key: 'sNo', header: 'S.NO' }].concat(COUPLE_EXPORT_COLUMNS);
@@ -1233,6 +1254,8 @@
     clinvar: 'Classification, under the "ClinVar" group',
     varseq: 'Classification, under the "ACMG Sample Classifier" group',
     zygosity: 'Zygosity (abbreviated: Heterozygous→HET, Homozygous→HOM/HEMI, Hemizygous→HEMI)',
+    genotype: '0/1 Genotypes (GT)',
+    filter: 'Filter',
     inheritance: 'Inheritance, under the "OMIM" group (abbreviated: AD/AR/XLD/XLR/XL/MF)',
     inhouseMerged: 'Samples2',
     inhouseCount: '# Samples',
@@ -1298,6 +1321,8 @@
     hgvsC: { headerStartsWith: 'HGVS c.' },
     hgvsP: { headerStartsWith: 'HGVS p.' },
     zygosity: { header: 'Zygosity' },
+    filter: { header: 'Filter' },
+    genotype: { header: '0/1 Genotypes (GT)' },
     vaf: { header: 'Variant Allele Freq' },
     alleleDepths: { header: 'Allelic Depths (AD)' },
     readDepths: { header: 'Read Depths (DP)' },
@@ -1419,10 +1444,19 @@
         result = value.richText.map(function (rt) { return rt.text || ''; }).join('');
       } else if (value.text != null) {
         result = value.text;
+      } else if (value.error != null) {
+        // A formula cell that evaluated to an Excel error (#N/A, #REF!, etc.)
+        result = value.error;
       } else if (value.result != null) {
-        result = value.result;
+        // A formula cell's cached result, which can itself be an error object.
+        result = (value.result.error != null) ? value.result.error : value.result;
+      } else if (value instanceof Date) {
+        result = value;
       } else {
-        result = String(value);
+        // Unrecognized object shape (e.g. a formula with no cached result at
+        // all) - nothing useful to display, so leave it blank rather than
+        // dumping the object's default "[object Object]" string form.
+        result = '';
       }
     }
     // "Ref,Alt"-style depth fields (e.g. Allelic Depths) leave a bare "," when
@@ -1441,6 +1475,38 @@
   function splitList(value) {
     if (value == null) return [];
     return String(value).split(',').map(function (s) { return s.trim(); });
+  }
+
+  // ACMG Secondary Findings v3.3 reportable gene list - any listed variant
+  // whose gene matches one of these is flagged in its own highlighted
+  // section at the top of every export, since it's a finding outside the
+  // primary referral reason and easy to miss among the regular rows.
+  var SECONDARY_FINDING_GENES = [
+    'APC', 'RET', 'BRCA1', 'BRCA2', 'PALB2', 'SDHD', 'SDHAF2', 'SDHC', 'SDHB', 'MAX', 'TMEM127',
+    'BMPR1A', 'SMAD4', 'TP53', 'MLH1', 'MSH2', 'MSH6', 'PMS2', 'MEN1', 'MUTYH', 'NF2', 'STK11',
+    'PTEN', 'RB1', 'TSC1', 'TSC2', 'VHL', 'WT1', 'FBN1', 'TGFBR1', 'TGFBR2', 'SMAD3', 'ACTA2',
+    'MYH11', 'PKP2', 'DSP', 'DSC2', 'TMEM43', 'DSG2', 'RYR2', 'CALM1', 'CALM2', 'CALM3', 'CASQ2',
+    'TRDN', 'MYH7', 'MYBPC3', 'TNNI3', 'TPM1', 'MYL3', 'ACTC1', 'PRKAG2', 'MYL2', 'TNNT2', 'LMNA',
+    'FLNC', 'TTN', 'BAG3', 'DES', 'RBM20', 'TNNC1', 'SCN5A', 'PLN', 'COL3A1', 'LDLR', 'APOB',
+    'PCSK9', 'KCNQ1', 'KCNH2', 'BTD', 'GLA', 'OTC', 'GAA', 'ABCD1', 'CYP27A1', 'HFE', 'ACVRL1',
+    'ENG', 'RYR1', 'CACNA1S', 'HNF1A', 'RPE65', 'ATP7B', 'TTR'
+  ];
+  var SECONDARY_FINDING_GENE_SET = SECONDARY_FINDING_GENES.reduce(function (acc, g) {
+    acc[g] = true;
+    return acc;
+  }, {});
+
+  // Returns the sorted, deduped list of genes in `rows` that appear on the
+  // ACMG Secondary Findings v3.3 list, matched case-insensitively.
+  function findSecondaryFindingGenes(rows) {
+    var found = {};
+    (rows || []).forEach(function (row) {
+      splitList(row.gene).forEach(function (g) {
+        var symbol = String(g || '').trim().toUpperCase();
+        if (symbol && SECONDARY_FINDING_GENE_SET[symbol]) found[symbol] = true;
+      });
+    });
+    return Object.keys(found).sort();
   }
 
   function formatVafPercent(value) {
@@ -1498,13 +1564,7 @@
     return sortInheritanceCodes(order);
   }
 
-  // Single/couple templates keep each comma-separated entry as its own group
-  // instead of flattening everything into one merged set — e.g. VarSeq's
-  // "Autosomal dominant/Autosomal recessive,Autosomal recessive" becomes
-  // "AD/AR,AR", not the flattened "AD/AR" that abbreviateInheritance produces
-  // (used by the cmc template, which doesn't distinguish per-entry grouping).
-  // Slash-compounds within a group are still abbreviated/sorted the same way;
-  // only exact-duplicate groups (post-abbreviation) are dropped.
+ 
   function abbreviateInheritanceGrouped(raw) {
     var groups = String(raw || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
     var seenGroups = {};
@@ -1534,12 +1594,7 @@
     return norm;
   }
 
-  // Some couple VarSeq exports omit the explicit "Zygosity" column and only
-  // carry Allelic Depths (ref,alt read counts) and/or Variant Allele Freq.
-  // Zygosity is conventionally derived from those same numbers anyway (a
-  // near-zero ref count means the alt allele is the only one seen = HOM;
-  // both ref and alt present = HET), so fall back to that when there's no
-  // explicit call to read.
+  
   function deriveZygosityFromDepths(alleleDepthsRaw, vafRaw, isXLinked) {
     if (alleleDepthsRaw) {
       var parts = String(alleleDepthsRaw).split(',');
@@ -1558,10 +1613,7 @@
     return '';
   }
 
-  // A heterozygous variant in a gene with strictly autosomal recessive
-  // inheritance usually means a carrier, not a manifesting disease allele
-  // on its own - flagged in red as a reminder this needs a second variant
-  // (or different interpretation) to explain the phenotype.
+  
   function isHetWithPureAR(row) {
     var zygosity = String(row.zygosity || '').trim().toUpperCase();
     var inheritance = String(row.inheritance || '').trim().toUpperCase();
@@ -1574,10 +1626,6 @@
     return m ? m[1].toUpperCase() : String(rawCalc).trim().toUpperCase();
   }
 
-  // ---- VarSeq workbook processing (batch mode) ----
-  // variantBatch: array of {fileName, rows, runName, title, error}
-  // variantPreviewIdx: which batch item is shown in the table (-1 = none)
-  // variantRows: convenience alias = variantBatch[variantPreviewIdx]?.rows || []
   var variantBatch = [];
   var variantPreviewIdx = -1;
   var variantRows = [];
@@ -1612,6 +1660,18 @@
       if (franklinEntries[i].gene === g && franklinEntries[i].variant === v) return franklinEntries[i].code;
     }
     return '';
+  }
+
+  // Gene-search links for OMIM and ClinGen, attached to the OMIM/ClinGen
+  // result columns the same way lookupFranklin's URL is attached to the
+  // FRANKLIN column - the analyst clicks straight through to that gene's
+  // page on the source site instead of having to search it manually.
+  function omimSearchUrl(gene) {
+    return 'https://www.omim.org/search/?index=entry&search=' + encodeURIComponent(gene);
+  }
+
+  function clingenSearchUrl(gene) {
+    return 'https://search.clinicalgenome.org/kb/genes?page=1&size=25&search=' + encodeURIComponent(gene);
   }
 
   franklinFileInput.addEventListener('change', function (e) {
@@ -1708,20 +1768,12 @@
     return '';
   }
 
-  // Allelic Depths (AD) is a "ref,alt" pair (e.g. "122,136") - a read depth
-  // below 20 for either allele is low-confidence and worth flagging, but only
-  // that specific number, not the whole cell. Returns an ExcelJS rich-text
-  // value ({ richText: [...] }) with each comma-separated piece kept as its
-  // own run so only the low number(s) get the red font; commas/whitespace
-  // are preserved verbatim as separators between runs.
   function alleleDepthRichText(value) {
     if (value == null || value === '') return value;
     var parts = String(value).split(/([,\s]+)/); // keeps separators as their own array entries
     var anyColored = false;
     var richText = parts.map(function (part) {
       var num = Number(part);
-      // A literal 0 means no reads at all (missing data), not a low-but-real
-      // depth - only 1-19 gets flagged.
       var isLow = part !== '' && !isNaN(num) && num > 0 && num < 20;
       if (isLow) anyColored = true;
       return isLow ? { text: part, font: { color: { argb: 'FFC2293A' }, bold: true } } : { text: part };
@@ -1729,9 +1781,6 @@
     return anyColored ? { richText: richText } : value;
   }
 
-  // "VUS/LP" and "B/VUS" are internal lean codes used only to pick a color
-  // (see franklinColor above) — the cell/input text itself should always
-  // just read "VUS" so the lean is conveyed purely through bold/color.
   function franklinDisplayText(value) {
     var v = String(value || '').trim().toUpperCase();
     if (v === 'VUS/LP' || v === 'B/VUS') return 'VUS';
@@ -1741,20 +1790,10 @@
   // ── Franklin (Genoox) auto-classification ──────────────────────────────────
   var FRANKLIN_PROXY_URL = 'https://script.google.com/macros/s/AKfycbxZho7Jig9dKaCIVZIqwSv6FvUJxU9vx6yLwpqvoRjlt3ZQHKkQljthA8QOG9vYq6E3/exec';
 
-  // A plain "VUS" (no lean) from the ACMG reference-file cross-check is
-  // ambiguous — the reference file only ever records the bare classification
-  // word, not which side of the fence it leans toward. Treat it as
-  // unresolved so the live Franklin lookup below still runs and can upgrade
-  // it to "VUS/LP" or "B/VUS" when Franklin's own classifier has a lean.
   function isGenericVus(value) {
     return String(value || '').trim().toUpperCase() === 'VUS';
   }
 
-  // Returns a Promise that resolves once every row's Franklin lookup (live
-  // proxy + ClinVar fallback) has settled, so callers that need the final
-  // classification - like building a download - can wait on it instead of
-  // reading row.franklin while lookups are still in flight or were never
-  // triggered at all (e.g. for a batch item that was never actively previewed).
   function resolveFranklinForRows(rows, batchIdx) {
     var pending = rows.map(function (row, rowIdx) {
       var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
@@ -1798,9 +1837,6 @@
           if (linkEl) linkEl.href = row._franklinUrl;
         }
         if (linkEl) linkEl.textContent = '↗';
-        // Only let a live lookup overwrite an existing generic "VUS" when it
-        // actually resolves to a specific lean — never downgrade a real
-        // lookup result, and never touch a non-VUS reference-file verdict.
         var canRefine = refiningGenericVus && data && data.ok &&
           (data.abbr === 'VUS/LP' || data.abbr === 'B/VUS');
         if (data && data.ok && data.abbr && (!row.franklin || canRefine)) {
@@ -1990,13 +2026,11 @@
   function extractPatientTitle(filename, runName) {
     var base = filename.replace(/\.[^.]+$/, '');
 
-    // Preferred: name + age/gender lifted straight from the filename.
     var nameMatch = base.match(/^[^_]+_(.+?)\s*\(([^)]+)\)/);
     if (nameMatch) {
       return 'LISTED VARIANTS FOR ' + nameMatch[1].trim().toUpperCase() +
              ' (' + nameMatch[2].trim().toUpperCase() + ')' + (runName ? '_' + runName : '');
     }
-    // Pattern 1: with series letter (e.g. _Y_) between code and patient number
     var m = base.match(/_?(MR|MRS|MS|MASTER)_([A-Z0-9]+)_([A-Z]{1,3})_(\d+)_(\d+)Y_?([MF])/i);
     if (m) {
       var p = m[1].toUpperCase() + '.' + m[2].toUpperCase() +
@@ -2019,17 +2053,6 @@
     return 'LISTED VARIANTS FOR ' + (runName || base);
   }
 
-  // Parses couple-mode filenames like
-  // "4370_MR_PUSHPARAJ_SADASHIVA_KUNDER44YM_4369_MRS_VAISHALI_LAXMAN.xlsx"
-  // into per-patient "<code>_<SALUTATION>. <FULL NAME>" labels. The name
-  // block (every underscore-separated word up to the next patient's
-  // "_<id>_MR|MRS|MS|MASTER_" block or end of string) is found by locating
-  // where each patient block *starts* rather than matching the name itself
-  // with a restrictive character class - a class like [A-Za-z_]+ can't cross
-  // a trailing age/gender suffix glued onto the last word (e.g. "KUNDER44YM"
-  // has digits in the middle), which silently failed the whole match before.
-  // A trailing Windows duplicate-download suffix like " (4)" is stripped
-  // first since it isn't part of the semantic filename.
   function extractCoupleNamesFromFilename(filename) {
     var base = filename.replace(/\.[^.]+$/, '').replace(/\s*\(\d+\)\s*$/, '');
     var starts = [];
@@ -2042,9 +2065,6 @@
       var nameEnd = (i + 1 < starts.length) ? starts[i + 1].matchStart : base.length;
       var nameBlock = base.slice(entry.nameStart, nameEnd).replace(/^_+|_+$/g, '');
       var words = nameBlock ? nameBlock.split('_').filter(Boolean) : [];
-      // Strip an age/gender suffix glued onto the last word (e.g.
-      // "KUNDER44YM" -> name word "KUNDER", age/gender dropped) so it
-      // isn't shown as part of the name.
       if (words.length) {
         var ageMatch = words[words.length - 1].match(/^([A-Za-z]*)\d{1,3}Y[MF]?$/i);
         if (ageMatch) {
@@ -2112,23 +2132,13 @@
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
 
-      // When a row lists multiple overlapping genes/transcripts, use whichever
-      // entry has a coding ("c.") HGVS notation - not just the first listed -
-      // and drop the row if none of them do (e.g. a non-coding RNA locus with
-      // only an "n." transcript).
       var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
       if (codingIdx === -1) { debugRowsSkipped.nonCoding++; return; }
 
-      // Every gene/variant is carried over regardless of classification -
-      // Benign/Likely Benign is flagged with a green Franklin font (see
-      // franklinColor) instead of being dropped. The analyst reviews and
-      // removes unwanted rows manually via the delete button.
       var gene = genes[codingIdx] || genes[0] || '';
       if (!gene) { debugRowsSkipped.noGene++; return; }
       var variant = stripHgvsPrefix(hgvsCList[codingIdx]);
 
-      // Skip rows that have neither zygosity nor inheritance — these are
-      // typically annotation-only or summary rows, not real variant calls.
       var rawZygosity    = get('zygosity');
       var rawInheritance = get('omimInheritance');
       if (!rawZygosity && !rawInheritance) { debugRowsSkipped.noZygOrInherit++; return; }
@@ -2147,6 +2157,8 @@
         clinvar: get('clinvarClass') || '',
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
+        filter: get('filter'),
+        genotype: get('genotype'),
         inheritance: currentReportType === 'cmc' ? inheritanceCodes.join('/') : abbreviateInheritanceGrouped(rawInheritance),
         inhouseMerged: get('inhouseSamples2'),
         inhouseCount: get('inhouseCount'),
@@ -2155,6 +2167,7 @@
         vafRaw: get('vaf'),
         alleleDepths: get('alleleDepths'),
         readDepths: get('readDepths'),
+        omimIdField: get('omimIdField'),
         omimTitle: get('omimTitle'),
         omimPhenotypes: get('omimPhenotypes'),
         omimDescription: get('omimDescription') || get('clingenDiseaseLabel') || get('omimPhenotypes'),
@@ -2182,11 +2195,6 @@
         phenoRank: get('phenoRank'),
         alphaMissense: get('alphaMissense'),
         revel: get('revel'),
-        // Preserve any hyperlinks the source VarSeq cells carried (e.g. rsID,
-        // OMIM, ClinVar links) so preview/export can render them as real
-        // links instead of flattening to plain text. Most keys already match
-        // the row field name directly; the handful that get renamed on the
-        // way into the row are re-mapped here explicitly.
         _hyperlinks: Object.assign({}, hyperlinks, {
           gene: hyperlinks.geneNames,
           variant: hyperlinks.hgvsC,
@@ -2195,8 +2203,18 @@
           varseq: hyperlinks.acmgClass,
           inheritance: hyperlinks.omimInheritance,
           inhouseMerged: hyperlinks.inhouseSamples2,
-          diseaseLabel: hyperlinks.clingenDiseaseLabel,
-          clingenClass: hyperlinks.clingenClassification,
+          // Gene-search links, not carried over from the source file. Only
+          // OMIM ID gets the OMIM link and only CLINGEN Disease label gets
+          // the ClinGen link - OMIM TITLE/CONDITIONS/CLINGEN CLASSIFICATION
+          // are text-only (explicitly nulled so a source-file hyperlink on
+          // those cells, if any, doesn't leak through the base `hyperlinks`
+          // spread above).
+          omimIdField: gene ? omimSearchUrl(gene) : null,
+          omimTitle: null,
+          omimPhenotypes: null,
+          omimDescription: null,
+          diseaseLabel: gene ? clingenSearchUrl(gene) : null,
+          clingenClass: null,
           vafRaw: hyperlinks.vaf,
         }),
       });
@@ -2212,11 +2230,6 @@
     return { rows: rows, runName: runName };
   }
 
-  // Couple-mode extraction: one row per variant with both partners' genotype
-  // fields (zygosity/DP/VAF/AD) kept side by side, plus the shared annotation
-  // fields. Sample columns are located by position (first 4-column sample
-  // block, second 4-column sample block) via findVarSeqColumns' carry-forward
-  // group matching, exactly like the couple-file detection already does.
   function processCoupleVarSeqWorkbook(workbook) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in the uploaded file.');
@@ -2372,6 +2385,17 @@
           proteinPos: hyperlinks.hgvsP,
           clinvar: hyperlinks.clinvarClass,
           inheritance: hyperlinks.omimInheritance,
+          // Gene-search links, not carried over from the source file. Only
+          // OMIM ID gets the OMIM link and only CLINGEN Disease label gets
+          // the ClinGen link - OMIM TITLE/CONDITIONS/CLINGEN CLASSIFICATION
+          // are text-only (explicitly nulled so a source-file hyperlink on
+          // those cells, if any, doesn't leak through the base `hyperlinks`
+          // spread above).
+          omimIdField: gene ? omimSearchUrl(gene) : null,
+          omimTitle: null,
+          omimPhenotypes: null,
+          diseaseLabel: gene ? clingenSearchUrl(gene) : null,
+          clingenClass: null,
         }),
       });
     });
@@ -2530,7 +2554,11 @@
     var split = splitCoupleRowsByGene(rows);
     var combinedRows = split.combinedRows, sample1Rows = split.sample1Rows, sample2Rows = split.sample2Rows;
 
-    var nextRow = writeSection(1, title, combinedRows);
+    var secondaryGenes = findSecondaryFindingGenes(rows);
+    var startRow = writeSecondaryFindingBlock(sheet, 1, COUPLE_EXPORT_COLUMNS.length, secondaryGenes);
+    startRow++; // blank separator row
+
+    var nextRow = writeSection(startRow, title, combinedRows);
     nextRow++; // blank separator row
     nextRow = writeSection(nextRow, title1, sample1Rows);
     nextRow++; // blank separator row
@@ -2687,6 +2715,28 @@
     td.style.cssText = 'font-weight:700;font-size:13px;padding:8px 10px;background:var(--bg-page);color:var(--ink);';
     tr.appendChild(td);
     return tr;
+  }
+
+  // Preview-grid mirror of writeSecondaryFindingBlock (see the Excel export
+  // builders): a highlighted heading row plus the matched-gene list row,
+  // shown above the variant rows so a secondary finding is never missed.
+  function buildSecondaryFindingRows(genes, columnCount) {
+    var headingTr = document.createElement('tr');
+    var headingTd = document.createElement('td');
+    headingTd.colSpan = columnCount + 1;
+    headingTd.textContent = 'Secondary Finding Genes';
+    headingTd.style.cssText = 'font-weight:700;font-size:13px;padding:8px 10px;text-align:center;background:#ffc7ce;color:#9c0006;';
+    headingTr.appendChild(headingTd);
+
+    var listTr = document.createElement('tr');
+    var listTd = document.createElement('td');
+    listTd.colSpan = columnCount + 1;
+    listTd.textContent = genes.length ? genes.join(', ') : 'None detected';
+    listTd.style.cssText = 'font-size:12px;padding:6px 10px;text-align:center;' +
+      (genes.length ? 'font-weight:700;color:#9c0006;' : 'font-style:italic;color:#888;');
+    listTr.appendChild(listTd);
+
+    return [headingTr, listTr];
   }
 
   function buildVariantDataRow(row, rowIndex, columns, batchIdx, displayNo) {
@@ -2922,16 +2972,25 @@
       tr.appendChild(rowNumTd);
       vals.forEach(function (v) {
         var td = document.createElement('td');
-        var text = (v && v.text != null) ? v.text : (v == null ? '' : String(v));
+        var raw = (v && v.text != null) ? v.text : '';
+        // Defensive: cellText() should already resolve any cell value down to
+        // a primitive, but fall back to blank rather than "[object Object]"
+        // if some unforeseen shape slips through.
+        var text = (typeof raw === 'object') ? '' : String(raw);
         if (v && v.link) {
           var a = document.createElement('a');
           a.href = v.link;
           a.target = '_blank'; a.rel = 'noopener noreferrer';
-          a.className = 'raw-cell-link';
+          a.className = 'raw-cell-link raw-cell-text';
+          a.title = text || v.link;
           a.textContent = text || v.link;
           td.appendChild(a);
         } else {
-          td.textContent = text;
+          var span = document.createElement('span');
+          span.className = 'raw-cell-text';
+          span.title = text;
+          span.textContent = text;
+          td.appendChild(span);
         }
         tr.appendChild(td);
       });
@@ -2962,6 +3021,9 @@
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
     } else if (currentReportType === 'couple') {
+      buildSecondaryFindingRows(findSecondaryFindingGenes(variantRows), columns.length).forEach(function (tr) {
+        variantTableBody.appendChild(tr);
+      });
       var maleGenes = {}, femaleGenes = {};
       variantRows.forEach(function (row) {
         if (row._hasMale) maleGenes[row.gene] = true;
@@ -2990,6 +3052,9 @@
         variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
       });
     } else {
+      buildSecondaryFindingRows(findSecondaryFindingGenes(variantRows), columns.length).forEach(function (tr) {
+        variantTableBody.appendChild(tr);
+      });
       variantRows.forEach(function (row, rowIndex) {
         variantTableBody.appendChild(buildVariantDataRow(row, rowIndex, columns, batchIdx, rowIndex + 1));
       });
@@ -3036,19 +3101,47 @@
     if (previousValue && sampleRows[previousValue]) variantSampleSelect.value = previousValue;
   }
 
+  // Writes the "Secondary Finding Genes" flag block (heading row + matched-gene
+  // list row, both merged across the full column width) starting at `startRow`,
+  // highlighted with Excel's standard "bad"/warning colors so it can't be missed
+  // among the rest of the report. Returns the next unused row after it.
+  function writeSecondaryFindingBlock(sheet, startRow, columnCount, genes) {
+    var headingRow = sheet.getRow(startRow);
+    headingRow.getCell(1).value = 'Secondary Finding Genes';
+    sheet.mergeCells(startRow, 1, startRow, columnCount);
+    headingRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF9C0006' } };
+    headingRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
+    headingRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    var listRow = sheet.getRow(startRow + 1);
+    listRow.getCell(1).value = genes.length ? genes.join(', ') : 'None detected';
+    sheet.mergeCells(startRow + 1, 1, startRow + 1, columnCount);
+    listRow.getCell(1).font = genes.length
+      ? { bold: true, color: { argb: 'FF9C0006' } }
+      : { italic: true, color: { argb: 'FF808080' } };
+    listRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    return startRow + 2;
+  }
+
   // Build an Excel workbook for one batch item and return the ArrayBuffer.
   function buildVariantExcel(rows, title, columns, workbook, reportType) {
     columns = columns || VARIANT_COLUMNS;
     workbook = workbook || new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
     columns.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
-    var headerRowIndex = 1;
+
+    var secondaryGenes = findSecondaryFindingGenes(rows);
+    var nextRow = writeSecondaryFindingBlock(sheet, 1, columns.length, secondaryGenes);
+    nextRow++; // blank separator row
+
+    var headerRowIndex = nextRow;
     if (title) {
-      sheet.getRow(1).getCell(1).value = title;
-      sheet.mergeCells(1, 1, 1, columns.length);
-      sheet.getRow(1).font = { bold: true };
-      sheet.getRow(1).alignment = { horizontal: 'center', vertical: 'middle' };
-      headerRowIndex = 2;
+      sheet.getRow(nextRow).getCell(1).value = title;
+      sheet.mergeCells(nextRow, 1, nextRow, columns.length);
+      sheet.getRow(nextRow).font = { bold: true };
+      sheet.getRow(nextRow).alignment = { horizontal: 'center', vertical: 'middle' };
+      headerRowIndex = nextRow + 1;
     }
     var headerRow = sheet.getRow(headerRowIndex);
     columns.forEach(function (c, i) {
