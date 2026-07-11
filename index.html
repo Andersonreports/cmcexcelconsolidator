@@ -2039,6 +2039,15 @@
     return null;
   }
 
+  // True for a CLINVAR classification of Pathogenic or Likely Pathogenic
+  // (including combined forms like "Pathogenic/Likely Pathogenic") - flagged
+  // red in the CLINVAR column, matching the red already used for P/LP in the
+  // FRANKLIN column (see franklinColor).
+  function isClinVarPathogenicText(text) {
+    var abbr = abbreviateClinSigText(text);
+    return abbr === 'P' || abbr === 'LP';
+  }
+
   function isFalseCall() { return false; }
 
   function franklinColor(value) {
@@ -2786,6 +2795,7 @@
     COUPLE_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
 
     var franklinColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
+    var clinvarColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
     var homoColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
       if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
       return acc;
@@ -2852,6 +2862,14 @@
           // as a fallback so the cell is still clickable either way.
           fCell.value = { text: franklinDisplayText(row.franklin) + ' ↗', hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
           fCell.font = fFont;
+        }
+        // Pathogenic/Likely Pathogenic CLINVAR text is flagged red - the
+        // cell's hyperlink (set above) is left exactly as it was; only the
+        // font color changes, keeping the underline if it was already a link.
+        if (clinvarColIdx >= 0 && isClinVarPathogenicText(row.clinvar)) {
+          var cvCell = dataRow.getCell(clinvarColIdx + 1);
+          var cvHadLink = !!(row._hyperlinks && row._hyperlinks.clinvar && row.clinvar != null && row.clinvar !== '');
+          cvCell.font = { color: { argb: 'FFC2293A' }, underline: cvHadLink };
         }
         homoColIdxs.forEach(function (colIdx) {
           var val = row[COUPLE_EXPORT_COLUMNS[colIdx].key];
@@ -3149,6 +3167,9 @@
         var zygUp = String(input.value || '').trim().toUpperCase();
         input.style.color = (zygUp === 'HOM' || zygUp === 'HEMI') ? '#c2293a' : '';
       }
+      if (c.key === 'clinvar') {
+        input.style.color = isClinVarPathogenicText(input.value) ? '#c2293a' : '';
+      }
       input.addEventListener('input', function (e) {
         variantRows[rowIndex][c.key] = e.target.value;
         e.target.title = e.target.value;
@@ -3165,6 +3186,9 @@
         if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') {
           var newZygUp = String(e.target.value || '').trim().toUpperCase();
           e.target.style.color = (newZygUp === 'HOM' || newZygUp === 'HEMI') ? '#c2293a' : '';
+        }
+        if (c.key === 'clinvar') {
+          e.target.style.color = isClinVarPathogenicText(e.target.value) ? '#c2293a' : '';
         }
       });
       if (c.key === 'inheritance') inheritanceInput = input;
@@ -3471,6 +3495,7 @@
     return {
       inheritanceColIdx: columns.findIndex(function (c) { return c.key === 'inheritance'; }),
       franklinColIdx: columns.findIndex(function (c) { return c.key === 'franklin'; }),
+      clinvarColIdx: columns.findIndex(function (c) { return c.key === 'clinvar'; }),
       homoColIdxs: columns.reduce(function (acc, c, i) {
         if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
         return acc;
@@ -3546,6 +3571,15 @@
       // fallback so the cell is still clickable either way.
       fCell.value = { text: franklinDisplayText(row.franklin) + ' ↗', hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
       fCell.font = fFont;
+    }
+    // Pathogenic/Likely Pathogenic CLINVAR text is flagged red - the cell's
+    // hyperlink (set above, in the main columns loop) is left exactly as it
+    // was; only the font color changes, keeping the underline if it was
+    // already a link so it still reads as clickable.
+    if (maps.clinvarColIdx >= 0 && isClinVarPathogenicText(row.clinvar)) {
+      var cvCell = dataRow.getCell(maps.clinvarColIdx + 1);
+      var cvHadLink = !!(row._hyperlinks && row._hyperlinks.clinvar && row.clinvar != null && row.clinvar !== '');
+      cvCell.font = { color: { argb: 'FFC2293A' }, underline: cvHadLink };
     }
     maps.homoColIdxs.forEach(function (colIdx) {
       var val = row[columns[colIdx].key];
