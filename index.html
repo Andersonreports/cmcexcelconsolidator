@@ -163,7 +163,7 @@
   .excel-grid-wrapper { background: #fff; }
   .excel-grid { font-size: 12px; }
   .excel-grid th, .excel-grid td {
-    border: 1px solid #d8d2c2; padding: 0; white-space: nowrap; position: relative;
+    border: 1px solid #d8d2c2; padding: 0; white-space: nowrap;
   }
   .excel-grid .grid-corner, .excel-grid .grid-col-letter, .excel-grid .grid-row-number {
     background: var(--bg-page); color: var(--text); font-weight: 600; text-align: center;
@@ -228,6 +228,27 @@
   .action-row button.primary { background: var(--primary); color: white; border-color: var(--primary); }
   .action-row button.primary:hover:not(:disabled) { background: var(--primary-dark); border-color: var(--primary-dark); box-shadow: 0 2px 4px rgba(31, 126, 196, 0.3); }
   .action-row button.primary:disabled { background: var(--border); border-color: var(--border); color: white; }
+
+  /* Pre-download dialog (single/couple): edit each file's name, then pick a folder. */
+  .dl-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.45); padding: 20px; }
+  .dl-modal[hidden] { display: none; }
+  .dl-modal-box { background: var(--bg, #fff); color: var(--ink); border-radius: 10px; width: 560px; max-width: 100%;
+    max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+  .dl-modal-title { font: 600 16px/1.3 var(--sans); padding: 18px 20px 4px; }
+  .dl-modal-hint { font: 13px/1.4 var(--sans); color: var(--text-secondary); padding: 0 20px 14px; }
+  .dl-modal-list { overflow-y: auto; padding: 0 20px; }
+  .dl-modal-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+  .dl-modal-row-src { flex: 0 0 40%; font: 12px/1.35 var(--sans); color: var(--text-secondary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dl-modal-row input { flex: 1; font: inherit; font-size: 13px; padding: 7px 9px; color: var(--ink);
+    border: 1px solid var(--border); border-radius: 4px; background: var(--bg); }
+  .dl-modal-row .dl-ext { flex: 0 0 auto; font: 12px var(--mono); color: var(--text-secondary); }
+  .dl-modal-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--border); }
+  .dl-modal-actions button { font: 500 13px var(--sans); padding: 9px 16px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border-strong, #bbb); background: var(--bg); color: var(--ink); }
+  .dl-modal-actions button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .dl-modal-actions button:disabled { opacity: .55; cursor: not-allowed; }
 
   input[type="file"] { font: inherit; font-size: 13px; color: var(--text); }
   input[type="file"]::file-selector-button {
@@ -508,6 +529,19 @@
       </div>
     </section>
 
+    <!-- Pre-download dialog for single/couple: edit filenames, then pick a folder. -->
+    <div class="dl-modal" id="download-modal" hidden>
+      <div class="dl-modal-box">
+        <div class="dl-modal-title" id="dl-modal-title">Download</div>
+        <div class="dl-modal-hint">File names are auto-filled from each uploaded file — edit if needed, then choose a folder to save into.</div>
+        <div class="dl-modal-list" id="dl-modal-list"></div>
+        <div class="dl-modal-actions">
+          <button type="button" id="dl-modal-cancel">Cancel</button>
+          <button type="button" class="primary" id="dl-modal-save">Choose folder &amp; save</button>
+        </div>
+      </div>
+    </div>
+
     <section class="tab-panel" id="panel-final-consolidate" hidden>
       <div class="panel-header">
         <div class="panel-eyebrow">Sample Final Consolidate</div>
@@ -625,6 +659,9 @@
 
     // Refresh the listed-variant preview/table/mapping list for this report type's own batch
     if (typeof refreshVariantViewForReportType === 'function') refreshVariantViewForReportType();
+    // Bottom download buttons change label/behavior by report type (ZIP for CMC,
+    // per-file folder-picker dialog for single/couple).
+    if (typeof updateDownloadButtons === 'function') updateDownloadButtons();
   }
 
   if (reportTypeSelect) {
@@ -660,8 +697,11 @@
   switchReportType('cmc');
 
   // ---------- Shared Excel export helper ----------
-  function downloadBlob(buffer, fileName) {
-    var blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  var XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  var ZIP_MIME = 'application/zip';
+
+  function downloadBlob(buffer, fileName, mimeType) {
+    var blob = new Blob([buffer], { type: mimeType || XLSX_MIME });
     var url = URL.createObjectURL(blob);
     var link = document.createElement('a');
     link.href = url;
@@ -670,6 +710,42 @@
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  // Saves one buffer letting the user pick the folder AND edit the filename via
+  // the browser's native Save dialog (Chrome/Edge). Falls back to a normal
+  // download (Downloads folder, given name) where showSaveFilePicker isn't
+  // available. Resolves true if saved, false if the user cancelled the dialog.
+  // Must be called during a user gesture (e.g. directly in a click handler)
+  // for the native picker to be allowed.
+  function saveBufferWithPicker(buffer, suggestedName, mimeType) {
+    mimeType = mimeType || XLSX_MIME;
+    if (window.showSaveFilePicker) {
+      var dot = suggestedName.lastIndexOf('.');
+      var ext = dot >= 0 ? suggestedName.slice(dot) : '';
+      var accept = {}; accept[mimeType] = ext ? [ext] : [];
+      return window.showSaveFilePicker({
+        suggestedName: suggestedName,
+        types: [{ description: 'Export', accept: accept }]
+      }).then(function (handle) {
+        return handle.createWritable().then(function (writable) {
+          return writable.write(buffer).then(function () { return writable.close(); });
+        });
+      }).then(function () { return true; })
+        .catch(function (err) {
+          if (err && err.name === 'AbortError') return false; // user cancelled
+          downloadBlob(buffer, suggestedName, mimeType); // any other failure: plain download
+          return true;
+        });
+    }
+    downloadBlob(buffer, suggestedName, mimeType);
+    return Promise.resolve(true);
+  }
+
+  // Auto filename (no extension) for an exported report, derived from the
+  // uploaded input file's name - the base every download name defaults to.
+  function autoExportBaseName(item) {
+    return String(item.fileName || 'listed-variants').replace(/\.[^.]+$/, '') + '-listed-variants';
   }
 
   function exportRowsToXlsx(rows, columns, sheetName, fileName) {
@@ -1508,17 +1584,16 @@
     return acc;
   }, {});
 
-  // Returns the sorted, deduped list of genes in `rows` that appear on the
-  // ACMG Secondary Findings v3.3 list, matched case-insensitively.
-  function findSecondaryFindingGenes(rows) {
-    var found = {};
-    (rows || []).forEach(function (row) {
-      splitList(row.gene).forEach(function (g) {
-        var symbol = String(g || '').trim().toUpperCase();
-        if (symbol && SECONDARY_FINDING_GENE_SET[symbol]) found[symbol] = true;
-      });
+  // True when a variant row's gene is on the ACMG Secondary Findings v3.3 list.
+  // Such rows are pulled out into their own "Secondary Findings" section at the
+  // top of the report (see buildVariantExcel / buildCoupleVariantExcel), the
+  // same way the couple export pulls shared-gene "common" variants into a
+  // section of their own.
+  function isSecondaryFindingRow(row) {
+    return splitList(row && row.gene).some(function (g) {
+      var symbol = String(g || '').trim().toUpperCase();
+      return symbol && SECONDARY_FINDING_GENE_SET[symbol];
     });
-    return Object.keys(found).sort();
   }
 
   function formatVafPercent(value) {
@@ -2233,6 +2308,7 @@
       var inheritanceCodes = abbreviateInheritance(splitList(rawInheritance));
       var clinvarValue = get('clinvarClass') || '';
       var omimIdValue = get('omimIdField') || '';
+      var omimTitleValue = get('omimTitle') || '';
       var diseaseLabelValue = get('clingenDiseaseLabel') || '';
 
       rows.push({
@@ -2256,7 +2332,7 @@
         alleleDepths: get('alleleDepths'),
         readDepths: get('readDepths'),
         omimIdField: omimIdValue,
-        omimTitle: get('omimTitle'),
+        omimTitle: omimTitleValue,
         omimPhenotypes: get('omimPhenotypes'),
         omimDescription: get('omimDescription') || diseaseLabelValue || get('omimPhenotypes'),
         diseaseLabel: diseaseLabelValue,
@@ -2293,16 +2369,17 @@
           varseq: hyperlinks.acmgClass,
           inheritance: hyperlinks.omimInheritance,
           inhouseMerged: hyperlinks.inhouseSamples2,
-          // Gene-search links, not carried over from the source file. Only
-          // OMIM ID gets the OMIM link and only CLINGEN Disease label gets
-          // the ClinGen link - and only when that cell actually has a value,
-          // since an empty OMIM ID/Disease label means nothing was found for
-          // this variant and a link icon there would be misleading. OMIM
-          // TITLE/CONDITIONS/CLINGEN CLASSIFICATION are always text-only
-          // (explicitly nulled so a source-file hyperlink on those cells, if
-          // any, doesn't leak through the base `hyperlinks` spread above).
+          // Gene-search links, not carried over from the source file, and only
+          // attached when the cell actually has a value (an empty cell means
+          // nothing was found for this variant, so a link icon would mislead).
+          // The OMIM link's home differs by report layout: single reports have
+          // a dedicated OMIM ID column so the link lives there and OMIM TITLE
+          // stays text; the CMC layout has no OMIM ID column, so OMIM TITLE
+          // carries the link instead. CONDITIONS and CLINGEN CLASSIFICATION are
+          // always text-only (explicitly nulled so a source-file hyperlink on
+          // those cells, if any, doesn't leak through the base spread above).
           omimIdField: (omimIdValue && gene) ? omimSearchUrl(gene) : null,
-          omimTitle: null,
+          omimTitle: (currentReportType === 'cmc' && omimTitleValue && gene) ? omimSearchUrl(gene) : null,
           omimPhenotypes: null,
           omimDescription: null,
           diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
@@ -2579,9 +2656,15 @@
       return acc;
     }, []);
 
-    function writeSection(startRow, title, sectionRows) {
+    function writeSection(startRow, title, sectionRows, highlightTitle) {
       sheet.getRow(startRow).getCell(1).value = title;
-      sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12 };
+      sheet.mergeCells(startRow, 1, startRow, COUPLE_EXPORT_COLUMNS.length);
+      if (highlightTitle) {
+        sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12, color: { argb: 'FF9C0006' } };
+        sheet.getRow(startRow).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
+      } else {
+        sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12 };
+      }
       sheet.getRow(startRow).getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
       var headerRowIdx = startRow + 1;
       var headerRow = sheet.getRow(headerRowIdx);
@@ -2647,11 +2730,19 @@
       return headerRowIdx + 1 + sectionRows.length;
     }
 
-    var split = splitCoupleRowsByGene(rows);
+    // Pull ACMG Secondary Findings rows out first so they lead the report in
+    // their own highlighted section; the remaining rows feed the usual
+    // combined / partner-1 / partner-2 split.
+    var secondaryRows = rows.filter(isSecondaryFindingRow);
+    var nonSecondaryRows = rows.filter(function (r) { return !isSecondaryFindingRow(r); });
+    var split = splitCoupleRowsByGene(nonSecondaryRows);
     var combinedRows = split.combinedRows, sample1Rows = split.sample1Rows, sample2Rows = split.sample2Rows;
 
-    var secondaryGenes = findSecondaryFindingGenes(rows);
-    var startRow = writeSecondaryFindingBlock(sheet, 1, COUPLE_EXPORT_COLUMNS.length, secondaryGenes);
+    var startRow = 1;
+    if (secondaryRows.length) {
+      startRow = writeSection(startRow, 'Secondary Findings', secondaryRows, true);
+      startRow++; // blank separator row
+    }
 
     var nextRow = writeSection(startRow, title, combinedRows);
     nextRow++; // blank separator row
@@ -2812,28 +2903,17 @@
     return tr;
   }
 
-  // Preview-grid mirror of writeSecondaryFindingBlock (see the Excel export
-  // builders): a highlighted heading row plus the matched-gene list row,
-  // shown above the variant rows so a secondary finding is never missed.
-  function buildSecondaryFindingRows(genes, columnCount) {
-    // Nothing to flag - render nothing, rather than an empty "None detected" banner.
-    if (!genes.length) return [];
-
-    var headingTr = document.createElement('tr');
-    var headingTd = document.createElement('td');
-    headingTd.colSpan = columnCount + 1;
-    headingTd.textContent = 'Secondary Finding Genes';
-    headingTd.style.cssText = 'font-weight:700;font-size:13px;padding:8px 10px;text-align:center;background:#ffc7ce;color:#9c0006;';
-    headingTr.appendChild(headingTd);
-
-    var listTr = document.createElement('tr');
-    var listTd = document.createElement('td');
-    listTd.colSpan = columnCount + 1;
-    listTd.textContent = genes.join(', ');
-    listTd.style.cssText = 'font-size:12px;padding:6px 10px;text-align:center;font-weight:700;color:#9c0006;';
-    listTr.appendChild(listTd);
-
-    return [headingTr, listTr];
+  // A single highlighted, full-width "Secondary Findings" title row for the
+  // preview grid, mirroring the export's highlighted section title. The
+  // matching variant rows are appended after it by the caller.
+  function buildSecondaryFindingsTitleRow(columnCount) {
+    var tr = document.createElement('tr');
+    var td = document.createElement('td');
+    td.colSpan = columnCount + 1;
+    td.textContent = 'Secondary Findings';
+    td.style.cssText = 'font-weight:700;font-size:13px;padding:8px 10px;text-align:center;background:#ffc7ce;color:#9c0006;';
+    tr.appendChild(td);
+    return tr;
   }
 
   function buildVariantDataRow(row, rowIndex, columns, batchIdx, displayNo) {
@@ -3128,11 +3208,12 @@
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
     } else if (currentReportType === 'couple') {
-      buildSecondaryFindingRows(findSecondaryFindingGenes(variantRows), columns.length).forEach(function (tr) {
-        variantTableBody.appendChild(tr);
-      });
+      // Secondary findings lead the preview in their own highlighted section;
+      // the remaining rows feed the usual combined / partner sections.
+      var secondaryEntries = [];
       var maleGenes = {}, femaleGenes = {};
       variantRows.forEach(function (row) {
+        if (isSecondaryFindingRow(row)) return; // excluded from the partner split
         if (row._hasMale) maleGenes[row.gene] = true;
         if (row._hasFemale) femaleGenes[row.gene] = true;
       });
@@ -3141,11 +3222,18 @@
 
       var combinedEntries = [], sample1Entries = [], sample2Entries = [];
       variantRows.forEach(function (row, rowIndex) {
+        if (isSecondaryFindingRow(row)) { secondaryEntries.push({ row: row, idx: rowIndex }); return; }
         if (sharedGenes[row.gene]) combinedEntries.push({ row: row, idx: rowIndex });
         else if (row._hasMale) sample1Entries.push({ row: row, idx: rowIndex });
         else if (row._hasFemale) sample2Entries.push({ row: row, idx: rowIndex });
       });
       var previewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+      if (secondaryEntries.length) {
+        variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
+        secondaryEntries.forEach(function (entry, i) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+        });
+      }
       variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title) || 'Both partners', columns.length));
       combinedEntries.forEach(function (entry, i) {
         variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
@@ -3159,11 +3247,21 @@
         variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
       });
     } else {
-      buildSecondaryFindingRows(findSecondaryFindingGenes(variantRows), columns.length).forEach(function (tr) {
-        variantTableBody.appendChild(tr);
-      });
+      // Secondary findings are pulled out into a highlighted section at the top;
+      // the rest follow in the normal list. Both are numbered from 1.
+      var secondaryEntries = [], mainEntries = [];
       variantRows.forEach(function (row, rowIndex) {
-        variantTableBody.appendChild(buildVariantDataRow(row, rowIndex, columns, batchIdx, rowIndex + 1));
+        (isSecondaryFindingRow(row) ? secondaryEntries : mainEntries).push({ row: row, idx: rowIndex });
+      });
+      if (secondaryEntries.length) {
+        variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
+        secondaryEntries.forEach(function (entry, i) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+        });
+        variantTableBody.appendChild(buildGridSectionHeaderRow('Listed Variants', columns.length));
+      }
+      mainEntries.forEach(function (entry, i) {
+        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
       });
     }
     applyFrozenColumns(variantTableHead, variantTableBody, columns, variantFrozenCols);
@@ -3208,50 +3306,34 @@
     if (previousValue && sampleRows[previousValue]) variantSampleSelect.value = previousValue;
   }
 
-  // Writes the "Secondary Finding Genes" flag block (heading row + matched-gene
-  // list row, both merged across the full column width) starting at `startRow`,
-  // highlighted with Excel's standard "bad"/warning colors so it can't be missed
-  // among the rest of the report. Returns the next unused row after it.
-  function writeSecondaryFindingBlock(sheet, startRow, columnCount, genes) {
-    // Nothing to flag - skip the block entirely (no heading, no blank
-    // separator row) rather than showing an empty "None detected" banner.
-    if (!genes.length) return startRow;
-
-    var headingRow = sheet.getRow(startRow);
-    headingRow.getCell(1).value = 'Secondary Finding Genes';
-    sheet.mergeCells(startRow, 1, startRow, columnCount);
-    headingRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF9C0006' } };
-    headingRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
-    headingRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-
-    var listRow = sheet.getRow(startRow + 1);
-    listRow.getCell(1).value = genes.join(', ');
-    sheet.mergeCells(startRow + 1, 1, startRow + 1, columnCount);
-    listRow.getCell(1).font = { bold: true, color: { argb: 'FF9C0006' } };
-    listRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-
-    return startRow + 3; // heading + list + a blank separator row before what follows
+  // Column-index maps used when styling data rows, so the main list and the
+  // Secondary Findings section get identical per-cell coloring.
+  function variantColIdxMaps(columns) {
+    return {
+      inheritanceColIdx: columns.findIndex(function (c) { return c.key === 'inheritance'; }),
+      franklinColIdx: columns.findIndex(function (c) { return c.key === 'franklin'; }),
+      homoColIdxs: columns.reduce(function (acc, c, i) {
+        if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
+        return acc;
+      }, []),
+      vafColIdxs: columns.reduce(function (acc, c, i) {
+        if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') acc.push(i);
+        return acc;
+      }, []),
+      alleleDepthColIdxs: columns.reduce(function (acc, c, i) {
+        if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') acc.push(i);
+        return acc;
+      }, []),
+      zygosityColIdxs: columns.reduce(function (acc, c, i) {
+        if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') acc.push(i);
+        return acc;
+      }, []),
+    };
   }
 
-  // Build an Excel workbook for one batch item and return the ArrayBuffer.
-  function buildVariantExcel(rows, title, columns, workbook, reportType) {
-    columns = columns || VARIANT_COLUMNS;
-    workbook = workbook || new ExcelJS.Workbook();
-    var sheet = workbook.addWorksheet('Listed Variants');
-    columns.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
-
-    var secondaryGenes = findSecondaryFindingGenes(rows);
-    var nextRow = writeSecondaryFindingBlock(sheet, 1, columns.length, secondaryGenes);
-
-    var headerRowIndex = nextRow;
-    if (title) {
-      sheet.getRow(nextRow).getCell(1).value = title;
-      sheet.mergeCells(nextRow, 1, nextRow, columns.length);
-      sheet.getRow(nextRow).font = { bold: true };
-      sheet.getRow(nextRow).alignment = { horizontal: 'center', vertical: 'middle' };
-      headerRowIndex = nextRow + 1;
-    }
-    var headerRow = sheet.getRow(headerRowIndex);
+  // Writes the blue column-header row for a listed-variants section at `rowIdx`.
+  function writeVariantHeaderRow(sheet, rowIdx, columns) {
+    var headerRow = sheet.getRow(rowIdx);
     columns.forEach(function (c, i) {
       var cell = headerRow.getCell(i + 1);
       cell.value = c.header;
@@ -3260,80 +3342,120 @@
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
     headerRow.height = 22;
-    var inheritanceColIdx = columns.findIndex(function (c) { return c.key === 'inheritance'; });
-    var franklinColIdx    = columns.findIndex(function (c) { return c.key === 'franklin'; });
-    var homoColIdxs = columns.reduce(function (acc, c, i) {
-      if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
-      return acc;
-    }, []);
-    var vafColIdxs = columns.reduce(function (acc, c, i) {
-      if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') acc.push(i);
-      return acc;
-    }, []);
-    var alleleDepthColIdxs = columns.reduce(function (acc, c, i) {
-      if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') acc.push(i);
-      return acc;
-    }, []);
-    var zygosityColIdxs = columns.reduce(function (acc, c, i) {
-      if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') acc.push(i);
-      return acc;
-    }, []);
-    rows.forEach(function (row, i) {
-      var dataRow = sheet.getRow(headerRowIndex + 1 + i);
-      columns.forEach(function (c, colIdx) {
-        var cell = dataRow.getCell(colIdx + 1);
-        var link = row._hyperlinks && row._hyperlinks[c.key];
-        var val = row[c.key];
-        if (link && val != null && val !== '') {
-          cell.value = { text: val, hyperlink: link };
-          cell.font = { color: { argb: 'FF0563C1' }, underline: true };
-        } else {
-          cell.value = val;
-        }
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      });
-      // Red HET/pure-AR carrier flag is a CMC-only convention.
-      if (reportType === 'cmc' && isHetWithPureAR(row)) {
-        dataRow.getCell(inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
+  }
+
+  // Writes one fully-styled data row at `rowIdx` (hyperlinks, Franklin link/
+  // color, and the red HOM/HEMI/low-VAF/low-depth/homozygous-count flags),
+  // reused by both the main list and the Secondary Findings section. When
+  // `displayNo` is given it overrides the S.NO column so each section can be
+  // numbered 1..n independently.
+  function writeVariantDataRow(sheet, rowIdx, row, columns, reportType, maps, displayNo) {
+    var dataRow = sheet.getRow(rowIdx);
+    columns.forEach(function (c, colIdx) {
+      var cell = dataRow.getCell(colIdx + 1);
+      var link = row._hyperlinks && row._hyperlinks[c.key];
+      var val = (c.key === 'sNo' && displayNo != null) ? displayNo : row[c.key];
+      if (link && val != null && val !== '') {
+        cell.value = { text: val, hyperlink: link };
+        cell.font = { color: { argb: 'FF0563C1' }, underline: true };
+      } else {
+        cell.value = val;
       }
-      if (franklinColIdx >= 0) {
-        var fCell = dataRow.getCell(franklinColIdx + 1);
-        var fColor = franklinColor(row.franklin);
-        // Not bold - Excel applies one font to the whole cell, so a bold
-        // colored classification plus arrow reads as one heavy block of
-        // color. Keeping the color (still conveys the lean) but dropping the
-        // bold weight gives a lighter, more link-like result.
-        var fFont = fColor ? { color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
-        // Same link the preview's "↗" icon opens - the resolved variant URL
-        // once Franklin lookup finishes, or the generic Franklin home page
-        // as a fallback so the cell is still clickable either way.
-        fCell.value = { text: franklinDisplayText(row.franklin) + ' ↗', hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
-        fCell.font = fFont;
-      }
-      homoColIdxs.forEach(function (colIdx) {
-        var val = row[columns[colIdx].key];
-        if (val != null && val !== '' && Number(val) > 0) {
-          dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
-        }
-      });
-      vafColIdxs.forEach(function (colIdx) {
-        var val = row[columns[colIdx].key];
-        if (val != null && val !== '' && !isNaN(Number(val)) && Number(val) < 0.3) {
-          dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
-        }
-      });
-      alleleDepthColIdxs.forEach(function (colIdx) {
-        var cell = dataRow.getCell(colIdx + 1);
-        var richValue = alleleDepthRichText(row[columns[colIdx].key]);
-        if (richValue && richValue.richText) cell.value = richValue;
-      });
-      zygosityColIdxs.forEach(function (colIdx) {
-        var val = String(row[columns[colIdx].key] || '').trim().toUpperCase();
-        if (val === 'HOM' || val === 'HEMI') {
-          dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
-        }
-      });
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
     });
+    // Red HET/pure-AR carrier flag is a CMC-only convention.
+    if (reportType === 'cmc' && maps.inheritanceColIdx >= 0 && isHetWithPureAR(row)) {
+      dataRow.getCell(maps.inheritanceColIdx + 1).font = { bold: true, color: { argb: 'FFC2293A' } };
+    }
+    if (maps.franklinColIdx >= 0) {
+      var fCell = dataRow.getCell(maps.franklinColIdx + 1);
+      var fColor = franklinColor(row.franklin);
+      // Not bold - Excel applies one font to the whole cell, so a bold colored
+      // classification plus arrow reads as one heavy block of color. Keeping
+      // the color (still conveys the lean) but dropping the bold weight gives a
+      // lighter, more link-like result.
+      var fFont = fColor ? { color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
+      // Same link the preview's "↗" icon opens - the resolved variant URL once
+      // Franklin lookup finishes, or the generic Franklin home page as a
+      // fallback so the cell is still clickable either way.
+      fCell.value = { text: franklinDisplayText(row.franklin) + ' ↗', hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
+      fCell.font = fFont;
+    }
+    maps.homoColIdxs.forEach(function (colIdx) {
+      var val = row[columns[colIdx].key];
+      if (val != null && val !== '' && Number(val) > 0) {
+        dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
+      }
+    });
+    maps.vafColIdxs.forEach(function (colIdx) {
+      var val = row[columns[colIdx].key];
+      if (val != null && val !== '' && !isNaN(Number(val)) && Number(val) < 0.3) {
+        dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
+      }
+    });
+    maps.alleleDepthColIdxs.forEach(function (colIdx) {
+      var cell = dataRow.getCell(colIdx + 1);
+      var richValue = alleleDepthRichText(row[columns[colIdx].key]);
+      if (richValue && richValue.richText) cell.value = richValue;
+    });
+    maps.zygosityColIdxs.forEach(function (colIdx) {
+      var val = String(row[columns[colIdx].key] || '').trim().toUpperCase();
+      if (val === 'HOM' || val === 'HEMI') {
+        dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
+      }
+    });
+  }
+
+  // Writes a merged, highlighted "Secondary Findings" section title at `rowIdx`.
+  function writeSecondaryFindingsTitle(sheet, rowIdx, columnCount) {
+    var r = sheet.getRow(rowIdx);
+    r.getCell(1).value = 'Secondary Findings';
+    sheet.mergeCells(rowIdx, 1, rowIdx, columnCount);
+    r.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF9C0006' } };
+    r.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
+    r.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+  }
+
+  // Build an Excel workbook for one batch item and return the ArrayBuffer.
+  // Any variant whose gene is on the ACMG Secondary Findings list is pulled out
+  // of the main list into its own highlighted "Secondary Findings" section at
+  // the top (mirroring how the couple export pulls out shared/common variants),
+  // so those clinically-reportable incidental findings can't be missed.
+  function buildVariantExcel(rows, title, columns, workbook, reportType) {
+    columns = columns || VARIANT_COLUMNS;
+    workbook = workbook || new ExcelJS.Workbook();
+    var sheet = workbook.addWorksheet('Listed Variants');
+    columns.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
+
+    var maps = variantColIdxMaps(columns);
+    var secondaryRows = rows.filter(isSecondaryFindingRow);
+    var mainRows = rows.filter(function (r) { return !isSecondaryFindingRow(r); });
+
+    var cursor = 1;
+
+    // Secondary Findings section (full rows), pulled to the top, if any.
+    if (secondaryRows.length) {
+      writeSecondaryFindingsTitle(sheet, cursor, columns.length); cursor++;
+      writeVariantHeaderRow(sheet, cursor, columns); cursor++;
+      secondaryRows.forEach(function (row, i) {
+        writeVariantDataRow(sheet, cursor, row, columns, reportType, maps, i + 1); cursor++;
+      });
+      cursor++; // blank separator row before the main list
+    }
+
+    // Main listed-variants section.
+    if (title) {
+      sheet.getRow(cursor).getCell(1).value = title;
+      sheet.mergeCells(cursor, 1, cursor, columns.length);
+      sheet.getRow(cursor).font = { bold: true };
+      sheet.getRow(cursor).alignment = { horizontal: 'center', vertical: 'middle' };
+      cursor++;
+    }
+    writeVariantHeaderRow(sheet, cursor, columns); cursor++;
+    mainRows.forEach(function (row, i) {
+      writeVariantDataRow(sheet, cursor, row, columns, reportType, maps, i + 1); cursor++;
+    });
+
     return workbook.xlsx.writeBuffer();
   }
 
@@ -3399,15 +3521,11 @@
         makeCoupleTitleInput('title1', 'Partner 1 section title');
         makeCoupleTitleInput('title2', 'Partner 2 section title');
         div.appendChild(coupleTitleGroup);
-      } else {
-        var titleInput = document.createElement('input');
-        titleInput.type = 'text';
-        titleInput.className = 'batch-item-title';
-        titleInput.value = item.title;
-        titleInput.placeholder = 'Report title';
-        titleInput.addEventListener('input', function (e) { variantBatch[idx].title = e.target.value; });
-        div.appendChild(titleInput);
       }
+      // Per-item report-title editing (non-couple) and the per-item "Excel"
+      // download button were removed: downloading and file naming now happen
+      // only from the bottom action bar (see the download buttons / dialog).
+      // The report banner title still auto-populates from the input filename.
 
       var previewBtn = document.createElement('button');
       previewBtn.className = 'batch-item-btn' + (idx === variantPreviewIdx ? ' active' : '');
@@ -3415,13 +3533,6 @@
       previewBtn.disabled = !!item.error;
       previewBtn.addEventListener('click', function () { selectBatchPreview(idx); });
       div.appendChild(previewBtn);
-
-      var dlBtn = document.createElement('button');
-      dlBtn.className = 'batch-item-btn';
-      dlBtn.textContent = '↓ Excel';
-      dlBtn.disabled = !!item.error;
-      dlBtn.addEventListener('click', function () { downloadBatchItem(idx, dlBtn); });
-      div.appendChild(dlBtn);
 
       var removeBtn = document.createElement('button');
       removeBtn.type = 'button';
@@ -3469,7 +3580,12 @@
       variantPreviewLabel.hidden = false;
     }
     renderVariantTable(idx);
-    resolveFranklinForRows(variantRows, idx);
+    // Franklin lookups resolve asynchronously (staggered proxy/ClinVar calls);
+    // repaint once they've all settled so any value that resolved after the
+    // initial render is reflected, instead of leaving that cell blank.
+    resolveFranklinForRows(variantRows, idx).then(function () {
+      if (variantPreviewIdx === idx) renderVariantTable(idx);
+    });
     resolveConflictingClinVarForRows(variantRows).then(function () {
       if (variantPreviewIdx === idx) renderVariantTable(idx);
     });
@@ -3482,8 +3598,11 @@
     if (typeof variantBatch === 'undefined') return; // not initialized yet during initial page setup
     var currentPreview = variantBatch[variantPreviewIdx];
     if (currentPreview && currentPreview.reportType === currentReportType) {
-      renderVariantTable(variantPreviewIdx);
-      renderBatchList();
+      // Go through selectBatchPreview (not a bare renderVariantTable) so the
+      // global `variantRows` is actually populated from this item - otherwise
+      // the grid renders empty after an autosave restore even though the batch
+      // item shows its variant count.
+      selectBatchPreview(variantPreviewIdx);
     } else {
       var firstOk = variantBatch.findIndex(function (it) { return !it.error && it.reportType === currentReportType; });
       if (firstOk !== -1) {
@@ -3543,33 +3662,22 @@
     return Promise.resolve(new ExcelJS.Workbook());
   }
 
-  function downloadBatchItem(idx, btn) {
-    var item = variantBatch[idx];
-    if (!item || item.error) return;
-
-    var originalText = btn ? btn.textContent : null;
-    if (btn) { btn.disabled = true; btn.textContent = 'Resolving…'; }
-
-    // Franklin classifications resolve asynchronously and are only ever
-    // triggered for whichever item is actively previewed - wait for (or
-    // kick off, if this item was never previewed) every row's lookup here
-    // so the export always reflects the final classification, not whatever
-    // row.franklin happened to be at the moment Download was clicked.
-    Promise.all([
-      resolveFranklinForRows(item.rows, idx),
+  // Resolves the async Franklin/ClinVar lookups for one item (they're only
+  // auto-triggered for the actively-previewed item, so kick them off here for
+  // any item), then builds and returns its final .xlsx buffer. `includeRawData`
+  // controls whether the original VarSeq "Complete Data" sheet is included.
+  function buildItemBuffer(item, includeRawData) {
+    var itemIdx = variantBatch.indexOf(item);
+    return Promise.all([
+      resolveFranklinForRows(item.rows, itemIdx),
       resolveConflictingClinVarForRows(item.rows),
     ]).then(function () {
-      return buildExportWorkbook(item);
+      return includeRawData ? buildExportWorkbook(item) : new ExcelJS.Workbook();
     }).then(function (workbook) {
       if (item.reportType === 'couple') {
         return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
       }
       return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook, item.reportType);
-    }).then(function (buffer) {
-      var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
-      downloadBlob(buffer, safeName);
-    }).finally(function () {
-      if (btn) { btn.disabled = !!item.error; btn.textContent = originalText; }
     });
   }
 
@@ -3691,14 +3799,18 @@
     renderVariantTable();
   });
 
-  // Builds the batch ZIP. `includeRawData` controls whether each exported
-  // workbook also gets the original VarSeq "Complete Data" sheet via
-  // buildExportWorkbook - skipping it just starts each workbook empty before
-  // the Listed Variants sheet is added.
-  function downloadAllZip(includeRawData, btn, zipFileName) {
-    var validItems = variantBatch.filter(function (item) {
+  function currentValidBatchItems() {
+    return variantBatch.filter(function (item) {
       return item.reportType === currentReportType && !item.error && item.rows.length > 0;
     });
+  }
+
+  // CMC only: bundle every current-type report into one ZIP and let the user
+  // pick the folder + zip name via the native Save dialog. `includeRawData`
+  // controls whether each workbook also carries the original VarSeq
+  // "Complete Data" sheet.
+  function downloadAllZip(includeRawData, btn, zipFileName) {
+    var validItems = currentValidBatchItems();
     if (!validItems.length) return;
 
     var originalText = btn.textContent;
@@ -3707,28 +3819,13 @@
 
     var zip = new JSZip();
     Promise.all(validItems.map(function (item) {
-      var itemIdx = variantBatch.indexOf(item);
-      // See downloadBatchItem for why this wait is needed: Franklin/ClinVar
-      // lookups are async and only ever auto-triggered for the
-      // actively-previewed item.
-      return Promise.all([
-        resolveFranklinForRows(item.rows, itemIdx),
-        resolveConflictingClinVarForRows(item.rows),
-      ]).then(function () {
-        return includeRawData ? buildExportWorkbook(item) : Promise.resolve(new ExcelJS.Workbook());
-      }).then(function (workbook) {
-        if (item.reportType === 'couple') {
-          return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
-        }
-        return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook, item.reportType);
-      }).then(function (buffer) {
-        var safeName = item.fileName.replace(/\.[^.]+$/, '') + '-listed-variants.xlsx';
-        zip.file(safeName, buffer);
+      return buildItemBuffer(item, includeRawData).then(function (buffer) {
+        zip.file(autoExportBaseName(item) + '.xlsx', buffer);
       });
     })).then(function () {
       return zip.generateAsync({ type: 'arraybuffer' });
     }).then(function (zipBuffer) {
-      downloadBlob(zipBuffer, zipFileName);
+      return saveBufferWithPicker(zipBuffer, zipFileName, ZIP_MIME);
     }).catch(function (err) {
       showVariantError((err && err.message) || 'Failed to generate ZIP.');
     }).finally(function () {
@@ -3737,15 +3834,151 @@
     });
   }
 
+  // ---- Single/couple: per-file download via a folder picker + editable names ----
+  var downloadModal = document.getElementById('download-modal');
+  var dlModalTitle = document.getElementById('dl-modal-title');
+  var dlModalList = document.getElementById('dl-modal-list');
+  var dlModalSaveBtn = document.getElementById('dl-modal-save');
+  var dlModalCancelBtn = document.getElementById('dl-modal-cancel');
+  var dlModalItems = [];        // { item, includeRawData } context for the open dialog
+  var dlModalIncludeRaw = true;
+
+  function openDownloadModal(includeRawData) {
+    var validItems = currentValidBatchItems();
+    if (!validItems.length) return;
+    dlModalItems = validItems;
+    dlModalIncludeRaw = includeRawData;
+    dlModalTitle.textContent = 'Download ' + (includeRawData ? 'with VarSeq data' : 'without VarSeq data');
+    dlModalList.innerHTML = '';
+    validItems.forEach(function (item) {
+      var row = document.createElement('div');
+      row.className = 'dl-modal-row';
+      var src = document.createElement('span');
+      src.className = 'dl-modal-row-src';
+      src.textContent = item.fileName;
+      src.title = item.fileName;
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.value = autoExportBaseName(item); // auto-fetched from the input file name, editable
+      var ext = document.createElement('span');
+      ext.className = 'dl-ext';
+      ext.textContent = '.xlsx';
+      row.appendChild(src); row.appendChild(input); row.appendChild(ext);
+      dlModalList.appendChild(row);
+    });
+    downloadModal.hidden = false;
+  }
+
+  function closeDownloadModal() {
+    downloadModal.hidden = true;
+    dlModalItems = [];
+  }
+
+  dlModalCancelBtn.addEventListener('click', closeDownloadModal);
+  downloadModal.addEventListener('click', function (e) {
+    if (e.target === downloadModal) closeDownloadModal(); // click backdrop to dismiss
+  });
+
+  // Normalizes one modal row's edited name to a safe "<base>.xlsx".
+  function modalDownloadNames() {
+    var nameInputs = [].slice.call(dlModalList.querySelectorAll('input'));
+    return dlModalItems.map(function (item, i) {
+      var raw = ((nameInputs[i] && nameInputs[i].value) || autoExportBaseName(item)).trim();
+      return (raw || autoExportBaseName(item)).replace(/\.xlsx$/i, '') + '.xlsx';
+    });
+  }
+
+  // Runs inside the Save click (so showDirectoryPicker has the required user
+  // activation): reads the edited names, picks ONE folder, then builds and
+  // writes every file into it sequentially. Falls back to individual browser
+  // downloads when the File System Access API isn't available.
+  function performModalDownload() {
+    if (!dlModalItems.length) { closeDownloadModal(); return; }
+    var names = modalDownloadNames();
+    var items = dlModalItems.slice();
+    var includeRaw = dlModalIncludeRaw;
+
+    var originalText = dlModalSaveBtn.textContent;
+    dlModalSaveBtn.disabled = true;
+    dlModalCancelBtn.disabled = true;
+    dlModalSaveBtn.textContent = 'Saving…';
+
+    function resetButtons() {
+      dlModalSaveBtn.disabled = false;
+      dlModalCancelBtn.disabled = false;
+      dlModalSaveBtn.textContent = originalText;
+    }
+
+    var dirPromise = window.showDirectoryPicker
+      ? window.showDirectoryPicker().catch(function (err) {
+          if (err && err.name === 'AbortError') return null; // user cancelled folder pick
+          return undefined; // API present but failed -> fall back to plain downloads
+        })
+      : Promise.resolve(undefined); // API absent -> fall back
+
+    return dirPromise.then(function (dirHandle) {
+      if (dirHandle === null) { resetButtons(); return; } // cancelled: keep dialog open
+      // Build + write each file sequentially so we don't hold many workbooks
+      // in memory at once.
+      var chain = Promise.resolve();
+      items.forEach(function (item, i) {
+        chain = chain.then(function () {
+          return buildItemBuffer(item, includeRaw).then(function (buffer) {
+            if (dirHandle) {
+              return dirHandle.getFileHandle(names[i], { create: true }).then(function (fh) {
+                return fh.createWritable().then(function (w) {
+                  return w.write(buffer).then(function () { return w.close(); });
+                });
+              });
+            }
+            downloadBlob(buffer, names[i]); // fallback: Downloads folder
+          });
+        });
+      });
+      return chain.then(function () { resetButtons(); closeDownloadModal(); });
+    }).catch(function (err) {
+      showVariantError((err && err.message) || 'Failed to save files.');
+      resetButtons(); closeDownloadModal();
+    });
+  }
+
+  dlModalSaveBtn.addEventListener('click', performModalDownload);
+
+  // The two bottom download buttons change label + behavior by report type:
+  // CMC downloads the whole batch as a ZIP; single/couple open the per-file
+  // folder-picker dialog. Called on init and whenever the report type switches.
+  function updateDownloadButtons() {
+    if (!variantDownloadAllBtn || !variantDownloadAllNoRawBtn) return; // not wired yet at init
+    if (currentReportType === 'cmc') {
+      variantDownloadAllBtn.textContent = 'Download All (ZIP)';
+      variantDownloadAllNoRawBtn.textContent = 'Download All (No VarSeq Data)';
+    } else {
+      variantDownloadAllBtn.textContent = 'Download with VarSeq';
+      variantDownloadAllNoRawBtn.textContent = 'Download without VarSeq';
+    }
+  }
+
   variantDownloadAllBtn.addEventListener('click', function () {
-    downloadAllZip(true, variantDownloadAllBtn, 'listed-variants-batch.zip');
+    if (currentReportType === 'cmc') {
+      downloadAllZip(true, variantDownloadAllBtn, 'listed-variants-batch.zip');
+    } else {
+      openDownloadModal(true);
+    }
   });
 
   if (variantDownloadAllNoRawBtn) {
     variantDownloadAllNoRawBtn.addEventListener('click', function () {
-      downloadAllZip(false, variantDownloadAllNoRawBtn, 'listed-variants-batch-no-varseq-data.zip');
+      if (currentReportType === 'cmc') {
+        downloadAllZip(false, variantDownloadAllNoRawBtn, 'listed-variants-batch-no-varseq-data.zip');
+      } else {
+        openDownloadModal(false);
+      }
     });
   }
+
+  // Set the initial button labels now that the buttons are wired (the init
+  // switchReportType() ran before these elements were assigned).
+  updateDownloadButtons();
 
   // ====================================================================
   // Sample Final Consolidate tab
