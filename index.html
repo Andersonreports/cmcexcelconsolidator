@@ -162,7 +162,7 @@
   .excel-grid-wrapper { background: #fff; }
   .excel-grid { font-size: 12px; }
   .excel-grid th, .excel-grid td {
-    border: 1px solid #d8d2c2; padding: 0; white-space: nowrap;
+    border: 1px solid #d8d2c2; padding: 0; white-space: nowrap; position: relative;
   }
   .excel-grid .grid-corner, .excel-grid .grid-col-letter, .excel-grid .grid-row-number {
     background: var(--bg-page); color: var(--text); font-weight: 600; text-align: center;
@@ -180,6 +180,18 @@
     border: none; border-radius: 0; background: transparent; color: var(--ink); text-align: center;
   }
   .excel-grid tbody td input:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: #fff; }
+  /* Click/focus a truncated cell to read its full value - pops the cell out
+     over its narrow column instead of requiring the column to be resized. */
+  .excel-grid tbody td input.grid-cell-expanded {
+    position: absolute; top: 0; left: 0; z-index: 50;
+    width: max-content; min-width: 100%; max-width: 420px;
+    background: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.3);
+  }
+  .excel-grid .raw-cell-text.grid-cell-expanded {
+    position: absolute; top: 0; left: 0; z-index: 50;
+    width: max-content; max-width: 420px; white-space: normal; word-break: break-word;
+    background: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.3); text-align: left; padding: 8px 10px;
+  }
 
   .grid-freeze-btn {
     cursor: pointer; border: 1px solid var(--border-strong); background: #fff;
@@ -1633,6 +1645,18 @@
   var variantTableHead = document.getElementById('variant-table-head');
   var variantTableBody = document.getElementById('variant-table-body');
   var variantFrozenCols = new Set();
+
+  // Raw-preview cells aren't focusable inputs, so give them a click-to-expand
+  // toggle instead (the "Variants" grid's editable cells get the same
+  // full-text view for free via the focus/blur handlers on each <input>).
+  variantTableBody.addEventListener('click', function (e) {
+    var cell = e.target.closest('.raw-cell-text');
+    var alreadyOpen = cell && cell.classList.contains('grid-cell-expanded');
+    variantTableBody.querySelectorAll('.raw-cell-text.grid-cell-expanded').forEach(function (el) {
+      el.classList.remove('grid-cell-expanded');
+    });
+    if (cell && !alreadyOpen) cell.classList.add('grid-cell-expanded');
+  });
   var variantFileInput = document.getElementById('variant-file-input');
   var variantBatchList = document.getElementById('variant-batch-list');
   var variantPreviewModeToggle = document.getElementById('variant-preview-mode-toggle');
@@ -1930,6 +1954,13 @@
     return termA + termB;
   }
 
+  // Human-facing ClinVar search link (gene + c. position), same query syntax
+  // as clinVarSearchTerm's eutils lookup above - attached only to rows whose
+  // CLINVAR column actually has a value, since most variants have none.
+  function clinVarWebUrl(gene, variant) {
+    return 'https://www.ncbi.nlm.nih.gov/clinvar/?term=' + encodeURIComponent(clinVarSearchTerm(gene, variant));
+  }
+
   function findClinVarVariationId(gene, variant) {
     var url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
       '?db=clinvar&term=' + encodeURIComponent(clinVarSearchTerm(gene, variant)) + '&retmax=1&retmode=json';
@@ -2146,6 +2177,9 @@
       var proteinPos = stripHgvsPrefix(hgvsPList[codingIdx] || hgvsPList[0] || '');
 
       var inheritanceCodes = abbreviateInheritance(splitList(rawInheritance));
+      var clinvarValue = get('clinvarClass') || '';
+      var omimIdValue = get('omimIdField') || '';
+      var diseaseLabelValue = get('clingenDiseaseLabel') || '';
 
       rows.push({
         sNo: '',
@@ -2154,7 +2188,7 @@
         proteinPos: proteinPos,
         franklin: lookupFranklin(gene, variant),
         _franklinUrl: null,
-        clinvar: get('clinvarClass') || '',
+        clinvar: clinvarValue,
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
         filter: get('filter'),
@@ -2167,11 +2201,11 @@
         vafRaw: get('vaf'),
         alleleDepths: get('alleleDepths'),
         readDepths: get('readDepths'),
-        omimIdField: get('omimIdField'),
+        omimIdField: omimIdValue,
         omimTitle: get('omimTitle'),
         omimPhenotypes: get('omimPhenotypes'),
-        omimDescription: get('omimDescription') || get('clingenDiseaseLabel') || get('omimPhenotypes'),
-        diseaseLabel: get('clingenDiseaseLabel'),
+        omimDescription: get('omimDescription') || diseaseLabelValue || get('omimPhenotypes'),
+        diseaseLabel: diseaseLabelValue,
         clingenClass: get('clingenClassification'),
         gnomadGenome4Count: get('gnomadGenome4Count'),
         gnomadGenome4SA: get('gnomadGenome4SA'),
@@ -2199,21 +2233,25 @@
           gene: hyperlinks.geneNames,
           variant: hyperlinks.hgvsC,
           proteinPos: hyperlinks.hgvsP,
-          clinvar: hyperlinks.clinvarClass,
+          // Only link CLINVAR when this row actually has a reported value -
+          // most variants have none, so most rows stay plain text here.
+          clinvar: (clinvarValue && gene && variant) ? clinVarWebUrl(gene, variant) : null,
           varseq: hyperlinks.acmgClass,
           inheritance: hyperlinks.omimInheritance,
           inhouseMerged: hyperlinks.inhouseSamples2,
           // Gene-search links, not carried over from the source file. Only
           // OMIM ID gets the OMIM link and only CLINGEN Disease label gets
-          // the ClinGen link - OMIM TITLE/CONDITIONS/CLINGEN CLASSIFICATION
-          // are text-only (explicitly nulled so a source-file hyperlink on
-          // those cells, if any, doesn't leak through the base `hyperlinks`
-          // spread above).
-          omimIdField: gene ? omimSearchUrl(gene) : null,
+          // the ClinGen link - and only when that cell actually has a value,
+          // since an empty OMIM ID/Disease label means nothing was found for
+          // this variant and a link icon there would be misleading. OMIM
+          // TITLE/CONDITIONS/CLINGEN CLASSIFICATION are always text-only
+          // (explicitly nulled so a source-file hyperlink on those cells, if
+          // any, doesn't leak through the base `hyperlinks` spread above).
+          omimIdField: (omimIdValue && gene) ? omimSearchUrl(gene) : null,
           omimTitle: null,
           omimPhenotypes: null,
           omimDescription: null,
-          diseaseLabel: gene ? clingenSearchUrl(gene) : null,
+          diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
           clingenClass: null,
           vafRaw: hyperlinks.vaf,
         }),
@@ -2309,6 +2347,8 @@
       // rather than blank - _hasMale/_hasFemale keep the real presence signal
       // around (separately from the displayed "-" placeholder) so section
       // filtering below isn't fooled into treating every row as shared.
+      var clinvarValue = get('clinvarClass') || '';
+
       rows.push({
         sNo: '',
         chrPos: chrPos || '',
@@ -2329,7 +2369,7 @@
         readDepths2: hasCall2 ? readDepths2 : '-',
         vaf2: hasCall2 ? vaf2 : '-',
         alleleDepths2: hasCall2 ? alleleDepths2 : '-',
-        clinvar: get('clinvarClass') || '',
+        clinvar: clinvarValue,
         inheritance: abbreviateInheritanceGrouped(get('omimInheritance')),
         phenoRank: get('phenoRank'),
         omimTitle: get('omimTitle'),
@@ -2383,7 +2423,9 @@
           gene: hyperlinks.geneNames,
           variant: hyperlinks.hgvsC,
           proteinPos: hyperlinks.hgvsP,
-          clinvar: hyperlinks.clinvarClass,
+          // Only link CLINVAR when this row actually has a reported value -
+          // most variants have none, so most rows stay plain text here.
+          clinvar: (clinvarValue && gene && variant) ? clinVarWebUrl(gene, variant) : null,
           inheritance: hyperlinks.omimInheritance,
           // Gene-search links, not carried over from the source file. Only
           // OMIM ID gets the OMIM link and only CLINGEN Disease label gets
@@ -2556,7 +2598,6 @@
 
     var secondaryGenes = findSecondaryFindingGenes(rows);
     var startRow = writeSecondaryFindingBlock(sheet, 1, COUPLE_EXPORT_COLUMNS.length, secondaryGenes);
-    startRow++; // blank separator row
 
     var nextRow = writeSection(startRow, title, combinedRows);
     nextRow++; // blank separator row
@@ -2721,6 +2762,9 @@
   // builders): a highlighted heading row plus the matched-gene list row,
   // shown above the variant rows so a secondary finding is never missed.
   function buildSecondaryFindingRows(genes, columnCount) {
+    // Nothing to flag - render nothing, rather than an empty "None detected" banner.
+    if (!genes.length) return [];
+
     var headingTr = document.createElement('tr');
     var headingTd = document.createElement('td');
     headingTd.colSpan = columnCount + 1;
@@ -2731,9 +2775,8 @@
     var listTr = document.createElement('tr');
     var listTd = document.createElement('td');
     listTd.colSpan = columnCount + 1;
-    listTd.textContent = genes.length ? genes.join(', ') : 'None detected';
-    listTd.style.cssText = 'font-size:12px;padding:6px 10px;text-align:center;' +
-      (genes.length ? 'font-weight:700;color:#9c0006;' : 'font-style:italic;color:#888;');
+    listTd.textContent = genes.join(', ');
+    listTd.style.cssText = 'font-size:12px;padding:6px 10px;text-align:center;font-weight:700;color:#9c0006;';
     listTr.appendChild(listTd);
 
     return [headingTr, listTr];
@@ -2790,6 +2833,12 @@
       // caller-supplied per-section position instead, without touching the
       // underlying row order or row.sNo itself.
       input.value = (c.key === 'sNo' && displayNo != null) ? displayNo : (row[c.key] != null ? row[c.key] : '');
+      // Full text on hover, and pop the cell out to full width on click/focus
+      // so a long value that's clipped by the column's narrow width can
+      // still be read (and edited) without resizing the column.
+      input.title = input.value;
+      input.addEventListener('focus', function (e) { e.target.classList.add('grid-cell-expanded'); });
+      input.addEventListener('blur', function (e) { e.target.classList.remove('grid-cell-expanded'); });
       if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
         var vafNum = Number(input.value);
         input.style.color = (input.value !== '' && !isNaN(vafNum) && vafNum < 0.3) ? '#c2293a' : '';
@@ -2807,6 +2856,7 @@
       }
       input.addEventListener('input', function (e) {
         variantRows[rowIndex][c.key] = e.target.value;
+        e.target.title = e.target.value;
         updateInheritanceColor();
         if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
           var newVaf = Number(e.target.value);
@@ -3106,6 +3156,10 @@
   // highlighted with Excel's standard "bad"/warning colors so it can't be missed
   // among the rest of the report. Returns the next unused row after it.
   function writeSecondaryFindingBlock(sheet, startRow, columnCount, genes) {
+    // Nothing to flag - skip the block entirely (no heading, no blank
+    // separator row) rather than showing an empty "None detected" banner.
+    if (!genes.length) return startRow;
+
     var headingRow = sheet.getRow(startRow);
     headingRow.getCell(1).value = 'Secondary Finding Genes';
     sheet.mergeCells(startRow, 1, startRow, columnCount);
@@ -3114,14 +3168,12 @@
     headingRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
 
     var listRow = sheet.getRow(startRow + 1);
-    listRow.getCell(1).value = genes.length ? genes.join(', ') : 'None detected';
+    listRow.getCell(1).value = genes.join(', ');
     sheet.mergeCells(startRow + 1, 1, startRow + 1, columnCount);
-    listRow.getCell(1).font = genes.length
-      ? { bold: true, color: { argb: 'FF9C0006' } }
-      : { italic: true, color: { argb: 'FF808080' } };
+    listRow.getCell(1).font = { bold: true, color: { argb: 'FF9C0006' } };
     listRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
 
-    return startRow + 2;
+    return startRow + 3; // heading + list + a blank separator row before what follows
   }
 
   // Build an Excel workbook for one batch item and return the ArrayBuffer.
@@ -3133,7 +3185,6 @@
 
     var secondaryGenes = findSecondaryFindingGenes(rows);
     var nextRow = writeSecondaryFindingBlock(sheet, 1, columns.length, secondaryGenes);
-    nextRow++; // blank separator row
 
     var headerRowIndex = nextRow;
     if (title) {
