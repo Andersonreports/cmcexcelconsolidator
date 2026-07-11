@@ -176,6 +176,13 @@
   }
   .excel-grid tbody td:not(.grid-row-number) { background: #fff; }
   .excel-grid tbody tr:hover td:not(.grid-row-number) { background: #faf6ec; }
+  /* Whole-row tint for ACMG Secondary Finding variants - a color not used
+     anywhere else on the page (blue/red/pink/teal/orange are all already
+     spoken for), pitched between "visible" and "still easy to read text on". */
+  .excel-grid tbody tr.secondary-finding-row td:not(.grid-row-number),
+  .excel-grid tbody tr.secondary-finding-row td.frozen-col { background: #EDE7F6; }
+  .excel-grid tbody tr.secondary-finding-row:hover td:not(.grid-row-number),
+  .excel-grid tbody tr.secondary-finding-row:hover td.frozen-col { background: #E1D5EF; }
   .excel-grid tbody td input {
     width: 100%; min-width: 90px; font: 12px/1.4 var(--mono); padding: 5px 8px;
     border: none; border-radius: 0; background: transparent; color: var(--ink); text-align: center;
@@ -2504,14 +2511,15 @@
           // Gene-search links, not carried over from the source file, and only
           // attached when the cell actually has a value (an empty cell means
           // nothing was found for this variant, so a link icon would mislead).
-          // The OMIM link's home differs by report layout: single reports have
-          // a dedicated OMIM ID column so the link lives there and OMIM TITLE
-          // stays text; the CMC layout has no OMIM ID column, so OMIM TITLE
-          // carries the link instead. CONDITIONS and CLINGEN CLASSIFICATION are
-          // always text-only (explicitly nulled so a source-file hyperlink on
-          // those cells, if any, doesn't leak through the base spread above).
-          omimIdField: (omimIdValue && gene) ? omimSearchUrl(gene) : null,
-          omimTitle: (currentReportType === 'cmc' && omimTitleValue && gene) ? omimSearchUrl(gene) : null,
+          // OMIM TITLE always carries the OMIM link (not OMIM ID) - OMIM ID is
+          // an optional column that can be missing from a given export, while
+          // OMIM TITLE is populated whenever there's any OMIM annotation at
+          // all, so it's the reliable place to put the link. CONDITIONS and
+          // CLINGEN CLASSIFICATION are always text-only (explicitly nulled so
+          // a source-file hyperlink on those cells, if any, doesn't leak
+          // through the base spread above).
+          omimIdField: null,
+          omimTitle: (omimTitleValue && gene) ? omimSearchUrl(gene) : null,
           omimPhenotypes: null,
           omimDescription: null,
           diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
@@ -2612,6 +2620,7 @@
       // filtering below isn't fooled into treating every row as shared.
       var clinvarValue = get('clinvarClass') || '';
       var omimIdValue = get('omimIdField') || '';
+      var omimTitleValue = get('omimTitle') || '';
       var diseaseLabelValue = get('clingenDiseaseLabel') || '';
 
       rows.push({
@@ -2637,7 +2646,7 @@
         clinvar: clinvarValue,
         inheritance: abbreviateInheritanceGrouped(get('omimInheritance')),
         phenoRank: get('phenoRank'),
-        omimTitle: get('omimTitle'),
+        omimTitle: omimTitleValue,
         omimPhenotypes: get('omimPhenotypes'),
         seqOntology: get('seqOntology'),
         transcriptName: get('transcriptName'),
@@ -2692,16 +2701,18 @@
           // most variants have none, so most rows stay plain text here.
           clinvar: (clinvarValue && gene && variant) ? clinVarWebUrl(gene, variant) : null,
           inheritance: hyperlinks.omimInheritance,
-          // Gene-search links, not carried over from the source file. Only
-          // OMIM ID gets the OMIM link and only CLINGEN Disease label gets
-          // the ClinGen link - and only when that cell actually has a value,
-          // since an empty OMIM ID/Disease label means nothing was found for
-          // this variant and a link icon there would be misleading. OMIM
-          // TITLE/CONDITIONS/CLINGEN CLASSIFICATION are always text-only
-          // (explicitly nulled so a source-file hyperlink on those cells, if
-          // any, doesn't leak through the base `hyperlinks` spread above).
-          omimIdField: (omimIdValue && gene) ? omimSearchUrl(gene) : null,
-          omimTitle: null,
+          // Gene-search links, not carried over from the source file, and only
+          // attached when the cell actually has a value (an empty cell means
+          // nothing was found for this variant, so a link icon would mislead).
+          // OMIM TITLE always carries the OMIM link (not OMIM ID) - OMIM ID is
+          // an optional column that can be missing from a given export, while
+          // OMIM TITLE is populated whenever there's any OMIM annotation at
+          // all, so it's the reliable place to put the link. CONDITIONS and
+          // CLINGEN CLASSIFICATION are always text-only (explicitly nulled so
+          // a source-file hyperlink on those cells, if any, doesn't leak
+          // through the base `hyperlinks` spread above).
+          omimIdField: null,
+          omimTitle: (omimTitleValue && gene) ? omimSearchUrl(gene) : null,
           omimPhenotypes: null,
           diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
           clingenClass: null,
@@ -2824,6 +2835,9 @@
             cell.value = val;
           }
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          // The Secondary Findings section reuses highlightTitle to also tint
+          // its data rows, matching the CMC/single export and preview grid.
+          if (highlightTitle) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SECONDARY_FINDING_ROW_FILL } };
         });
         if (franklinColIdx >= 0) {
           var fCell = dataRow.getCell(franklinColIdx + 1);
@@ -3060,8 +3074,9 @@
     return tr;
   }
 
-  function buildVariantDataRow(row, rowIndex, columns, batchIdx, displayNo) {
+  function buildVariantDataRow(row, rowIndex, columns, batchIdx, displayNo, highlight) {
     var tr = document.createElement('tr');
+    if (highlight) tr.classList.add('secondary-finding-row');
     var inheritanceInput = null;
 
     function updateInheritanceColor() {
@@ -3375,7 +3390,7 @@
       if (secondaryEntries.length) {
         variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
         secondaryEntries.forEach(function (entry, i) {
-          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1, true));
         });
       }
       variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title) || 'Both partners', columns.length));
@@ -3400,7 +3415,7 @@
       if (secondaryEntries.length) {
         variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
         secondaryEntries.forEach(function (entry, i) {
-          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1, true));
         });
         variantTableBody.appendChild(buildGridSectionHeaderRow('Listed Variants', columns.length));
       }
@@ -3488,12 +3503,18 @@
     headerRow.height = 22;
   }
 
+  // Whole-row tint for ACMG Secondary Finding variants in the exported Excel -
+  // same color as the preview grid's .secondary-finding-row (see CSS), a hue
+  // not used anywhere else in the report so these rows stand out at a glance.
+  var SECONDARY_FINDING_ROW_FILL = 'FFEDE7F6';
+
   // Writes one fully-styled data row at `rowIdx` (hyperlinks, Franklin link/
   // color, and the red HOM/HEMI/low-VAF/low-depth/homozygous-count flags),
   // reused by both the main list and the Secondary Findings section. When
   // `displayNo` is given it overrides the S.NO column so each section can be
-  // numbered 1..n independently.
-  function writeVariantDataRow(sheet, rowIdx, row, columns, reportType, maps, displayNo) {
+  // numbered 1..n independently. `rowFill`, when given, tints every cell in
+  // the row with that ARGB fill color (used for Secondary Finding rows).
+  function writeVariantDataRow(sheet, rowIdx, row, columns, reportType, maps, displayNo, rowFill) {
     var dataRow = sheet.getRow(rowIdx);
     columns.forEach(function (c, colIdx) {
       var cell = dataRow.getCell(colIdx + 1);
@@ -3506,6 +3527,7 @@
         cell.value = val;
       }
       cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      if (rowFill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowFill } };
     });
     // Red HET/pure-AR carrier flag is a CMC-only convention.
     if (reportType === 'cmc' && maps.inheritanceColIdx >= 0 && isHetWithPureAR(row)) {
@@ -3582,7 +3604,7 @@
       writeSecondaryFindingsTitle(sheet, cursor, columns.length); cursor++;
       writeVariantHeaderRow(sheet, cursor, columns); cursor++;
       secondaryRows.forEach(function (row, i) {
-        writeVariantDataRow(sheet, cursor, row, columns, reportType, maps, i + 1); cursor++;
+        writeVariantDataRow(sheet, cursor, row, columns, reportType, maps, i + 1, SECONDARY_FINDING_ROW_FILL); cursor++;
       });
       cursor++; // blank separator row before the main list
     }
