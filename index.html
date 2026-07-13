@@ -1261,21 +1261,17 @@
   // ====================================================================
   // Listed Variant Excel tab
   // ====================================================================
-  // Column order below mirrors the raw VarSeq CMC export's own header-row
-  // sequence (see column-order-cmc.xlsx) rather than being hand-curated —
-  // S.NO (generated, not in the source) leads and FRANKLIN (a lookup, not in
-  // the source) sits next to the other classification columns; every other
-  // column follows the source file's left-to-right order exactly. This
-  // order applies to the CMC layout only — SINGLE_VARIANT_COLUMNS and
+  // Column order below mirrors template.xlsx's "Listed Variants" header row —
+  // S.NO (generated, not in the source), FILTER, and GENOTYPE lead (template's
+  // own unlabeled first two columns), then GENE/VARIANT/PROTEIN POS/FRANKLIN
+  // and the rest follow the template's left-to-right order exactly. OMIM
+  // TITLE has no template counterpart, so it stays beside OMIM PHENOTYPE.
+  // This order applies to the CMC layout only — SINGLE_VARIANT_COLUMNS and
   // COUPLE_EXPORT_COLUMNS keep their own existing order.
   var VARIANT_COLUMNS = [
     { key: 'sNo', header: 'S.NO' },
     { key: 'filter', header: 'FILTER' },
-    { key: 'vaf', header: 'VAF(%)' },
-    { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
-    { key: 'readDepths', header: 'READ DEPTH' },
     { key: 'genotype', header: 'GENOTYPE' },
-    { key: 'zygosity', header: 'ZYGOSITY' },
     { key: 'gene', header: 'GENE' },
     { key: 'variant', header: 'VARIANT' },
     { key: 'proteinPos', header: 'PROTEIN POS' },
@@ -1284,7 +1280,14 @@
     { key: 'varseq', header: 'ACMG Classification' },
     { key: 'diseaseLabel', header: 'CLINGEN Disease label' },
     { key: 'clingenClass', header: 'CLINGEN CLASSIFICATION' },
+    { key: 'zygosity', header: 'ZYGOSITY' },
     { key: 'inheritance', header: 'INHERTIANCE' },
+    { key: 'inhouseMerged', header: 'Inhouse merged' },
+    { key: 'inhouseCount', header: 'Hematology Inhouse count' },
+    { key: 'inhouseSampleNames', header: 'Hematology inhouse sample name' },
+    { key: 'vaf', header: 'VAF(%)' },
+    { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
+    { key: 'readDepths', header: 'READ DEPTH' },
     { key: 'omimTitle', header: 'OMIM TITLE' },
     { key: 'omimPhenotypes', header: 'OMIM PHENOTYPE' },
     { key: 'omimDescription', header: 'CONDITIONS' },
@@ -1303,9 +1306,6 @@
     { key: 'gnomadExome2', header: 'GNOM AD EXOME V2 S A' },
     { key: 'alphaMissense', header: 'ALPHA MISSENSE' },
     { key: 'revel', header: 'Revel Score' },
-    { key: 'inhouseMerged', header: 'Inhouse merged' },
-    { key: 'inhouseCount', header: 'Hematology Inhouse count' },
-    { key: 'inhouseSampleNames', header: 'Hematology inhouse sample name' },
   ];
 
   // Single-sample report layout — separate named in-house cohort columns instead
