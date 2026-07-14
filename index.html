@@ -1617,6 +1617,7 @@
       if (spec.header && header !== spec.header) continue;
       if (spec.headerStartsWith && header.indexOf(spec.headerStartsWith) !== 0) continue;
       if (spec.groupIncludes && !spec.groupIncludes.every(function (needle) { return groupText.indexOf(needle) !== -1; })) continue;
+      if (spec.groupRegex && !spec.groupRegex.test(groupText)) continue;
       matches.push(c);
     }
     return matches;
