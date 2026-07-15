@@ -5071,6 +5071,15 @@
         var mergedCell = dataRow.getCell(startCol);
         mergedCell.value = 'No Pathogenic Variant';
         mergedCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        // Black box border around the merged cell so "No Pathogenic Variant"
+        // stands out from the surrounding rows, matching the reference report.
+        var noPathBorderSide = { style: 'medium', color: { argb: 'FF000000' } };
+        for (var noPathCol = startCol; noPathCol <= endCol; noPathCol++) {
+          dataRow.getCell(noPathCol).border = {
+            top: noPathBorderSide, bottom: noPathBorderSide,
+            left: noPathBorderSide, right: noPathBorderSide,
+          };
+        }
       }
     });
 
