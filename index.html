@@ -4777,13 +4777,10 @@
           var cellVal = cellRaw != null ? String(cellRaw) : '';
 
           if (linkUrl && cellVal.trim()) {
-            // OMIM cells show the MIM number as the clickable text (linking to
-            // the entry page). Showing the raw URL as text makes Excel
-            // auto-hyperlink it and then fail to open it, so we show the number
-            // instead. Falls back to the phenotype name when there's no MIM
-            // number. Other linked columns show their value text.
+            // Show the cell's own value text as the clickable label (e.g. the
+            // OMIM phenotype name), linking to the resolved URL (OMIM entry
+            // page by MIM number, PubMed, ClinVar, …).
             var linkText = cellVal;
-            if (c.key === 'omimTitle') linkText = row.omimNumber ? String(row.omimNumber) : cellVal;
             var link = document.createElement('a');
             link.className = 'grid-cell-link';
             link.href = linkUrl;
@@ -5203,15 +5200,15 @@
             // Excel auto-hyperlinks URL-looking text and then fails to open it
             // ("Cannot download the information you requested"). Fall back to the
             // phenotype name when there's no MIM number.
-            var omimDisplay = row.omimNumber ? String(row.omimNumber) : omimText;
-            // Use a HYPERLINK() formula rather than a stored hyperlink: Excel
-            // resolves it through a different path that avoids the "Cannot
-            // download the information you requested" error some setups hit on
-            // stored hyperlinks.
+            // Display the phenotype name/title as the clickable label, linked to
+            // the OMIM entry page. Use a HYPERLINK() formula rather than a stored
+            // hyperlink: Excel resolves it through a different path that avoids
+            // the "Cannot download the information you requested" error some
+            // setups hit on stored hyperlinks.
             cell.value = {
               formula: 'HYPERLINK("' + omimUrl.replace(/"/g, '""') + '","' +
-                       omimDisplay.replace(/"/g, '""') + '")',
-              result: omimDisplay,
+                       omimText.replace(/"/g, '""') + '")',
+              result: omimText,
             };
             cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
           }
