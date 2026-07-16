@@ -184,6 +184,13 @@
     text-overflow: ellipsis; cursor: pointer;
   }
   .excel-grid td a.grid-cell-link:hover { color: #044a9e; }
+  /* Direct-hit primary variant: green fill on GENE NAME → DEPTH(X), matching
+     the Excel export. Inline the input so the green shows through. */
+  .excel-grid tbody td.direct-hit-cell,
+  .excel-grid tbody tr:hover td.direct-hit-cell { background: #00B050; }
+  .excel-grid tbody td.direct-hit-cell input,
+  .excel-grid tbody td.direct-hit-cell input:hover,
+  .excel-grid tbody td.direct-hit-cell input:focus { background: transparent; }
   /* Whole-row tint for ACMG Secondary Finding variants - a color not used
      anywhere else on the page (blue/red/pink/teal/orange are all already
      spoken for), pitched between "visible" and "still easy to read text on". */
@@ -1707,9 +1714,16 @@
 
   function formatVafPercent(value) {
     if (value == null || value === '') return '';
-    var num = parseFloat(value);
+    var str = String(value).trim();
+    var hasPercent = str.indexOf('%') !== -1;
+    var num = parseFloat(str.replace('%', ''));
     if (isNaN(num)) return value;
-    return (num * 100).toFixed(2) + '%';
+    // Values written with a "%" sign — or any magnitude > 1 — are already on the
+    // 0–100 percentage scale (e.g. the Listed Variant Excel stores "100.00%" /
+    // "31.79%"). Only bare fractions in 0–1 (Excel's numeric form of "100%" →
+    // 1.0) get scaled up, so we never double-multiply.
+    var pct = (hasPercent || num > 1) ? num : num * 100;
+    return pct.toFixed(2) + '%';
   }
 
   function stripHgvsPrefix(value) {
@@ -4310,6 +4324,11 @@
     { key: 'remark', header: 'Remark' },
   ];
 
+  // Columns highlighted green for a "direct hit" primary variant: GENE NAME
+  // through DEPTH(X), inclusive.
+  var DIRECT_HIT_GREEN_KEYS = ['gene', 'variant', 'proteinPos', 'zygosity',
+    'inheritance', 'vaf', 'alleleDepths', 'readDepths'];
+
   function normalizeGeneVariantKey(gene, variant) {
     var g = String(gene || '').trim().toUpperCase();
     var v = String(variant || '');
@@ -4634,6 +4653,10 @@
           literatureEvidence: vr.literatureEvidence,
           remark: vr.remark,
           unmatched: vr.unmatched,
+          // The primary SNV row is a "direct hit" when the SNV Result carries a
+          // real gene (not "No Pathogenic Variant"); such rows get GENE NAME →
+          // DEPTH(X) highlighted green. Additional variants are never green.
+          directHit: i === 0 && !!vr.gene && vr.gene !== 'No Pathogenic Variant',
           chr: vr.chr || '',
           pos: vr.pos || '',
           ref: vr.ref || '',
@@ -4659,17 +4682,17 @@
       return (lv && typeof lv === 'object') ? lv.hyperlink : null;
     }
     if (key === 'omimTitle') {
-      var omimText = String(row.omimTitle || '').trim();
+      var omimText = String(cellText(row.omimTitle) || '').trim();
       if (!omimText) return null;
-      return row.omimUrl ||
+      return row.omimUrl || cellHyperlink(row.omimTitle) ||
         (row.omimNumber
           ? 'https://www.omim.org/entry/' + row.omimNumber
           : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
     }
     if (key === 'clinvar') {
-      var cvText = String(row.clinvar || '').trim();
+      var cvText = String(cellText(row.clinvar) || '').trim();
       if (!cvText) return null;
-      return row.clinvarUrl ||
+      return row.clinvarUrl || cellHyperlink(row.clinvar) ||
         (row.gene && row.variant ? clinvarFallbackUrl(row.gene, row.variant) : null);
     }
     return null;
@@ -4709,19 +4732,32 @@
           var c = FINAL_COLUMNS[colI];
           var td = document.createElement('td');
 
+          // Green highlight for a direct-hit primary variant (GENE NAME → DEPTH(X)).
+          if (!isNoPath && row.directHit && DIRECT_HIT_GREEN_KEYS.indexOf(c.key) !== -1) {
+            td.className = 'direct-hit-cell';
+          }
+
           // Linked columns (OMIM / ClinVar / Literature) render as a clickable
           // hyperlink — matching the Excel export — instead of an editable input.
           var linkUrl = (isNoPath || colI === noPathStart) ? null : finalCellLinkUrl(row, c.key);
-          var cellVal = row[c.key] != null ? String(row[c.key]) : '';
+          // Normalize through cellText() at display time too: rows restored from
+          // autosave (or any other path) may still hold rich-text/hyperlink
+          // objects, which would otherwise show as "[object Object]".
+          var cellRaw = cellText(row[c.key]);
+          var cellVal = cellRaw != null ? String(cellRaw) : '';
 
           if (linkUrl && cellVal.trim()) {
+            // OMIM cells show the entry URL itself as the clickable text
+            // (instead of the phenotype name); other linked columns show
+            // their value text.
+            var linkText = (c.key === 'omimTitle') ? linkUrl : cellVal;
             var link = document.createElement('a');
             link.className = 'grid-cell-link';
             link.href = linkUrl;
             link.target = '_blank';
             link.rel = 'noopener noreferrer';
-            link.textContent = cellVal;
-            link.title = cellVal;
+            link.textContent = linkText;
+            link.title = linkText;
             td.appendChild(link);
             tr.appendChild(td);
             continue;
@@ -4738,7 +4774,7 @@
               return function (e) { finalConsolidateRows[ri].gene = e.target.value; };
             })(rowIndex));
           } else {
-            input.value = row[c.key] != null ? row[c.key] : '';
+            input.value = cellVal;
             if (row.unmatched && (c.key === 'gene' || c.key === 'variant')) {
               input.style.color = '#c2293a';
             }
@@ -5089,14 +5125,19 @@
         var cell = dataRow.getCell(colIdx + 1);
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
 
+        // Green fill for a direct-hit primary variant (GENE NAME → DEPTH(X)).
+        if (row.directHit && DIRECT_HIT_GREEN_KEYS.indexOf(c.key) !== -1) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00B050' } };
+        }
+
         // ClinVar column: write as a clickable hyperlink whenever the cell has text.
         // Exact URL from eutils is preferred; falls back to a ClinVar search URL
         // so that "Pathogenic" (etc.) is ALWAYS a link, not plain text.
         // Empty cells (variant not in ClinVar) stay empty — no phantom links.
         if (colIdx === clinvarColIdx && !isNoPath) {
-          var cvText = String(row.clinvar || '').trim();
+          var cvText = String(cellText(row.clinvar) || '').trim();
           if (cvText) {
-            var cvUrl = row.clinvarUrl ||
+            var cvUrl = row.clinvarUrl || cellHyperlink(row.clinvar) ||
                         (row.gene && row.variant ? clinvarFallbackUrl(row.gene, row.variant) : '');
             if (cvUrl) {
               cell.value = { text: cvText, hyperlink: cvUrl };
@@ -5107,15 +5148,17 @@
           }
           // else: leave cell empty
         } else if (colIdx === omimColIdx) {
-          var omimText = String(row.omimTitle || '').trim();
+          var omimText = String(cellText(row.omimTitle) || '').trim();
           if (omimText) {
             // Prefer the source cell's own hyperlink; fall back to an OMIM
             // entry link (by MIM number) or a title search.
-            var omimUrl = row.omimUrl ||
+            var omimUrl = row.omimUrl || cellHyperlink(row.omimTitle) ||
               (row.omimNumber
                 ? 'https://www.omim.org/entry/' + row.omimNumber
                 : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
-            cell.value = { text: omimText, hyperlink: omimUrl };
+            // Display the entry URL itself as the clickable text, not the
+            // (often very long) phenotype name.
+            cell.value = { text: omimUrl, hyperlink: omimUrl };
             cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
           }
         } else if (colIdx === litColIdx) {
@@ -5127,7 +5170,7 @@
             cell.value = litVal;
           }
         } else {
-          cell.value = row[c.key];
+          cell.value = cellText(row[c.key]);
         }
       });
 
