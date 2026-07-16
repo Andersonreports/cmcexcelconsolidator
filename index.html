@@ -4668,6 +4668,7 @@
 
           if (isNoPath && colI === noPathStart) {
             td.colSpan = noPathEnd - noPathStart + 1;
+            td.style.border = '1px solid #000';
             input.value = 'No Pathogenic Variant';
             input.style.textAlign = 'center';
             input.addEventListener('input', (function (ri) {
