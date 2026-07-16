@@ -4329,6 +4329,19 @@
   var DIRECT_HIT_GREEN_KEYS = ['gene', 'variant', 'proteinPos', 'zygosity',
     'inheritance', 'vaf', 'alleleDepths', 'readDepths'];
 
+  // ACMG Classification cell fill (CMC template only), keyed off the leading
+  // classification token: VUS → blue, P / LP → red, everything else → none.
+  // Values look like "LP: PM5, …", "P- PS3, …", "VUS: …".
+  function acmgFillColor(value) {
+    var s = String(value || '').trim().toUpperCase();
+    if (!s) return null;
+    var m = s.match(/^[A-Z]+/);
+    var token = m ? m[0] : '';
+    if (token === 'VUS') return 'FF00B0F0';          // blue
+    if (token === 'P' || token === 'LP') return 'FFFF0000'; // red
+    return null;
+  }
+
   function normalizeGeneVariantKey(gene, variant) {
     var g = String(gene || '').trim().toUpperCase();
     var v = String(variant || '');
@@ -5131,6 +5144,14 @@
         // Green fill for a direct-hit primary variant (GENE NAME → DEPTH(X)).
         if (row.directHit && DIRECT_HIT_GREEN_KEYS.indexOf(c.key) !== -1) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00B050' } };
+        }
+
+        // ACMG Classification fill (CMC only): VUS → blue, P/LP → red.
+        if (currentReportType === 'cmc' && c.key === 'acmgClassification') {
+          var acmgColor = acmgFillColor(row.acmgClassification);
+          if (acmgColor) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: acmgColor } };
+          }
         }
 
         // ClinVar column: write as a clickable hyperlink whenever the cell has text.
