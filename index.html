@@ -4647,6 +4647,7 @@
           readDepths: vr.readDepths,
           omimTitle: vr.omimTitle,
           omimUrl: vr.omimUrl || '',
+          omimNumber: vr.omimNumber || '',
           clinvar: vr.clinvar,
           clinvarUrl: vr.clinvarUrl || '',
           acmgClassification: vr.acmgClassification,
@@ -4684,10 +4685,12 @@
     if (key === 'omimTitle') {
       var omimText = String(cellText(row.omimTitle) || '').trim();
       if (!omimText) return null;
+      // Prefer the specific OMIM entry page (by MIM number). Only if we have no
+      // MIM number do we fall back to the source cell's own hyperlink or a
+      // search — the source link often points at a search, not the entry.
+      if (row.omimNumber) return 'https://www.omim.org/entry/' + row.omimNumber;
       return row.omimUrl || cellHyperlink(row.omimTitle) ||
-        (row.omimNumber
-          ? 'https://www.omim.org/entry/' + row.omimNumber
-          : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
+        'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim());
     }
     if (key === 'clinvar') {
       var cvText = String(cellText(row.clinvar) || '').trim();
@@ -5152,10 +5155,12 @@
           if (omimText) {
             // Prefer the source cell's own hyperlink; fall back to an OMIM
             // entry link (by MIM number) or a title search.
-            var omimUrl = row.omimUrl || cellHyperlink(row.omimTitle) ||
-              (row.omimNumber
-                ? 'https://www.omim.org/entry/' + row.omimNumber
-                : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
+            // Prefer the specific OMIM entry page (by MIM number); fall back to
+            // the source cell's own hyperlink or a search only when we have none.
+            var omimUrl = row.omimNumber
+              ? 'https://www.omim.org/entry/' + row.omimNumber
+              : (row.omimUrl || cellHyperlink(row.omimTitle) ||
+                 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
             // Display the entry URL itself as the clickable text, not the
             // (often very long) phenotype name.
             cell.value = { text: omimUrl, hyperlink: omimUrl };
@@ -5226,6 +5231,9 @@
   var AUTOSAVE_KEY = 'cmcExcelConsolidator.autosave.v1';
   var AUTOSAVE_DEBOUNCE_MS = 800;
   var autosaveTimer = null;
+  // Temporarily disabled: while the consolidation logic is changing, restoring
+  // old autosaved rows masks the new behavior. Set back to true to re-enable.
+  var AUTOSAVE_ENABLED = false;
 
   function arrayBufferToBase64(buffer) {
     var bytes = new Uint8Array(buffer);
@@ -5295,6 +5303,7 @@
   }
 
   function persistAutosaveState() {
+    if (!AUTOSAVE_ENABLED) return;
     try {
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(collectAutosaveState(true)));
     } catch (e) {
@@ -5441,7 +5450,13 @@
   }
 
   var autosaveRestored = false;
-  try { autosaveRestored = restoreAutosavedState(); } catch (e) { console.warn('Autosave restore failed:', e); }
+  if (!AUTOSAVE_ENABLED) {
+    // Autosave is off for now — purge any previously saved (stale) session so
+    // it can't be restored, and always start fresh.
+    clearAutosavedState();
+  } else {
+    try { autosaveRestored = restoreAutosavedState(); } catch (e) { console.warn('Autosave restore failed:', e); }
+  }
   if (!autosaveRestored) {
     renderSampleTable();
     renderVariantTable();
@@ -5449,7 +5464,7 @@
     renderFinalTable();
     populateSampleSelect();
   }
-  initAutosaveWatchers();
+  if (AUTOSAVE_ENABLED) initAutosaveWatchers();
 })();
 </script>
 </body>
