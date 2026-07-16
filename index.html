@@ -1983,6 +1983,16 @@
     return 'https://www.omim.org/search/?index=entry&search=' + encodeURIComponent(gene);
   }
 
+  // Link to an OMIM entry by MIM number. Routed through NCBI's OMIM (which
+  // returns 200) rather than omim.org directly, because omim.org sits behind
+  // Cloudflare and returns 403 to Excel's hyperlink pre-check — so a direct
+  // omim.org link fails to open from the generated Excel ("Cannot download the
+  // information you requested"). NCBI shows the same entry and links out to the
+  // live omim.org page.
+  function omimEntryLink(mim) {
+    return 'https://www.ncbi.nlm.nih.gov/omim/?term=' + encodeURIComponent(mim);
+  }
+
   function clingenSearchUrl(gene) {
     return 'https://search.clinicalgenome.org/kb/genes?page=1&size=25&search=' + encodeURIComponent(gene);
   }
@@ -2493,7 +2503,7 @@
       var omimMim = (gene ? omimGeneMap.get(gene.toUpperCase()) : '') ||
                     extractMimNumber(omimPhenotypesValue) || extractMimNumber(omimIdValue);
       var omimEntryUrl = (currentReportType === 'cmc' && omimMim)
-        ? 'https://www.omim.org/entry/' + omimMim
+        ? omimEntryLink(omimMim)
         : (gene ? omimSearchUrl(gene) : null);
 
       rows.push({
@@ -4715,7 +4725,7 @@
       // Prefer the specific OMIM entry page (by MIM number). Only if we have no
       // MIM number do we fall back to the source cell's own hyperlink or a
       // search — the source link often points at a search, not the entry.
-      if (row.omimNumber) return 'https://www.omim.org/entry/' + row.omimNumber;
+      if (row.omimNumber) return omimEntryLink(row.omimNumber);
       return row.omimUrl || cellHyperlink(row.omimTitle) ||
         'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim());
     }
@@ -5197,23 +5207,14 @@
         } else if (colIdx === omimColIdx) {
           var omimText = String(cellText(row.omimTitle) || '').trim();
           if (omimText) {
-            // Prefer the source cell's own hyperlink; fall back to an OMIM
-            // entry link (by MIM number) or a title search.
-            // Prefer the specific OMIM entry page (by MIM number); fall back to
-            // the source cell's own hyperlink or a search only when we have none.
+            // Link the phenotype name to the OMIM entry (by MIM number, via
+            // omimEntryLink → NCBI, since omim.org is unreachable to Excel).
+            // Fall back to the source cell's hyperlink or a title search when
+            // there's no MIM number. Plain stored hyperlink (like ClinVar).
             var omimUrl = row.omimNumber
-              ? 'https://www.omim.org/entry/' + row.omimNumber
+              ? omimEntryLink(row.omimNumber)
               : (row.omimUrl || cellHyperlink(row.omimTitle) ||
                  'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
-            // Display the MIM number (not the raw URL) as the clickable text:
-            // Excel auto-hyperlinks URL-looking text and then fails to open it
-            // ("Cannot download the information you requested"). Fall back to the
-            // phenotype name when there's no MIM number.
-            // Display the phenotype name/title as the clickable label, linked to
-            // the OMIM entry page. Use a plain stored hyperlink (same as the
-            // ClinVar/Literature links) — HYPERLINK() formulas fail to open on
-            // some Excel setups ("Cannot download the information you requested")
-            // while stored hyperlinks navigate fine.
             cell.value = { text: omimText, hyperlink: omimUrl };
             cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
           }
