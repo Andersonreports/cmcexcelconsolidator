@@ -176,6 +176,14 @@
   }
   .excel-grid tbody td:not(.grid-row-number) { background: #fff; }
   .excel-grid tbody tr:hover td:not(.grid-row-number) { background: #faf6ec; }
+  /* Linked cells (OMIM / ClinVar / Literature) shown as clickable hyperlinks,
+     mirroring the Excel export. Sized to match the editable input cells. */
+  .excel-grid td a.grid-cell-link {
+    display: block; padding: 7px 9px; font-size: 13px; color: #0563C1;
+    text-decoration: underline; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; cursor: pointer;
+  }
+  .excel-grid td a.grid-cell-link:hover { color: #044a9e; }
   /* Whole-row tint for ACMG Secondary Finding variants - a color not used
      anywhere else on the page (blue/red/pink/teal/orange are all already
      spoken for), pitched between "visible" and "still easy to read text on". */
@@ -4470,19 +4478,27 @@
       var gene    = String(row.getCell(geneCol).value || '').trim().split(';')[0].trim();
       var variant = String(row.getCell(variantCol).value || '').trim();
       if (!gene || !variant) return;
+      var clinvarRaw = row.getCell(clinvarCol).value;
+      var omimRaw    = omimTitleCol ? row.getCell(omimTitleCol).value : null;
       entries.push({
         key:          normalizeGeneVariantKey(gene, variant),
-        proteinPos:   row.getCell(proteinCol).value,
-        clinvar:      row.getCell(clinvarCol).value,
-        clinvarUrl:   '',
-        zygosity:     row.getCell(zygosityCol).value,
-        inheritance:  row.getCell(inheritCol).value,
+        // Normalize every text cell through cellText(): OMIM/ClinVar (and
+        // sometimes others) come in as rich-text/hyperlink objects, which
+        // otherwise render as "[object Object]" in the preview and export.
+        proteinPos:   cellText(row.getCell(proteinCol).value),
+        clinvar:      cellText(clinvarRaw),
+        // Preserve the source cell's own hyperlink target when present.
+        clinvarUrl:   cellHyperlink(clinvarRaw) || '',
+        zygosity:     cellText(row.getCell(zygosityCol).value),
+        inheritance:  cellText(row.getCell(inheritCol).value),
         // Excel auto-converts "100.00%" strings to the numeric 1.0 —
         // reapply formatVafPercent so we always get a "XX.XX%" string.
         vaf:          formatVafPercent(row.getCell(vafCol).value),
-        alleleDepths: row.getCell(allelicCol).value,
-        readDepths:   row.getCell(readDepthCol).value,
-        omimTitle:    omimTitleCol ? row.getCell(omimTitleCol).value : null,
+        alleleDepths: cellText(row.getCell(allelicCol).value),
+        readDepths:   cellText(row.getCell(readDepthCol).value),
+        omimTitle:    omimTitleCol ? cellText(omimRaw) : null,
+        // Preserve the OMIM cell's own hyperlink target when present.
+        omimUrl:      cellHyperlink(omimRaw) || '',
         // Genomic coords for ClinVar VCF tabix lookup
         chr: chrCol ? String(row.getCell(chrCol).value || '').trim() : '',
         pos: posCol ? String(row.getCell(posCol).value || '').trim() : '',
@@ -4566,6 +4582,7 @@
           alleleDepths: details ? details.alleleDepths : '',
           readDepths: details ? details.readDepths : '',
           omimTitle: details ? details.omimTitle : '',
+          omimUrl: details ? (details.omimUrl || '') : '',
           omimNumber: omimGeneMap.get(gene.toUpperCase()) ||
                       (details ? extractMimNumber(details.omimPhenotypes) : ''),
           clinvar: details ? (details.clinvar || '') : '',
@@ -4610,6 +4627,7 @@
           alleleDepths: vr.alleleDepths,
           readDepths: vr.readDepths,
           omimTitle: vr.omimTitle,
+          omimUrl: vr.omimUrl || '',
           clinvar: vr.clinvar,
           clinvarUrl: vr.clinvarUrl || '',
           acmgClassification: vr.acmgClassification,
@@ -4629,6 +4647,32 @@
     showFinalWarning(unmatchedPicks.length
       ? unmatchedPicks.length + ' picked variant(s) not found in the uploaded Listed Variant Excel files (flagged red below): ' + unmatchedPicks.join(', ')
       : '');
+  }
+
+  // Returns a clickable URL for a linked column (OMIM / ClinVar / Literature
+  // evidence) so the preview grid can render those cells as hyperlinks, the
+  // same links the Excel export produces. Returns null for every other column
+  // or when there's no text/URL to link.
+  function finalCellLinkUrl(row, key) {
+    if (key === 'literatureEvidence') {
+      var lv = pubmedHyperlinkValue(row.literatureEvidence);
+      return (lv && typeof lv === 'object') ? lv.hyperlink : null;
+    }
+    if (key === 'omimTitle') {
+      var omimText = String(row.omimTitle || '').trim();
+      if (!omimText) return null;
+      return row.omimUrl ||
+        (row.omimNumber
+          ? 'https://www.omim.org/entry/' + row.omimNumber
+          : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
+    }
+    if (key === 'clinvar') {
+      var cvText = String(row.clinvar || '').trim();
+      if (!cvText) return null;
+      return row.clinvarUrl ||
+        (row.gene && row.variant ? clinvarFallbackUrl(row.gene, row.variant) : null);
+    }
+    return null;
   }
 
   function renderFinalTable() {
@@ -4664,6 +4708,25 @@
 
           var c = FINAL_COLUMNS[colI];
           var td = document.createElement('td');
+
+          // Linked columns (OMIM / ClinVar / Literature) render as a clickable
+          // hyperlink — matching the Excel export — instead of an editable input.
+          var linkUrl = (isNoPath || colI === noPathStart) ? null : finalCellLinkUrl(row, c.key);
+          var cellVal = row[c.key] != null ? String(row[c.key]) : '';
+
+          if (linkUrl && cellVal.trim()) {
+            var link = document.createElement('a');
+            link.className = 'grid-cell-link';
+            link.href = linkUrl;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = cellVal;
+            link.title = cellVal;
+            td.appendChild(link);
+            tr.appendChild(td);
+            continue;
+          }
+
           var input = document.createElement('input');
 
           if (isNoPath && colI === noPathStart) {
@@ -5046,9 +5109,12 @@
         } else if (colIdx === omimColIdx) {
           var omimText = String(row.omimTitle || '').trim();
           if (omimText) {
-            var omimUrl = row.omimNumber
-              ? 'https://www.omim.org/entry/' + row.omimNumber
-              : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim());
+            // Prefer the source cell's own hyperlink; fall back to an OMIM
+            // entry link (by MIM number) or a title search.
+            var omimUrl = row.omimUrl ||
+              (row.omimNumber
+                ? 'https://www.omim.org/entry/' + row.omimNumber
+                : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
             cell.value = { text: omimText, hyperlink: omimUrl };
             cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
           }
