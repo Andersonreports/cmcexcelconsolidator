@@ -2485,7 +2485,16 @@
       var clinvarValue = get('clinvarClass') || '';
       var omimIdValue = get('omimIdField') || '';
       var omimTitleValue = get('omimTitle') || '';
+      var omimPhenotypesValue = get('omimPhenotypes');
       var diseaseLabelValue = get('clingenDiseaseLabel') || '';
+
+      // OMIM TITLE links to the specific entry page (by MIM number) in CMC so
+      // clicking navigates to that phenotype's OMIM page, not a gene search.
+      var omimMim = (gene ? omimGeneMap.get(gene.toUpperCase()) : '') ||
+                    extractMimNumber(omimPhenotypesValue) || extractMimNumber(omimIdValue);
+      var omimEntryUrl = (currentReportType === 'cmc' && omimMim)
+        ? 'https://www.omim.org/entry/' + omimMim
+        : (gene ? omimSearchUrl(gene) : null);
 
       rows.push({
         sNo: '',
@@ -2556,7 +2565,7 @@
           // a source-file hyperlink on those cells, if any, doesn't leak
           // through the base spread above).
           omimIdField: null,
-          omimTitle: (omimTitleValue && gene) ? omimSearchUrl(gene) : null,
+          omimTitle: (omimTitleValue && gene) ? omimEntryUrl : null,
           omimPhenotypes: null,
           omimDescription: null,
           diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
@@ -3574,7 +3583,17 @@
       var link = row._hyperlinks && row._hyperlinks[c.key];
       var val = (c.key === 'sNo' && displayNo != null) ? displayNo : row[c.key];
       if (link && val != null && val !== '') {
-        cell.value = { text: val, hyperlink: link };
+        if (c.key === 'omimTitle') {
+          // HYPERLINK() formula (not a stored hyperlink) so the OMIM entry link
+          // navigates reliably in Excel — same approach as the final report.
+          cell.value = {
+            formula: 'HYPERLINK("' + String(link).replace(/"/g, '""') + '","' +
+                     String(val).replace(/"/g, '""') + '")',
+            result: String(val),
+          };
+        } else {
+          cell.value = { text: val, hyperlink: link };
+        }
         cell.font = { color: { argb: 'FF0563C1' }, underline: true };
       } else {
         cell.value = val;
