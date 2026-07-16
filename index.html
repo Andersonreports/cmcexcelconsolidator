@@ -191,6 +191,11 @@
   .excel-grid tbody td.direct-hit-cell input,
   .excel-grid tbody td.direct-hit-cell input:hover,
   .excel-grid tbody td.direct-hit-cell input:focus { background: transparent; }
+  /* ACMG classification fill (VUS blue / P-LP red) set inline per-cell; keep the
+     input transparent so the fill shows through, including on hover/focus. */
+  .excel-grid tbody td.acmg-fill input,
+  .excel-grid tbody td.acmg-fill input:hover,
+  .excel-grid tbody td.acmg-fill input:focus { background: transparent; }
   /* Whole-row tint for ACMG Secondary Finding variants - a color not used
      anywhere else on the page (blue/red/pink/teal/orange are all already
      spoken for), pitched between "visible" and "still easy to read text on". */
@@ -4751,6 +4756,15 @@
           // Green highlight for a direct-hit primary variant (GENE NAME → DEPTH(X)).
           if (!isNoPath && row.directHit && DIRECT_HIT_GREEN_KEYS.indexOf(c.key) !== -1) {
             td.className = 'direct-hit-cell';
+          }
+
+          // ACMG Classification highlight (CMC only): VUS → blue, P/LP → red.
+          if (!isNoPath && currentReportType === 'cmc' && c.key === 'acmgClassification') {
+            var acmgArgb = acmgFillColor(row.acmgClassification);
+            if (acmgArgb) {
+              td.classList.add('acmg-fill');
+              td.style.backgroundColor = '#' + acmgArgb.slice(2);
+            }
           }
 
           // Linked columns (OMIM / ClinVar / Literature) render as a clickable
