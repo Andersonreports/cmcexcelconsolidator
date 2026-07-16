@@ -4777,10 +4777,13 @@
           var cellVal = cellRaw != null ? String(cellRaw) : '';
 
           if (linkUrl && cellVal.trim()) {
-            // OMIM cells show the entry URL itself as the clickable text
-            // (instead of the phenotype name); other linked columns show
-            // their value text.
-            var linkText = (c.key === 'omimTitle') ? linkUrl : cellVal;
+            // OMIM cells show the MIM number as the clickable text (linking to
+            // the entry page). Showing the raw URL as text makes Excel
+            // auto-hyperlink it and then fail to open it, so we show the number
+            // instead. Falls back to the phenotype name when there's no MIM
+            // number. Other linked columns show their value text.
+            var linkText = cellVal;
+            if (c.key === 'omimTitle') linkText = row.omimNumber ? String(row.omimNumber) : cellVal;
             var link = document.createElement('a');
             link.className = 'grid-cell-link';
             link.href = linkUrl;
@@ -5196,9 +5199,12 @@
               ? 'https://www.omim.org/entry/' + row.omimNumber
               : (row.omimUrl || cellHyperlink(row.omimTitle) ||
                  'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
-            // Display the entry URL itself as the clickable text, not the
-            // (often very long) phenotype name.
-            cell.value = { text: omimUrl, hyperlink: omimUrl };
+            // Display the MIM number (not the raw URL) as the clickable text:
+            // Excel auto-hyperlinks URL-looking text and then fails to open it
+            // ("Cannot download the information you requested"). Fall back to the
+            // phenotype name when there's no MIM number.
+            var omimDisplay = row.omimNumber ? String(row.omimNumber) : omimText;
+            cell.value = { text: omimDisplay, hyperlink: omimUrl };
             cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
           }
         } else if (colIdx === litColIdx) {
