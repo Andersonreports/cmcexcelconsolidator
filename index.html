@@ -5204,7 +5204,15 @@
             // ("Cannot download the information you requested"). Fall back to the
             // phenotype name when there's no MIM number.
             var omimDisplay = row.omimNumber ? String(row.omimNumber) : omimText;
-            cell.value = { text: omimDisplay, hyperlink: omimUrl };
+            // Use a HYPERLINK() formula rather than a stored hyperlink: Excel
+            // resolves it through a different path that avoids the "Cannot
+            // download the information you requested" error some setups hit on
+            // stored hyperlinks.
+            cell.value = {
+              formula: 'HYPERLINK("' + omimUrl.replace(/"/g, '""') + '","' +
+                       omimDisplay.replace(/"/g, '""') + '")',
+              result: omimDisplay,
+            };
             cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
           }
         } else if (colIdx === litColIdx) {
