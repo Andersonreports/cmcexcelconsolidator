@@ -4280,35 +4280,24 @@
 
   dlModalSaveBtn.addEventListener('click', performModalDownload);
 
-  // The two bottom download buttons change label + behavior by report type:
-  // CMC downloads the whole batch as a ZIP; single/couple open the per-file
-  // folder-picker dialog. Called on init and whenever the report type switches.
+  // The two bottom download buttons open the per-file editable-name dialog
+  // for every report type (CMC, single, couple). Called on init and whenever
+  // the report type switches.
   function updateDownloadButtons() {
     if (!variantDownloadAllBtn || !variantDownloadAllNoRawBtn) return; // not wired yet at init
-    if (currentReportType === 'cmc') {
-      variantDownloadAllBtn.textContent = 'Download All (ZIP)';
-      variantDownloadAllNoRawBtn.textContent = 'Download All (No VarSeq Data)';
-    } else {
-      variantDownloadAllBtn.textContent = 'Download with VarSeq';
-      variantDownloadAllNoRawBtn.textContent = 'Download without VarSeq';
-    }
+    // Every report type (CMC included) now opens the per-file editable-name
+    // dialog, so the labels are uniform.
+    variantDownloadAllBtn.textContent = 'Download with VarSeq';
+    variantDownloadAllNoRawBtn.textContent = 'Download without VarSeq';
   }
 
   variantDownloadAllBtn.addEventListener('click', function () {
-    if (currentReportType === 'cmc') {
-      downloadAllZip(true, variantDownloadAllBtn, 'listed-variants-batch.zip');
-    } else {
-      openDownloadModal(true);
-    }
+    openDownloadModal(true);
   });
 
   if (variantDownloadAllNoRawBtn) {
     variantDownloadAllNoRawBtn.addEventListener('click', function () {
-      if (currentReportType === 'cmc') {
-        downloadAllZip(false, variantDownloadAllNoRawBtn, 'listed-variants-batch-no-varseq-data.zip');
-      } else {
-        openDownloadModal(false);
-      }
+      openDownloadModal(false);
     });
   }
 
