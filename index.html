@@ -4186,29 +4186,33 @@
     });
   }
 
-  // ---- Single/couple: per-file download via a folder picker + editable names ----
+  // ---- Per-file download via a folder picker + editable names ----
+  // Shared by the listed-variant batch (one row per report) and the Sample
+  // Final Consolidate tab (a single row). Works off a generic list of
+  // entries: { baseName (no ext), hoverTitle?, build: () => Promise<buffer> }.
   var downloadModal = document.getElementById('download-modal');
   var dlModalTitle = document.getElementById('dl-modal-title');
   var dlModalList = document.getElementById('dl-modal-list');
   var dlModalSaveBtn = document.getElementById('dl-modal-save');
   var dlModalCancelBtn = document.getElementById('dl-modal-cancel');
-  var dlModalItems = [];        // { item, includeRawData } context for the open dialog
-  var dlModalIncludeRaw = true;
+  var dlModalEntries = [];      // [{ baseName, hoverTitle, build }] for the open dialog
+  var dlModalOnError = showVariantError;
 
-  function openDownloadModal(includeRawData) {
-    var validItems = currentValidBatchItems();
-    if (!validItems.length) return;
-    dlModalItems = validItems;
-    dlModalIncludeRaw = includeRawData;
-    dlModalTitle.textContent = 'Download ' + (includeRawData ? 'with VarSeq data' : 'without VarSeq data');
+  // Generic opener: `title` heads the dialog, `entries` becomes one editable
+  // name row each, `onError` (optional) reports save failures.
+  function openSaveNamesModal(title, entries, onError) {
+    if (!entries || !entries.length) return;
+    dlModalEntries = entries;
+    dlModalOnError = onError || showVariantError;
+    dlModalTitle.textContent = title;
     dlModalList.innerHTML = '';
-    validItems.forEach(function (item) {
+    entries.forEach(function (entry) {
       var row = document.createElement('div');
       row.className = 'dl-modal-row';
       var input = document.createElement('input');
       input.type = 'text';
-      input.value = autoExportBaseName(item); // auto-fetched from the input file name, editable
-      input.title = item.fileName; // hover to see which uploaded file this came from
+      input.value = entry.baseName; // auto-filled, editable
+      if (entry.hoverTitle) input.title = entry.hoverTitle;
       var ext = document.createElement('span');
       ext.className = 'dl-ext';
       ext.textContent = '.xlsx';
@@ -4218,9 +4222,23 @@
     downloadModal.hidden = false;
   }
 
+  // Listed-variant batch: one editable row per current-type report.
+  function openDownloadModal(includeRawData) {
+    var validItems = currentValidBatchItems();
+    if (!validItems.length) return;
+    var entries = validItems.map(function (item) {
+      return {
+        baseName: autoExportBaseName(item), // auto-fetched from the input file name
+        hoverTitle: item.fileName,          // hover to see which uploaded file this came from
+        build: function () { return buildItemBuffer(item, includeRawData); },
+      };
+    });
+    openSaveNamesModal('Download ' + (includeRawData ? 'with VarSeq data' : 'without VarSeq data'), entries);
+  }
+
   function closeDownloadModal() {
     downloadModal.hidden = true;
-    dlModalItems = [];
+    dlModalEntries = [];
   }
 
   dlModalCancelBtn.addEventListener('click', closeDownloadModal);
@@ -4231,9 +4249,9 @@
   // Normalizes one modal row's edited name to a safe "<base>.xlsx".
   function modalDownloadNames() {
     var nameInputs = [].slice.call(dlModalList.querySelectorAll('input'));
-    return dlModalItems.map(function (item, i) {
-      var raw = ((nameInputs[i] && nameInputs[i].value) || autoExportBaseName(item)).trim();
-      return (raw || autoExportBaseName(item)).replace(/\.xlsx$/i, '') + '.xlsx';
+    return dlModalEntries.map(function (entry, i) {
+      var raw = ((nameInputs[i] && nameInputs[i].value) || entry.baseName).trim();
+      return (raw || entry.baseName).replace(/\.xlsx$/i, '') + '.xlsx';
     });
   }
 
@@ -4243,10 +4261,10 @@
   // inside this flow itself. Falls back to individual browser downloads when
   // the File System Access API isn't available at all.
   function performModalDownload() {
-    if (!dlModalItems.length) { closeDownloadModal(); return; }
+    if (!dlModalEntries.length) { closeDownloadModal(); return; }
     var names = modalDownloadNames();
-    var items = dlModalItems.slice();
-    var includeRaw = dlModalIncludeRaw;
+    var entries = dlModalEntries.slice();
+    var onError = dlModalOnError;
 
     var originalText = dlModalSaveBtn.textContent;
     dlModalSaveBtn.disabled = true;
@@ -4263,9 +4281,9 @@
       // Build + write each file sequentially so we don't hold many workbooks
       // in memory at once.
       var chain = Promise.resolve();
-      items.forEach(function (item, i) {
+      entries.forEach(function (entry, i) {
         chain = chain.then(function () {
-          return buildItemBuffer(item, includeRaw).then(function (buffer) {
+          return Promise.resolve(entry.build()).then(function (buffer) {
             if (dirHandle) return writeBufferToDir(dirHandle, names[i], buffer);
             downloadBlob(buffer, names[i]); // no folder available - plain download
           });
@@ -4273,7 +4291,7 @@
       });
       return chain.then(function () { resetButtons(); closeDownloadModal(); });
     }).catch(function (err) {
-      showVariantError((err && err.message) || 'Failed to save files.');
+      (onError || showVariantError)((err && err.message) || 'Failed to save files.');
       resetButtons();
     });
   }
@@ -5129,7 +5147,9 @@
     });
   }
 
-  function buildAndDownloadFinalExcel() {
+  // Builds the final consolidated workbook and resolves to its buffer (no
+  // download here - the caller hands it to the editable-name save dialog).
+  function buildFinalExcelBuffer() {
     var workbook = new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Final Consolidated');
 
@@ -5239,11 +5259,7 @@
       }
     });
 
-    workbook.xlsx.writeBuffer().then(function (buffer) {
-      downloadBlob(buffer, 'final-consolidated-report.xlsx');
-      finalDownloadBtn.disabled = false;
-      finalDownloadBtn.textContent = 'Download Excel';
-    });
+    return workbook.xlsx.writeBuffer();
   }
 
   finalDownloadBtn.addEventListener('click', function () {
@@ -5257,7 +5273,14 @@
         var cvIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
         if (inputs[cvIdx]) inputs[cvIdx].value = row.clinvar;
       });
-      buildAndDownloadFinalExcel();
+      finalDownloadBtn.disabled = false;
+      finalDownloadBtn.textContent = 'Download Excel';
+      // Same editable-name save dialog as the listed-variant download, with a
+      // single row for the consolidated report.
+      openSaveNamesModal('Download consolidated report', [{
+        baseName: 'final-consolidated-report',
+        build: buildFinalExcelBuffer,
+      }]);
     });
   });
 
