@@ -56,6 +56,8 @@
     flex-wrap: wrap; gap: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   }
   .top-bar-title { font-size: clamp(18px, 2.4vw, 24px); font-weight: 700; color: var(--ink); }
+  #global-undo-btn:hover:not(:disabled) { background: rgba(255,255,255,.8); }
+  #global-undo-btn:disabled { opacity: .45; cursor: not-allowed; }
 
   .top-tabs {
     display: flex; flex-wrap: wrap; gap: 4px;
@@ -183,6 +185,16 @@
   .excel-grid tbody tr.secondary-finding-row td.frozen-col { background: #EDE7F6; }
   .excel-grid tbody tr.secondary-finding-row:hover td:not(.grid-row-number),
   .excel-grid tbody tr.secondary-finding-row:hover td.frozen-col { background: #E1D5EF; }
+  /* Rows removed from the preview via the ×/restore toggle: parked at the
+     bottom (see renderVariantTable), greyed and struck through so it's clear
+     they're excluded from the export but can still be brought back. */
+  .excel-grid tbody tr.variant-row-removed td:not(.grid-row-number),
+  .excel-grid tbody tr.variant-row-removed td.frozen-col { background: #f2f2f2; }
+  .excel-grid tbody tr.variant-row-removed:hover td:not(.grid-row-number),
+  .excel-grid tbody tr.variant-row-removed:hover td.frozen-col { background: #ececec; }
+  .excel-grid tbody tr.variant-row-removed td input {
+    color: #999; text-decoration: line-through;
+  }
   .excel-grid tbody td input {
     width: 100%; min-width: 90px; font: 12px/1.4 var(--mono); padding: 5px 8px;
     border: none; border-radius: 0; background: transparent; color: var(--ink); text-align: center;
@@ -391,6 +403,10 @@
   <header class="top-bar">
     <div style="display: flex; align-items: center; gap: 16px;">
       <span class="top-bar-title">Anderson-Bioinfo Excel Consolidator</span>
+      <button type="button" id="global-undo-btn" title="Undo the last change (Ctrl+Z)" disabled
+        style="display:flex;align-items:center;gap:6px;font:600 13px var(--sans);padding:6px 12px;border:1px solid rgba(0,0,0,.3);border-radius:6px;background:rgba(255,255,255,.5);color:var(--ink);cursor:pointer;">
+        <span aria-hidden="true">↶</span> Undo
+      </button>
     </div>
     <div class="report-type-selector">
       <select id="report-type-select" class="report-type-select">
@@ -644,6 +660,7 @@
   // ---------- Report type switching ----------
   var currentReportType = 'cmc';
   var reportTypeSelect = document.getElementById('report-type-select');
+  var globalUndoBtn = document.getElementById('global-undo-btn');
   var toolsLabels = document.querySelectorAll('.tools-label');
 
   function switchReportType(reportType) {
@@ -1586,6 +1603,18 @@
 
   var INHERITANCE_PRIORITY = ['MF', 'AD', 'AR', 'XLR', 'XLD', 'XL'];
 
+  // sheet.columnCount can under-report the true width of an uploaded VarSeq
+  // export (it trusts the file's stored dimension range, which some
+  // export/edit tools don't recalculate after columns are appended). Take the
+  // max against the header/group rows' own cell counts and a 100-column
+  // floor so a required column added past a stale boundary is still found.
+  function effectiveVarSeqColCount(sheet, groupRow, headerRow) {
+    var fromSheet = (sheet && sheet.columnCount) || 0;
+    var fromGroup = groupRow ? (groupRow.cellCount || groupRow.actualCellCount || 0) : 0;
+    var fromHeader = headerRow ? (headerRow.cellCount || headerRow.actualCellCount || 0) : 0;
+    return Math.max(fromSheet, fromGroup, fromHeader, 100);
+  }
+
   function findVarSeqColumn(groupRow, headerRow, colCount, spec) {
     var lastGroup = '';
     for (var c = 1; c <= colCount; c++) {
@@ -2384,7 +2413,7 @@
 
     var groupRow = sheet.getRow(1);
     var headerRow = sheet.getRow(2);
-    var colCount = sheet.columnCount;
+    var colCount = effectiveVarSeqColCount(sheet, groupRow, headerRow);
 
     var cols = {};
     Object.keys(VARSEQ_COLUMN_SPECS).forEach(function (key) {
@@ -2555,7 +2584,7 @@
 
     var groupRow = sheet.getRow(1);
     var headerRow = sheet.getRow(2);
-    var colCount = sheet.columnCount;
+    var colCount = effectiveVarSeqColCount(sheet, groupRow, headerRow);
 
     var cols = {};
     var colsAll = {};
@@ -2791,6 +2820,9 @@
   // 2 lists variants only partner 1 carries, section 3 only those partner 2
   // carries — same column layout throughout, per the couple template.
   function buildCoupleVariantExcel(rows, title, title1, title2, workbook) {
+    // Rows soft-deleted via the preview's ×/restore toggle are parked, not
+    // spliced out, so they must be filtered here rather than at removal time.
+    rows = rows.filter(function (r) { return !r._removed; });
     workbook = workbook || new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
     COUPLE_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
@@ -3096,6 +3128,7 @@
   function buildVariantDataRow(row, rowIndex, columns, batchIdx, displayNo, highlight) {
     var tr = document.createElement('tr');
     if (highlight) tr.classList.add('secondary-finding-row');
+    if (row._removed) tr.classList.add('variant-row-removed');
     var inheritanceInput = null;
 
     function updateInheritanceColor() {
@@ -3112,19 +3145,31 @@
     rowNumTd.style.cssText = 'white-space:nowrap;';
 
     var delBtn = document.createElement('button');
-    delBtn.textContent = '×';
-    delBtn.title = 'Remove this variant from the list';
-    delBtn.style.cssText = 'font-size:11px;line-height:1;padding:0 3px;margin-right:4px;cursor:pointer;border:1px solid #bbb;background:#fff;border-radius:2px;color:#888;vertical-align:middle;';
+    delBtn.style.cssText = 'font-size:11px;line-height:1;padding:0 3px;margin-right:4px;cursor:pointer;border:1px solid #bbb;background:#fff;border-radius:2px;vertical-align:middle;';
+    if (row._removed) {
+      delBtn.textContent = '↺';
+      delBtn.title = 'Restore this variant to the list';
+      delBtn.style.color = '#1f4e79';
+      delBtn.style.borderColor = '#1f4e79';
+    } else {
+      delBtn.textContent = '×';
+      delBtn.title = 'Remove this variant from the list (parked at the bottom, greyed out, until restored)';
+      delBtn.style.color = '#888';
+    }
     delBtn.addEventListener('click', (function (capturedIdx) {
       return function () {
-        variantRows.splice(capturedIdx, 1);
-        variantRows.forEach(function (r, i) { r.sNo = i + 1; });
+        // Soft delete: the row is only flagged, never spliced out, so it can
+        // be restored later and stays out of the Excel export in the
+        // meantime (see buildVariantExcel / buildCoupleVariantExcel).
+        var r = variantRows[capturedIdx];
+        r._removed = !r._removed;
         var item = variantBatch[variantPreviewIdx];
         if (item) {
+          var activeCount = variantRows.filter(function (rr) { return !rr._removed; }).length;
           variantPreviewLabel.textContent =
             'Previewing file ' + (variantPreviewIdx + 1) + ' of ' + variantBatch.length +
             ': ' + item.fileName +
-            ' (' + variantRows.length + ' variant' + (variantRows.length !== 1 ? 's' : '') + ')';
+            ' (' + activeCount + ' variant' + (activeCount !== 1 ? 's' : '') + ')';
         }
         renderVariantTable(variantPreviewIdx);
       };
@@ -3145,6 +3190,9 @@
       // caller-supplied per-section position instead, without touching the
       // underlying row order or row.sNo itself.
       input.value = (c.key === 'sNo' && displayNo != null) ? displayNo : (row[c.key] != null ? row[c.key] : '');
+      // Removed rows are parked read-only until restored - they shouldn't be
+      // editable while excluded from the export.
+      if (row._removed) input.disabled = true;
       // Full text on hover, plus a wrapped full-text popover when a clipped
       // cell is focused/clicked - so a long value that's too wide for its
       // column can still be read in full while it's edited beneath.
@@ -3274,9 +3322,9 @@
 
     loadWorkbookFromBuffer(item.rawBuffer).then(function (workbook) {
       var sheet = workbook.worksheets[0];
-      var colCount = sheet.columnCount;
       var groupRow = sheet.getRow(1);
       var headerRow = sheet.getRow(2);
+      var colCount = effectiveVarSeqColCount(sheet, groupRow, headerRow);
       var headers = [];
       for (var c = 1; c <= colCount; c++) {
         headers.push({
@@ -3391,62 +3439,81 @@
       td.textContent = 'No data loaded yet. Upload a VarSeq Excel export to preview it here.';
       tr.appendChild(td);
       variantTableBody.appendChild(tr);
-    } else if (currentReportType === 'couple') {
-      // Secondary findings lead the preview in their own highlighted section;
-      // the remaining rows feed the usual combined / partner sections.
-      var secondaryEntries = [];
-      var maleGenes = {}, femaleGenes = {};
-      variantRows.forEach(function (row) {
-        if (isSecondaryFindingRow(row)) return; // excluded from the partner split
-        if (row._hasMale) maleGenes[row.gene] = true;
-        if (row._hasFemale) femaleGenes[row.gene] = true;
-      });
-      var sharedGenes = {};
-      Object.keys(maleGenes).forEach(function (g) { if (femaleGenes[g]) sharedGenes[g] = true; });
-
-      var combinedEntries = [], sample1Entries = [], sample2Entries = [];
-      variantRows.forEach(function (row, rowIndex) {
-        if (isSecondaryFindingRow(row)) { secondaryEntries.push({ row: row, idx: rowIndex }); return; }
-        if (sharedGenes[row.gene]) combinedEntries.push({ row: row, idx: rowIndex });
-        else if (row._hasMale) sample1Entries.push({ row: row, idx: rowIndex });
-        else if (row._hasFemale) sample2Entries.push({ row: row, idx: rowIndex });
-      });
-      var previewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
-      if (secondaryEntries.length) {
-        variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
-        secondaryEntries.forEach(function (entry, i) {
-          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1, true));
-        });
-      }
-      variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title) || 'Both partners', columns.length));
-      combinedEntries.forEach(function (entry, i) {
-        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
-      });
-      variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title1) || 'Sample 1', columns.length));
-      sample1Entries.forEach(function (entry, i) {
-        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
-      });
-      variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title2) || 'Sample 2', columns.length));
-      sample2Entries.forEach(function (entry, i) {
-        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
-      });
     } else {
-      // Secondary findings are pulled out into a highlighted section at the top;
-      // the rest follow in the normal list. Both are numbered from 1.
-      var secondaryEntries = [], mainEntries = [];
+      // Rows soft-deleted via the ×/restore toggle (row._removed) are pulled
+      // out of the normal sections below and parked in their own greyed
+      // section at the bottom, so they never affect the active numbering or
+      // grouping and stay out of the Excel export until restored.
+      var removedEntries = [];
+      var activeRowEntries = [];
       variantRows.forEach(function (row, rowIndex) {
-        (isSecondaryFindingRow(row) ? secondaryEntries : mainEntries).push({ row: row, idx: rowIndex });
+        (row._removed ? removedEntries : activeRowEntries).push({ row: row, idx: rowIndex });
       });
-      if (secondaryEntries.length) {
-        variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
-        secondaryEntries.forEach(function (entry, i) {
-          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1, true));
+
+      if (currentReportType === 'couple') {
+        // Secondary findings lead the preview in their own highlighted section;
+        // the remaining rows feed the usual combined / partner sections.
+        var secondaryEntries = [];
+        var maleGenes = {}, femaleGenes = {};
+        activeRowEntries.forEach(function (entry) {
+          if (isSecondaryFindingRow(entry.row)) return; // excluded from the partner split
+          if (entry.row._hasMale) maleGenes[entry.row.gene] = true;
+          if (entry.row._hasFemale) femaleGenes[entry.row.gene] = true;
         });
-        variantTableBody.appendChild(buildGridSectionHeaderRow('Listed Variants', columns.length));
+        var sharedGenes = {};
+        Object.keys(maleGenes).forEach(function (g) { if (femaleGenes[g]) sharedGenes[g] = true; });
+
+        var combinedEntries = [], sample1Entries = [], sample2Entries = [];
+        activeRowEntries.forEach(function (entry) {
+          if (isSecondaryFindingRow(entry.row)) { secondaryEntries.push(entry); return; }
+          if (sharedGenes[entry.row.gene]) combinedEntries.push(entry);
+          else if (entry.row._hasMale) sample1Entries.push(entry);
+          else if (entry.row._hasFemale) sample2Entries.push(entry);
+        });
+        var previewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+        if (secondaryEntries.length) {
+          variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
+          secondaryEntries.forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1, true));
+          });
+        }
+        variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title) || 'Both partners', columns.length));
+        combinedEntries.forEach(function (entry, i) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+        });
+        variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title1) || 'Sample 1', columns.length));
+        sample1Entries.forEach(function (entry, i) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+        });
+        variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title2) || 'Sample 2', columns.length));
+        sample2Entries.forEach(function (entry, i) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+        });
+      } else {
+        // Secondary findings are pulled out into a highlighted section at the top;
+        // the rest follow in the normal list. Both are numbered from 1.
+        var secondaryEntries = [], mainEntries = [];
+        activeRowEntries.forEach(function (entry) {
+          (isSecondaryFindingRow(entry.row) ? secondaryEntries : mainEntries).push(entry);
+        });
+        if (secondaryEntries.length) {
+          variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
+          secondaryEntries.forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1, true));
+          });
+          variantTableBody.appendChild(buildGridSectionHeaderRow('Listed Variants', columns.length));
+        }
+        mainEntries.forEach(function (entry, i) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+        });
       }
-      mainEntries.forEach(function (entry, i) {
-        variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
-      });
+
+      if (removedEntries.length) {
+        variantTableBody.appendChild(buildGridSectionHeaderRow('Removed (excluded from export)', columns.length));
+        removedEntries.forEach(function (entry) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx));
+        });
+      }
     }
     applyFrozenColumns(variantTableHead, variantTableBody, columns, variantFrozenCols);
     }
@@ -3456,8 +3523,11 @@
     variantDownloadAllBtn.disabled = currentTypeCount === 0;
     if (variantDownloadAllNoRawBtn) variantDownloadAllNoRawBtn.disabled = currentTypeCount === 0;
     if (variantSelectedCount) {
+      var activeRecordCount = variantRows.filter(function (r) { return !r._removed; }).length;
+      var removedRecordCount = variantRows.length - activeRecordCount;
       variantSelectedCount.textContent =
-        variantRows.length + ' record' + (variantRows.length !== 1 ? 's' : '');
+        activeRecordCount + ' record' + (activeRecordCount !== 1 ? 's' : '') +
+        (removedRecordCount ? ' (' + removedRecordCount + ' removed)' : '');
     }
   }
 
@@ -3623,6 +3693,9 @@
   // the top (mirroring how the couple export pulls out shared/common variants),
   // so those clinically-reportable incidental findings can't be missed.
   function buildVariantExcel(rows, title, columns, workbook, reportType) {
+    // Rows soft-deleted via the preview's ×/restore toggle are parked, not
+    // spliced out, so they must be filtered here rather than at removal time.
+    rows = rows.filter(function (r) { return !r._removed; });
     columns = columns || VARIANT_COLUMNS;
     workbook = workbook || new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Listed Variants');
@@ -3692,9 +3765,10 @@
       infoDiv.appendChild(nameSpan);
       var countSpan = document.createElement('span');
       countSpan.className = 'batch-item-count' + (item.error ? ' error-text' : '');
+      var activeItemRowCount = item.rows ? item.rows.filter(function (r) { return !r._removed; }).length : 0;
       countSpan.textContent = item.error
         ? item.error
-        : item.rows.length + ' variant' + (item.rows.length !== 1 ? 's' : '') + ' after exclusions';
+        : activeItemRowCount + ' variant' + (activeItemRowCount !== 1 ? 's' : '') + ' after exclusions';
       infoDiv.appendChild(countSpan);
       div.appendChild(infoDiv);
 
@@ -3922,8 +3996,9 @@
           // VarSeq exports use a 2-row header: row 1 is the annotation-source
           // group label, row 2 the actual column name - style them
           // differently so that distinction is visible, not one flat bar.
-          highlightGroupHeaderRow(sheet.getRow(1), sheet.columnCount);
-          highlightHeaderRow(sheet.getRow(2), sheet.columnCount);
+          var exportColCount = effectiveVarSeqColCount(sheet, sheet.getRow(1), sheet.getRow(2));
+          highlightGroupHeaderRow(sheet.getRow(1), exportColCount);
+          highlightHeaderRow(sheet.getRow(2), exportColCount);
           sheet.getRow(1).height = 20;
           sheet.getRow(2).height = 22;
         }
@@ -3975,7 +4050,7 @@
           var sheet = workbook.worksheets[0];
           var groupRow = sheet.getRow(1);
           var headerRow = sheet.getRow(2);
-          var readDepthCols = findVarSeqColumns(groupRow, headerRow, sheet.columnCount, VARSEQ_COLUMN_SPECS.readDepths);
+          var readDepthCols = findVarSeqColumns(groupRow, headerRow, effectiveVarSeqColCount(sheet, groupRow, headerRow), VARSEQ_COLUMN_SPECS.readDepths);
           var isCoupleFile = currentReportType === 'couple' && readDepthCols.length >= 2;
 
           if (isCoupleFile) {
@@ -4384,7 +4459,7 @@
     var colMap = {};
     for (var scanR = 1; scanR <= 3; scanR++) {
       var scanRow = sheet.getRow(scanR);
-      for (var ci = 1; ci <= 60; ci++) {
+      for (var ci = 1; ci <= 100; ci++) {
         var cv = scanRow.getCell(ci).value;
         var h = (cv !== null && cv !== undefined && typeof cv !== 'object')
           ? String(cv).trim().toUpperCase() : '';
@@ -4403,7 +4478,7 @@
 
     // Also scan for "HGVS c.*" prefix (VarSeq variant column).
     var hgvsCCol = 0;
-    for (var ci2 = 1; ci2 <= 60; ci2++) {
+    for (var ci2 = 1; ci2 <= 100; ci2++) {
       for (var r2 = 1; r2 <= 3; r2++) {
         var h2 = String(sheet.getRow(r2).getCell(ci2).value || '').trim().toUpperCase();
         if (h2.indexOf('HGVS C') === 0) { hgvsCCol = ci2; break; }
@@ -4423,7 +4498,7 @@
     var isVarSeqFormat = headerRowIndex === 2;
     var vsGroupRow  = isVarSeqFormat ? sheet.getRow(1) : null;
     var vsHeaderRow = isVarSeqFormat ? sheet.getRow(headerRowIndex) : null;
-    var vsColCount  = sheet.columnCount;
+    var vsColCount  = effectiveVarSeqColCount(sheet, vsGroupRow, vsHeaderRow);
 
     function findVSCol(spec) {
       if (!isVarSeqFormat) return null;
@@ -5199,6 +5274,90 @@
     }
   }
 
+  // ── Undo history ─────────────────────────────────────────────────────
+  // Deliberately NOT hooked to the autosave MutationObserver above: that
+  // observer also fires for background async work unrelated to anything the
+  // user did (Franklin/ClinVar lookups re-rendering cells on a timer), which
+  // kept resetting a shared debounce indefinitely and made a just-completed
+  // action's checkpoint arrive arbitrarily late - so a quick Undo right
+  // after an edit could pop a stale, older snapshot instead. Undo gets its
+  // own debounce, triggered only by real user gestures (click/input/change)
+  // that those background updates never dispatch, so "the user just did
+  // something" stays a reliable signal regardless of what else is loading.
+  var undoStack = [];
+  var MAX_UNDO_STEPS = 50;
+  var lastCheckpointJSON = null;
+  var undoRestoring = false; // guards against an undo's own re-render being recorded as a new change
+  var undoCheckpointTimer = null;
+  var UNDO_DEBOUNCE_MS = 800;
+
+  function updateUndoButtonState() {
+    if (globalUndoBtn) globalUndoBtn.disabled = undoStack.length === 0;
+  }
+
+  function recordUndoCheckpoint(newJson) {
+    if (undoRestoring) return;
+    if (lastCheckpointJSON !== null && newJson !== lastCheckpointJSON) {
+      undoStack.push(lastCheckpointJSON);
+      if (undoStack.length > MAX_UNDO_STEPS) undoStack.shift();
+    }
+    lastCheckpointJSON = newJson;
+    updateUndoButtonState();
+  }
+
+  function scheduleUndoCheckpoint() {
+    if (undoRestoring) return;
+    if (undoCheckpointTimer) clearTimeout(undoCheckpointTimer);
+    undoCheckpointTimer = setTimeout(function () {
+      undoCheckpointTimer = null;
+      var json;
+      try {
+        json = JSON.stringify(collectAutosaveState(true));
+      } catch (e) {
+        console.warn('Undo checkpoint failed:', e);
+        return;
+      }
+      recordUndoCheckpoint(json);
+    }, UNDO_DEBOUNCE_MS);
+  }
+
+  function initUndoWatchers() {
+    document.addEventListener('input', function (e) {
+      var tag = e.target && e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') scheduleUndoCheckpoint();
+    });
+    document.addEventListener('change', function (e) {
+      var tag = e.target && e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') scheduleUndoCheckpoint();
+    });
+    // Catches button-driven mutations (row remove/restore, clear-all, etc.)
+    // that don't fire input/change. Harmless if a click didn't actually
+    // change anything - recordUndoCheckpoint no-ops when the JSON matches.
+    document.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('button')) scheduleUndoCheckpoint();
+    });
+  }
+
+  function performUndo() {
+    if (!undoStack.length) return;
+    var prevJson = undoStack.pop();
+    var state;
+    try {
+      state = JSON.parse(prevJson);
+    } catch (e) {
+      updateUndoButtonState();
+      return;
+    }
+    undoRestoring = true;
+    try {
+      applyPersistedState(state, false);
+      lastCheckpointJSON = prevJson;
+    } finally {
+      undoRestoring = false;
+    }
+    updateUndoButtonState();
+  }
+
   function scheduleAutosave() {
     if (autosaveTimer) clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(function () {
@@ -5237,22 +5396,12 @@
     setTimeout(function () { if (bar.parentNode) bar.remove(); }, 10000);
   }
 
-  // Restores everything captured by collectAutosaveState and re-renders
-  // every tab. Returns true if a saved session was actually applied.
-  function restoreAutosavedState() {
-    var raw;
-    try { raw = localStorage.getItem(AUTOSAVE_KEY); } catch (e) { return false; }
-    if (!raw) return false;
-    var state;
-    try { state = JSON.parse(raw); } catch (e) { clearAutosavedState(); return false; }
-    if (!state || state.v !== 1) return false;
-
-    var hasAnyData = (state.sampleRows && state.sampleRows.length) ||
-      (state.variantBatch && state.variantBatch.length) ||
-      (state.finalSummaryPatients && state.finalSummaryPatients.length) ||
-      (state.finalConsolidateRows && state.finalConsolidateRows.length);
-    if (!hasAnyData) return false;
-
+  // Applies a previously-captured state object (see collectAutosaveState) and
+  // re-renders every tab. Shared by the page-load localStorage restore and by
+  // the Undo history (below) so both take the exact same restore path.
+  // `showRestoredNotice` is only true for the page-load path - Undo shouldn't
+  // pop up the "restored from before refresh" banner.
+  function applyPersistedState(state, showRestoredNotice) {
     try {
       sampleRows = state.sampleRows || [];
       finalSummaryPatients = state.finalSummaryPatients || [];
@@ -5309,12 +5458,31 @@
 
       populateSampleSelect();
       renderVariantMappingList();
-      showAutosaveRestoredNotice();
+      if (showRestoredNotice) showAutosaveRestoredNotice();
       return true;
     } catch (e) {
-      console.warn('Failed to restore autosaved state:', e);
+      console.warn('Failed to apply persisted state:', e);
       return false;
     }
+  }
+
+  // Restores everything captured by collectAutosaveState on page load.
+  // Returns true if a saved session was actually applied.
+  function restoreAutosavedState() {
+    var raw;
+    try { raw = localStorage.getItem(AUTOSAVE_KEY); } catch (e) { return false; }
+    if (!raw) return false;
+    var state;
+    try { state = JSON.parse(raw); } catch (e) { clearAutosavedState(); return false; }
+    if (!state || state.v !== 1) return false;
+
+    var hasAnyData = (state.sampleRows && state.sampleRows.length) ||
+      (state.variantBatch && state.variantBatch.length) ||
+      (state.finalSummaryPatients && state.finalSummaryPatients.length) ||
+      (state.finalConsolidateRows && state.finalConsolidateRows.length);
+    if (!hasAnyData) return false;
+
+    return applyPersistedState(state, true);
   }
 
   function initAutosaveWatchers() {
@@ -5340,6 +5508,28 @@
     populateSampleSelect();
   }
   initAutosaveWatchers();
+  initUndoWatchers();
+
+  // Baseline checkpoint so the very first user edit has something to undo
+  // back to, rather than being silently absorbed as "no prior state". Must
+  // use the same includeBuffers=true shape persistAutosaveState normally
+  // records, or the first real diff would spuriously differ on rawBuffer
+  // presence alone and an undo could drop already-loaded files' raw bytes.
+  try {
+    lastCheckpointJSON = JSON.stringify(collectAutosaveState(true));
+  } catch (e) {
+    try { lastCheckpointJSON = JSON.stringify(collectAutosaveState(false)); } catch (e2) { /* ignore */ }
+  }
+  updateUndoButtonState();
+
+  if (globalUndoBtn) globalUndoBtn.addEventListener('click', performUndo);
+  document.addEventListener('keydown', function (e) {
+    var key = e.key ? e.key.toLowerCase() : '';
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && key === 'z') {
+      e.preventDefault();
+      performUndo();
+    }
+  });
 })();
 </script>
 </body>
