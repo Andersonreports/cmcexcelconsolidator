@@ -178,6 +178,26 @@
   }
   .excel-grid tbody td:not(.grid-row-number) { background: #fff; }
   .excel-grid tbody tr:hover td:not(.grid-row-number) { background: #faf6ec; }
+  /* Linked cells (OMIM / ClinVar / Literature) shown as clickable hyperlinks,
+     mirroring the Excel export. Sized to match the editable input cells. */
+  .excel-grid td a.grid-cell-link {
+    display: block; padding: 7px 9px; font-size: 13px; color: #0563C1;
+    text-decoration: underline; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; cursor: pointer;
+  }
+  .excel-grid td a.grid-cell-link:hover { color: #044a9e; }
+  /* Direct-hit primary variant: green fill on GENE NAME → DEPTH(X), matching
+     the Excel export. Inline the input so the green shows through. */
+  .excel-grid tbody td.direct-hit-cell,
+  .excel-grid tbody tr:hover td.direct-hit-cell { background: #00B050; }
+  .excel-grid tbody td.direct-hit-cell input,
+  .excel-grid tbody td.direct-hit-cell input:hover,
+  .excel-grid tbody td.direct-hit-cell input:focus { background: transparent; }
+  /* ACMG classification fill (VUS blue / P-LP red) set inline per-cell; keep the
+     input transparent so the fill shows through, including on hover/focus. */
+  .excel-grid tbody td.acmg-fill input,
+  .excel-grid tbody td.acmg-fill input:hover,
+  .excel-grid tbody td.acmg-fill input:focus { background: transparent; }
   /* Whole-row tint for ACMG Secondary Finding variants - a color not used
      anywhere else on the page (blue/red/pink/teal/orange are all already
      spoken for), pitched between "visible" and "still easy to read text on". */
@@ -1728,9 +1748,16 @@
 
   function formatVafPercent(value) {
     if (value == null || value === '') return '';
-    var num = parseFloat(value);
+    var str = String(value).trim();
+    var hasPercent = str.indexOf('%') !== -1;
+    var num = parseFloat(str.replace('%', ''));
     if (isNaN(num)) return value;
-    return (num * 100).toFixed(2) + '%';
+    // Values written with a "%" sign — or any magnitude > 1 — are already on the
+    // 0–100 percentage scale (e.g. the Listed Variant Excel stores "100.00%" /
+    // "31.79%"). Only bare fractions in 0–1 (Excel's numeric form of "100%" →
+    // 1.0) get scaled up, so we never double-multiply.
+    var pct = (hasPercent || num > 1) ? num : num * 100;
+    return pct.toFixed(2) + '%';
   }
 
   function stripHgvsPrefix(value) {
@@ -1983,6 +2010,16 @@
   // page on the source site instead of having to search it manually.
   function omimSearchUrl(gene) {
     return 'https://www.omim.org/search/?index=entry&search=' + encodeURIComponent(gene);
+  }
+
+  // Link to an OMIM entry by MIM number. Routed through NCBI's OMIM (which
+  // returns 200) rather than omim.org directly, because omim.org sits behind
+  // Cloudflare and returns 403 to Excel's hyperlink pre-check — so a direct
+  // omim.org link fails to open from the generated Excel ("Cannot download the
+  // information you requested"). NCBI shows the same entry and links out to the
+  // live omim.org page.
+  function omimEntryLink(mim) {
+    return 'https://www.ncbi.nlm.nih.gov/omim/?term=' + encodeURIComponent(mim);
   }
 
   function clingenSearchUrl(gene) {
@@ -2487,7 +2524,16 @@
       var clinvarValue = get('clinvarClass') || '';
       var omimIdValue = get('omimIdField') || '';
       var omimTitleValue = get('omimTitle') || '';
+      var omimPhenotypesValue = get('omimPhenotypes');
       var diseaseLabelValue = get('clingenDiseaseLabel') || '';
+
+      // OMIM TITLE links to the specific entry page (by MIM number) in CMC so
+      // clicking navigates to that phenotype's OMIM page, not a gene search.
+      var omimMim = (gene ? omimGeneMap.get(gene.toUpperCase()) : '') ||
+                    extractMimNumber(omimPhenotypesValue) || extractMimNumber(omimIdValue);
+      var omimEntryUrl = (currentReportType === 'cmc' && omimMim)
+        ? omimEntryLink(omimMim)
+        : (gene ? omimSearchUrl(gene) : null);
 
       rows.push({
         sNo: '',
@@ -2558,7 +2604,7 @@
           // a source-file hyperlink on those cells, if any, doesn't leak
           // through the base spread above).
           omimIdField: null,
-          omimTitle: (omimTitleValue && gene) ? omimSearchUrl(gene) : null,
+          omimTitle: (omimTitleValue && gene) ? omimEntryUrl : null,
           omimPhenotypes: null,
           omimDescription: null,
           diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
@@ -4215,29 +4261,33 @@
     });
   }
 
-  // ---- Single/couple: per-file download via a folder picker + editable names ----
+  // ---- Per-file download via a folder picker + editable names ----
+  // Shared by the listed-variant batch (one row per report) and the Sample
+  // Final Consolidate tab (a single row). Works off a generic list of
+  // entries: { baseName (no ext), hoverTitle?, build: () => Promise<buffer> }.
   var downloadModal = document.getElementById('download-modal');
   var dlModalTitle = document.getElementById('dl-modal-title');
   var dlModalList = document.getElementById('dl-modal-list');
   var dlModalSaveBtn = document.getElementById('dl-modal-save');
   var dlModalCancelBtn = document.getElementById('dl-modal-cancel');
-  var dlModalItems = [];        // { item, includeRawData } context for the open dialog
-  var dlModalIncludeRaw = true;
+  var dlModalEntries = [];      // [{ baseName, hoverTitle, build }] for the open dialog
+  var dlModalOnError = showVariantError;
 
-  function openDownloadModal(includeRawData) {
-    var validItems = currentValidBatchItems();
-    if (!validItems.length) return;
-    dlModalItems = validItems;
-    dlModalIncludeRaw = includeRawData;
-    dlModalTitle.textContent = 'Download ' + (includeRawData ? 'with VarSeq data' : 'without VarSeq data');
+  // Generic opener: `title` heads the dialog, `entries` becomes one editable
+  // name row each, `onError` (optional) reports save failures.
+  function openSaveNamesModal(title, entries, onError) {
+    if (!entries || !entries.length) return;
+    dlModalEntries = entries;
+    dlModalOnError = onError || showVariantError;
+    dlModalTitle.textContent = title;
     dlModalList.innerHTML = '';
-    validItems.forEach(function (item) {
+    entries.forEach(function (entry) {
       var row = document.createElement('div');
       row.className = 'dl-modal-row';
       var input = document.createElement('input');
       input.type = 'text';
-      input.value = autoExportBaseName(item); // auto-fetched from the input file name, editable
-      input.title = item.fileName; // hover to see which uploaded file this came from
+      input.value = entry.baseName; // auto-filled, editable
+      if (entry.hoverTitle) input.title = entry.hoverTitle;
       var ext = document.createElement('span');
       ext.className = 'dl-ext';
       ext.textContent = '.xlsx';
@@ -4247,9 +4297,23 @@
     downloadModal.hidden = false;
   }
 
+  // Listed-variant batch: one editable row per current-type report.
+  function openDownloadModal(includeRawData) {
+    var validItems = currentValidBatchItems();
+    if (!validItems.length) return;
+    var entries = validItems.map(function (item) {
+      return {
+        baseName: autoExportBaseName(item), // auto-fetched from the input file name
+        hoverTitle: item.fileName,          // hover to see which uploaded file this came from
+        build: function () { return buildItemBuffer(item, includeRawData); },
+      };
+    });
+    openSaveNamesModal('Download ' + (includeRawData ? 'with VarSeq data' : 'without VarSeq data'), entries);
+  }
+
   function closeDownloadModal() {
     downloadModal.hidden = true;
-    dlModalItems = [];
+    dlModalEntries = [];
   }
 
   dlModalCancelBtn.addEventListener('click', closeDownloadModal);
@@ -4260,9 +4324,9 @@
   // Normalizes one modal row's edited name to a safe "<base>.xlsx".
   function modalDownloadNames() {
     var nameInputs = [].slice.call(dlModalList.querySelectorAll('input'));
-    return dlModalItems.map(function (item, i) {
-      var raw = ((nameInputs[i] && nameInputs[i].value) || autoExportBaseName(item)).trim();
-      return (raw || autoExportBaseName(item)).replace(/\.xlsx$/i, '') + '.xlsx';
+    return dlModalEntries.map(function (entry, i) {
+      var raw = ((nameInputs[i] && nameInputs[i].value) || entry.baseName).trim();
+      return (raw || entry.baseName).replace(/\.xlsx$/i, '') + '.xlsx';
     });
   }
 
@@ -4272,10 +4336,10 @@
   // inside this flow itself. Falls back to individual browser downloads when
   // the File System Access API isn't available at all.
   function performModalDownload() {
-    if (!dlModalItems.length) { closeDownloadModal(); return; }
+    if (!dlModalEntries.length) { closeDownloadModal(); return; }
     var names = modalDownloadNames();
-    var items = dlModalItems.slice();
-    var includeRaw = dlModalIncludeRaw;
+    var entries = dlModalEntries.slice();
+    var onError = dlModalOnError;
 
     var originalText = dlModalSaveBtn.textContent;
     dlModalSaveBtn.disabled = true;
@@ -4292,9 +4356,9 @@
       // Build + write each file sequentially so we don't hold many workbooks
       // in memory at once.
       var chain = Promise.resolve();
-      items.forEach(function (item, i) {
+      entries.forEach(function (entry, i) {
         chain = chain.then(function () {
-          return buildItemBuffer(item, includeRaw).then(function (buffer) {
+          return Promise.resolve(entry.build()).then(function (buffer) {
             if (dirHandle) return writeBufferToDir(dirHandle, names[i], buffer);
             downloadBlob(buffer, names[i]); // no folder available - plain download
           });
@@ -4302,42 +4366,31 @@
       });
       return chain.then(function () { resetButtons(); closeDownloadModal(); });
     }).catch(function (err) {
-      showVariantError((err && err.message) || 'Failed to save files.');
+      (onError || showVariantError)((err && err.message) || 'Failed to save files.');
       resetButtons();
     });
   }
 
   dlModalSaveBtn.addEventListener('click', performModalDownload);
 
-  // The two bottom download buttons change label + behavior by report type:
-  // CMC downloads the whole batch as a ZIP; single/couple open the per-file
-  // folder-picker dialog. Called on init and whenever the report type switches.
+  // The two bottom download buttons open the per-file editable-name dialog
+  // for every report type (CMC, single, couple). Called on init and whenever
+  // the report type switches.
   function updateDownloadButtons() {
     if (!variantDownloadAllBtn || !variantDownloadAllNoRawBtn) return; // not wired yet at init
-    if (currentReportType === 'cmc') {
-      variantDownloadAllBtn.textContent = 'Download All (ZIP)';
-      variantDownloadAllNoRawBtn.textContent = 'Download All (No VarSeq Data)';
-    } else {
-      variantDownloadAllBtn.textContent = 'Download with VarSeq';
-      variantDownloadAllNoRawBtn.textContent = 'Download without VarSeq';
-    }
+    // Every report type (CMC included) now opens the per-file editable-name
+    // dialog, so the labels are uniform.
+    variantDownloadAllBtn.textContent = 'Download with VarSeq';
+    variantDownloadAllNoRawBtn.textContent = 'Download without VarSeq';
   }
 
   variantDownloadAllBtn.addEventListener('click', function () {
-    if (currentReportType === 'cmc') {
-      downloadAllZip(true, variantDownloadAllBtn, 'listed-variants-batch.zip');
-    } else {
-      openDownloadModal(true);
-    }
+    openDownloadModal(true);
   });
 
   if (variantDownloadAllNoRawBtn) {
     variantDownloadAllNoRawBtn.addEventListener('click', function () {
-      if (currentReportType === 'cmc') {
-        downloadAllZip(false, variantDownloadAllNoRawBtn, 'listed-variants-batch-no-varseq-data.zip');
-      } else {
-        openDownloadModal(false);
-      }
+      openDownloadModal(false);
     });
   }
 
@@ -4376,6 +4429,24 @@
     { key: 'cnvFinding', header: 'CNV Finding\nNote: Alternative test is strongly recommended to rule out the deletion/duplication.' },
     { key: 'remark', header: 'Remark' },
   ];
+
+  // Columns highlighted green for a "direct hit" primary variant: GENE NAME
+  // through DEPTH(X), inclusive.
+  var DIRECT_HIT_GREEN_KEYS = ['gene', 'variant', 'proteinPos', 'zygosity',
+    'inheritance', 'vaf', 'alleleDepths', 'readDepths'];
+
+  // ACMG Classification cell fill (CMC template only), keyed off the leading
+  // classification token: VUS → blue, P / LP → red, everything else → none.
+  // Values look like "LP: PM5, …", "P- PS3, …", "VUS: …".
+  function acmgFillColor(value) {
+    var s = String(value || '').trim().toUpperCase();
+    if (!s) return null;
+    var m = s.match(/^[A-Z]+/);
+    var token = m ? m[0] : '';
+    if (token === 'VUS') return 'FF00B0F0';          // blue
+    if (token === 'P' || token === 'LP') return 'FFFF0000'; // red
+    return null;
+  }
 
   function normalizeGeneVariantKey(gene, variant) {
     var g = String(gene || '').trim().toUpperCase();
@@ -4545,19 +4616,27 @@
       var gene    = String(row.getCell(geneCol).value || '').trim().split(';')[0].trim();
       var variant = String(row.getCell(variantCol).value || '').trim();
       if (!gene || !variant) return;
+      var clinvarRaw = row.getCell(clinvarCol).value;
+      var omimRaw    = omimTitleCol ? row.getCell(omimTitleCol).value : null;
       entries.push({
         key:          normalizeGeneVariantKey(gene, variant),
-        proteinPos:   row.getCell(proteinCol).value,
-        clinvar:      row.getCell(clinvarCol).value,
-        clinvarUrl:   '',
-        zygosity:     row.getCell(zygosityCol).value,
-        inheritance:  row.getCell(inheritCol).value,
+        // Normalize every text cell through cellText(): OMIM/ClinVar (and
+        // sometimes others) come in as rich-text/hyperlink objects, which
+        // otherwise render as "[object Object]" in the preview and export.
+        proteinPos:   cellText(row.getCell(proteinCol).value),
+        clinvar:      cellText(clinvarRaw),
+        // Preserve the source cell's own hyperlink target when present.
+        clinvarUrl:   cellHyperlink(clinvarRaw) || '',
+        zygosity:     cellText(row.getCell(zygosityCol).value),
+        inheritance:  cellText(row.getCell(inheritCol).value),
         // Excel auto-converts "100.00%" strings to the numeric 1.0 —
         // reapply formatVafPercent so we always get a "XX.XX%" string.
         vaf:          formatVafPercent(row.getCell(vafCol).value),
-        alleleDepths: row.getCell(allelicCol).value,
-        readDepths:   row.getCell(readDepthCol).value,
-        omimTitle:    omimTitleCol ? row.getCell(omimTitleCol).value : null,
+        alleleDepths: cellText(row.getCell(allelicCol).value),
+        readDepths:   cellText(row.getCell(readDepthCol).value),
+        omimTitle:    omimTitleCol ? cellText(omimRaw) : null,
+        // Preserve the OMIM cell's own hyperlink target when present.
+        omimUrl:      cellHyperlink(omimRaw) || '',
         // Genomic coords for ClinVar VCF tabix lookup
         chr: chrCol ? String(row.getCell(chrCol).value || '').trim() : '',
         pos: posCol ? String(row.getCell(posCol).value || '').trim() : '',
@@ -4641,6 +4720,7 @@
           alleleDepths: details ? details.alleleDepths : '',
           readDepths: details ? details.readDepths : '',
           omimTitle: details ? details.omimTitle : '',
+          omimUrl: details ? (details.omimUrl || '') : '',
           omimNumber: omimGeneMap.get(gene.toUpperCase()) ||
                       (details ? extractMimNumber(details.omimPhenotypes) : ''),
           clinvar: details ? (details.clinvar || '') : '',
@@ -4685,12 +4765,18 @@
           alleleDepths: vr.alleleDepths,
           readDepths: vr.readDepths,
           omimTitle: vr.omimTitle,
+          omimUrl: vr.omimUrl || '',
+          omimNumber: vr.omimNumber || '',
           clinvar: vr.clinvar,
           clinvarUrl: vr.clinvarUrl || '',
           acmgClassification: vr.acmgClassification,
           literatureEvidence: vr.literatureEvidence,
           remark: vr.remark,
           unmatched: vr.unmatched,
+          // The primary SNV row is a "direct hit" when the SNV Result carries a
+          // real gene (not "No Pathogenic Variant"); such rows get GENE NAME →
+          // DEPTH(X) highlighted green. Additional variants are never green.
+          directHit: i === 0 && !!vr.gene && vr.gene !== 'No Pathogenic Variant',
           chr: vr.chr || '',
           pos: vr.pos || '',
           ref: vr.ref || '',
@@ -4704,6 +4790,34 @@
     showFinalWarning(unmatchedPicks.length
       ? unmatchedPicks.length + ' picked variant(s) not found in the uploaded Listed Variant Excel files (flagged red below): ' + unmatchedPicks.join(', ')
       : '');
+  }
+
+  // Returns a clickable URL for a linked column (OMIM / ClinVar / Literature
+  // evidence) so the preview grid can render those cells as hyperlinks, the
+  // same links the Excel export produces. Returns null for every other column
+  // or when there's no text/URL to link.
+  function finalCellLinkUrl(row, key) {
+    if (key === 'literatureEvidence') {
+      var lv = pubmedHyperlinkValue(row.literatureEvidence);
+      return (lv && typeof lv === 'object') ? lv.hyperlink : null;
+    }
+    if (key === 'omimTitle') {
+      var omimText = String(cellText(row.omimTitle) || '').trim();
+      if (!omimText) return null;
+      // Prefer the specific OMIM entry page (by MIM number). Only if we have no
+      // MIM number do we fall back to the source cell's own hyperlink or a
+      // search — the source link often points at a search, not the entry.
+      if (row.omimNumber) return omimEntryLink(row.omimNumber);
+      return row.omimUrl || cellHyperlink(row.omimTitle) ||
+        'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim());
+    }
+    if (key === 'clinvar') {
+      var cvText = String(cellText(row.clinvar) || '').trim();
+      if (!cvText) return null;
+      return row.clinvarUrl || cellHyperlink(row.clinvar) ||
+        (row.gene && row.variant ? clinvarFallbackUrl(row.gene, row.variant) : null);
+    }
+    return null;
   }
 
   function renderFinalTable() {
@@ -4739,17 +4853,59 @@
 
           var c = FINAL_COLUMNS[colI];
           var td = document.createElement('td');
+
+          // Green highlight for a direct-hit primary variant (GENE NAME → DEPTH(X)).
+          if (!isNoPath && row.directHit && DIRECT_HIT_GREEN_KEYS.indexOf(c.key) !== -1) {
+            td.className = 'direct-hit-cell';
+          }
+
+          // ACMG Classification highlight (CMC only): VUS → blue, P/LP → red.
+          if (!isNoPath && currentReportType === 'cmc' && c.key === 'acmgClassification') {
+            var acmgArgb = acmgFillColor(row.acmgClassification);
+            if (acmgArgb) {
+              td.classList.add('acmg-fill');
+              td.style.backgroundColor = '#' + acmgArgb.slice(2);
+            }
+          }
+
+          // Linked columns (OMIM / ClinVar / Literature) render as a clickable
+          // hyperlink — matching the Excel export — instead of an editable input.
+          var linkUrl = (isNoPath || colI === noPathStart) ? null : finalCellLinkUrl(row, c.key);
+          // Normalize through cellText() at display time too: rows restored from
+          // autosave (or any other path) may still hold rich-text/hyperlink
+          // objects, which would otherwise show as "[object Object]".
+          var cellRaw = cellText(row[c.key]);
+          var cellVal = cellRaw != null ? String(cellRaw) : '';
+
+          if (linkUrl && cellVal.trim()) {
+            // Show the cell's own value text as the clickable label (e.g. the
+            // OMIM phenotype name), linking to the resolved URL (OMIM entry
+            // page by MIM number, PubMed, ClinVar, …).
+            var linkText = cellVal;
+            var link = document.createElement('a');
+            link.className = 'grid-cell-link';
+            link.href = linkUrl;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = linkText;
+            link.title = linkText;
+            td.appendChild(link);
+            tr.appendChild(td);
+            continue;
+          }
+
           var input = document.createElement('input');
 
           if (isNoPath && colI === noPathStart) {
             td.colSpan = noPathEnd - noPathStart + 1;
+            td.style.border = '1px solid #000';
             input.value = 'No Pathogenic Variant';
             input.style.textAlign = 'center';
             input.addEventListener('input', (function (ri) {
               return function (e) { finalConsolidateRows[ri].gene = e.target.value; };
             })(rowIndex));
           } else {
-            input.value = row[c.key] != null ? row[c.key] : '';
+            input.value = cellVal;
             if (row.unmatched && (c.key === 'gene' || c.key === 'variant')) {
               input.style.color = '#c2293a';
             }
@@ -5066,7 +5222,9 @@
     });
   }
 
-  function buildAndDownloadFinalExcel() {
+  // Builds the final consolidated workbook and resolves to its buffer (no
+  // download here - the caller hands it to the editable-name save dialog).
+  function buildFinalExcelBuffer() {
     var workbook = new ExcelJS.Workbook();
     var sheet = workbook.addWorksheet('Final Consolidated');
 
@@ -5100,14 +5258,27 @@
         var cell = dataRow.getCell(colIdx + 1);
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
 
+        // Green fill for a direct-hit primary variant (GENE NAME → DEPTH(X)).
+        if (row.directHit && DIRECT_HIT_GREEN_KEYS.indexOf(c.key) !== -1) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00B050' } };
+        }
+
+        // ACMG Classification fill (CMC only): VUS → blue, P/LP → red.
+        if (currentReportType === 'cmc' && c.key === 'acmgClassification') {
+          var acmgColor = acmgFillColor(row.acmgClassification);
+          if (acmgColor) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: acmgColor } };
+          }
+        }
+
         // ClinVar column: write as a clickable hyperlink whenever the cell has text.
         // Exact URL from eutils is preferred; falls back to a ClinVar search URL
         // so that "Pathogenic" (etc.) is ALWAYS a link, not plain text.
         // Empty cells (variant not in ClinVar) stay empty — no phantom links.
         if (colIdx === clinvarColIdx && !isNoPath) {
-          var cvText = String(row.clinvar || '').trim();
+          var cvText = String(cellText(row.clinvar) || '').trim();
           if (cvText) {
-            var cvUrl = row.clinvarUrl ||
+            var cvUrl = row.clinvarUrl || cellHyperlink(row.clinvar) ||
                         (row.gene && row.variant ? clinvarFallbackUrl(row.gene, row.variant) : '');
             if (cvUrl) {
               cell.value = { text: cvText, hyperlink: cvUrl };
@@ -5118,11 +5289,16 @@
           }
           // else: leave cell empty
         } else if (colIdx === omimColIdx) {
-          var omimText = String(row.omimTitle || '').trim();
+          var omimText = String(cellText(row.omimTitle) || '').trim();
           if (omimText) {
+            // Link the phenotype name to the OMIM entry (by MIM number, via
+            // omimEntryLink → NCBI, since omim.org is unreachable to Excel).
+            // Fall back to the source cell's hyperlink or a title search when
+            // there's no MIM number. Plain stored hyperlink (like ClinVar).
             var omimUrl = row.omimNumber
-              ? 'https://www.omim.org/entry/' + row.omimNumber
-              : 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim());
+              ? omimEntryLink(row.omimNumber)
+              : (row.omimUrl || cellHyperlink(row.omimTitle) ||
+                 'https://www.omim.org/search?search=' + encodeURIComponent(omimText.split(';')[0].trim()));
             cell.value = { text: omimText, hyperlink: omimUrl };
             cell.font  = { color: { argb: 'FF0563C1' }, underline: true };
           }
@@ -5135,7 +5311,7 @@
             cell.value = litVal;
           }
         } else {
-          cell.value = row[c.key];
+          cell.value = cellText(row[c.key]);
         }
       });
 
@@ -5158,11 +5334,7 @@
       }
     });
 
-    workbook.xlsx.writeBuffer().then(function (buffer) {
-      downloadBlob(buffer, 'final-consolidated-report.xlsx');
-      finalDownloadBtn.disabled = false;
-      finalDownloadBtn.textContent = 'Download Excel';
-    });
+    return workbook.xlsx.writeBuffer();
   }
 
   finalDownloadBtn.addEventListener('click', function () {
@@ -5176,7 +5348,14 @@
         var cvIdx = FINAL_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
         if (inputs[cvIdx]) inputs[cvIdx].value = row.clinvar;
       });
-      buildAndDownloadFinalExcel();
+      finalDownloadBtn.disabled = false;
+      finalDownloadBtn.textContent = 'Download Excel';
+      // Same editable-name save dialog as the listed-variant download, with a
+      // single row for the consolidated report.
+      openSaveNamesModal('Download consolidated report', [{
+        baseName: 'final-consolidated-report',
+        build: buildFinalExcelBuffer,
+      }]);
     });
   });
 
@@ -5191,6 +5370,9 @@
   var AUTOSAVE_KEY = 'cmcExcelConsolidator.autosave.v1';
   var AUTOSAVE_DEBOUNCE_MS = 800;
   var autosaveTimer = null;
+  // Temporarily disabled: while the consolidation logic is changing, restoring
+  // old autosaved rows masks the new behavior. Set back to true to re-enable.
+  var AUTOSAVE_ENABLED = false;
 
   function arrayBufferToBase64(buffer) {
     var bytes = new Uint8Array(buffer);
@@ -5260,6 +5442,7 @@
   }
 
   function persistAutosaveState() {
+    if (!AUTOSAVE_ENABLED) return;
     try {
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(collectAutosaveState(true)));
     } catch (e) {
@@ -5499,7 +5682,13 @@
   }
 
   var autosaveRestored = false;
-  try { autosaveRestored = restoreAutosavedState(); } catch (e) { console.warn('Autosave restore failed:', e); }
+  if (!AUTOSAVE_ENABLED) {
+    // Autosave is off for now — purge any previously saved (stale) session so
+    // it can't be restored, and always start fresh.
+    clearAutosavedState();
+  } else {
+    try { autosaveRestored = restoreAutosavedState(); } catch (e) { console.warn('Autosave restore failed:', e); }
+  }
   if (!autosaveRestored) {
     renderSampleTable();
     renderVariantTable();
@@ -5507,7 +5696,7 @@
     renderFinalTable();
     populateSampleSelect();
   }
-  initAutosaveWatchers();
+  if (AUTOSAVE_ENABLED) initAutosaveWatchers();
   initUndoWatchers();
 
   // Baseline checkpoint so the very first user edit has something to undo
@@ -5515,6 +5704,9 @@
   // use the same includeBuffers=true shape persistAutosaveState normally
   // records, or the first real diff would spuriously differ on rawBuffer
   // presence alone and an undo could drop already-loaded files' raw bytes.
+  // Undo runs regardless of AUTOSAVE_ENABLED - it's independent of whether
+  // state gets persisted to localStorage, only of collectAutosaveState's
+  // in-memory snapshot shape.
   try {
     lastCheckpointJSON = JSON.stringify(collectAutosaveState(true));
   } catch (e) {
