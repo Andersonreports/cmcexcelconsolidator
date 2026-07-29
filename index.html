@@ -282,6 +282,12 @@
     max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
   .dl-modal-title { font: 600 16px/1.3 var(--sans); padding: 18px 20px 4px; }
   .dl-modal-hint { font: 13px/1.4 var(--sans); color: var(--text-secondary); padding: 0 20px 14px; }
+  /* Save failures are reported here, inside the dialog: the panel's top error
+     banner is far above the fold when the download buttons are in view, so a
+     failure reported only there reads as "the button did nothing". */
+  .dl-modal-error { font: 13px/1.4 var(--sans); color: #b3261e; background: #fdecea; border: 1px solid #f5c6c2;
+    border-radius: 4px; margin: 0 20px 12px; padding: 8px 10px; }
+  .dl-modal-error[hidden] { display: none; }
   .dl-modal-list { overflow-y: auto; padding: 0 20px; }
   .dl-modal-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
   .dl-modal-row input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 7px 9px; color: var(--ink);
@@ -586,6 +592,7 @@
       <div class="dl-modal-box">
         <div class="dl-modal-title" id="dl-modal-title">Download</div>
         <div class="dl-modal-hint">File names are auto-filled from each uploaded file — edit if needed, then save. Files go into your chosen save folder (see the "Save folder" control below).</div>
+        <div class="dl-modal-error" id="dl-modal-error" hidden></div>
         <div class="dl-modal-list" id="dl-modal-list"></div>
         <div class="dl-modal-actions">
           <button type="button" id="dl-modal-cancel">Cancel</button>
@@ -852,6 +859,13 @@
     if (!window.indexedDB) return Promise.resolve();
     return openSaveDirDb().then(function (db) { return idbSet(db, SAVE_DIR_KEY, handle); }).catch(function () {});
   }
+  // Drops the remembered folder (in memory, in IndexedDB and in the UI) once
+  // it turns out to be unusable, so the next download offers the picker again.
+  function forgetSaveDirHandle() {
+    savedDirHandle = null;
+    persistDirHandle(null);
+    updateSaveFolderUI();
+  }
   // Silent check only (no permission prompt) - safe to call outside a user
   // gesture, e.g. on page load, to restore the remembered folder's display.
   function loadPersistedDirHandle() {
@@ -864,7 +878,13 @@
   // directory handle. Requesting permission needs a user gesture, so pass
   // `allowPrompt: true` only when called directly from a click handler.
   function ensureDirPermission(handle, allowPrompt) {
-    return handle.queryPermission({ mode: 'readwrite' }).then(function (state) {
+    // queryPermission() is called inside the promise chain so that a handle
+    // that no longer behaves like one (e.g. restored from IndexedDB in a
+    // browser that didn't clone it properly) rejects here instead of throwing
+    // synchronously out of the caller's click handler.
+    return Promise.resolve().then(function () {
+      return handle.queryPermission({ mode: 'readwrite' });
+    }).then(function (state) {
       if (state === 'granted') return true;
       if (!allowPrompt) return false;
       return handle.requestPermission({ mode: 'readwrite' }).then(function (s) { return s === 'granted'; });
@@ -3563,8 +3583,12 @@
 
     var currentTypeCount = variantBatch.filter(function (item) { return item.reportType === currentReportType; }).length;
     variantClearAllBtn.disabled = currentTypeCount === 0;
-    variantDownloadAllBtn.disabled = currentTypeCount === 0;
-    if (variantDownloadAllNoRawBtn) variantDownloadAllNoRawBtn.disabled = currentTypeCount === 0;
+    // Download follows what's actually exportable (parsed, non-empty), not just
+    // what's loaded - otherwise the buttons look live but the click can't do
+    // anything.
+    var exportableCount = currentValidBatchItems().length;
+    variantDownloadAllBtn.disabled = exportableCount === 0;
+    if (variantDownloadAllNoRawBtn) variantDownloadAllNoRawBtn.disabled = exportableCount === 0;
     if (variantSelectedCount) {
       var activeRecordCount = variantRows.filter(function (r) { return !r._removed; }).length;
       var removedRecordCount = variantRows.length - activeRecordCount;
@@ -3578,6 +3602,10 @@
     if (message) {
       variantError.textContent = message;
       variantError.hidden = false;
+      // This banner sits at the top of the panel, well above the download
+      // buttons at the bottom - scroll it into view so a failure triggered from
+      // down there doesn't look like nothing happened.
+      if (variantError.scrollIntoView) variantError.scrollIntoView({ block: 'nearest' });
     } else {
       variantError.hidden = true;
     }
@@ -3784,8 +3812,11 @@
     var hasItems = visibleEntries.length > 0;
     variantBatchList.hidden = !hasItems;
     variantClearAllBtn.disabled = !hasItems;
-    variantDownloadAllBtn.disabled = !hasItems;
-    if (variantDownloadAllNoRawBtn) variantDownloadAllNoRawBtn.disabled = !hasItems;
+    // Same rule as renderVariantTable: enabled only when there's something the
+    // download can actually produce.
+    var hasExportable = currentValidBatchItems().length > 0;
+    variantDownloadAllBtn.disabled = !hasExportable;
+    if (variantDownloadAllNoRawBtn) variantDownloadAllNoRawBtn.disabled = !hasExportable;
 
     variantBatchList.innerHTML = '';
     visibleEntries.forEach(function (entry, displayIdx) {
@@ -4208,10 +4239,20 @@
     if (!saveFolderSupported()) return Promise.resolve(null);
     if (savedDirHandle) {
       return ensureDirPermission(savedDirHandle, true).then(function (granted) {
-        return granted ? savedDirHandle : null;
+        if (granted) return savedDirHandle;
+        // The remembered folder is unusable now (permission refused, or the
+        // handle no longer resolves - folder deleted/renamed/moved). Forget it
+        // so the next download asks for a folder again instead of failing the
+        // same way forever; this download falls back to a plain download.
+        forgetSaveDirHandle();
+        return null;
       });
     }
-    return window.showDirectoryPicker().then(function (handle) {
+    // Wrapped in a promise so a synchronous throw ("must be handling a user
+    // gesture") becomes a rejection rather than escaping the click handler.
+    return Promise.resolve().then(function () {
+      return window.showDirectoryPicker();
+    }).then(function (handle) {
       savedDirHandle = handle;
       updateSaveFolderUI();
       persistDirHandle(handle);
@@ -4267,13 +4308,25 @@
   var dlModalList = document.getElementById('dl-modal-list');
   var dlModalSaveBtn = document.getElementById('dl-modal-save');
   var dlModalCancelBtn = document.getElementById('dl-modal-cancel');
+  var dlModalErrorEl = document.getElementById('dl-modal-error');
   var dlModalEntries = [];      // [{ baseName, hoverTitle, build }] for the open dialog
   var dlModalOnError = showVariantError;
+
+  // Reports a save problem inside the dialog, where the user is actually
+  // looking when they press Save.
+  function showDlModalError(message) {
+    if (!dlModalErrorEl) return;
+    dlModalErrorEl.textContent = message || '';
+    dlModalErrorEl.hidden = !message;
+  }
 
   // Generic opener: `title` heads the dialog, `entries` becomes one editable
   // name row each, `onError` (optional) reports save failures.
   function openSaveNamesModal(title, entries, onError) {
-    if (!entries || !entries.length) return;
+    if (!entries || !entries.length) {
+      (onError || showVariantError)('Nothing to download yet - load a report with at least one variant first.');
+      return;
+    }
     dlModalEntries = entries;
     dlModalOnError = onError || showVariantError;
     dlModalTitle.textContent = title;
@@ -4291,13 +4344,20 @@
       row.appendChild(input); row.appendChild(ext);
       dlModalList.appendChild(row);
     });
+    showDlModalError('');
     downloadModal.hidden = false;
   }
 
   // Listed-variant batch: one editable row per current-type report.
   function openDownloadModal(includeRawData) {
     var validItems = currentValidBatchItems();
-    if (!validItems.length) return;
+    if (!validItems.length) {
+      // The buttons stay clickable whenever any file is loaded for this report
+      // type, so say why nothing opened rather than doing nothing at all.
+      showVariantError('No exportable report for this tab - every loaded file either failed to parse or contains no variants.');
+      return;
+    }
+    showVariantError('');
     var entries = validItems.map(function (item) {
       return {
         baseName: autoExportBaseName(item), // auto-fetched from the input file name
@@ -4311,6 +4371,7 @@
   function closeDownloadModal() {
     downloadModal.hidden = true;
     dlModalEntries = [];
+    showDlModalError('');
   }
 
   dlModalCancelBtn.addEventListener('click', closeDownloadModal);
@@ -4331,7 +4392,8 @@
   // folder (the standalone "Save folder" control, or a one-time picker if
   // nothing's been set yet - see resolveSaveDirHandle) - no folder dialog
   // inside this flow itself. Falls back to individual browser downloads when
-  // the File System Access API isn't available at all.
+  // the File System Access API isn't available, and per file whenever writing
+  // into the chosen folder fails, so a file always lands somewhere.
   function performModalDownload() {
     if (!dlModalEntries.length) { closeDownloadModal(); return; }
     var names = modalDownloadNames();
@@ -4342,6 +4404,7 @@
     dlModalSaveBtn.disabled = true;
     dlModalCancelBtn.disabled = true;
     dlModalSaveBtn.textContent = 'Saving…';
+    showDlModalError('');
 
     function resetButtons() {
       dlModalSaveBtn.disabled = false;
@@ -4349,20 +4412,58 @@
       dlModalSaveBtn.textContent = originalText;
     }
 
-    return resolveSaveDirHandle().then(function (dirHandle) {
+    // Reported once at the end: the chosen folder became unusable and these
+    // files went to the browser's Downloads folder instead.
+    var fellBackToDownloads = false;
+    var failures = [];
+
+    // Called directly (not behind a .then) so the click's user activation is
+    // still live for requestPermission()/showDirectoryPicker(); the try/catch
+    // covers a synchronous throw, which would otherwise leave the dialog stuck
+    // on "Saving…" with no explanation.
+    var dirPromise;
+    try {
+      dirPromise = resolveSaveDirHandle();
+    } catch (e) {
+      dirPromise = Promise.resolve(null);
+    }
+
+    return dirPromise.then(function (dirHandle) {
       // Build + write each file sequentially so we don't hold many workbooks
       // in memory at once.
       var chain = Promise.resolve();
       entries.forEach(function (entry, i) {
         chain = chain.then(function () {
-          return Promise.resolve(entry.build()).then(function (buffer) {
-            if (dirHandle) return writeBufferToDir(dirHandle, names[i], buffer);
-            downloadBlob(buffer, names[i]); // no folder available - plain download
+          dlModalSaveBtn.textContent = entries.length > 1
+            ? 'Saving… (' + (i + 1) + '/' + entries.length + ')'
+            : 'Saving…';
+          return Promise.resolve().then(function () { return entry.build(); }).then(function (buffer) {
+            if (!dirHandle) { downloadBlob(buffer, names[i]); return; } // no folder available
+            return writeBufferToDir(dirHandle, names[i], buffer).catch(function () {
+              // Folder deleted/renamed/moved or permission revoked mid-save:
+              // don't lose the report, hand it to the browser instead.
+              fellBackToDownloads = true;
+              downloadBlob(buffer, names[i]);
+            });
+          }).catch(function (err) {
+            failures.push(names[i] + ': ' + ((err && err.message) || 'failed to build'));
           });
         });
       });
-      return chain.then(function () { resetButtons(); closeDownloadModal(); });
+      return chain;
+    }).then(function () {
+      resetButtons();
+      if (failures.length) {
+        showDlModalError('Could not save ' + failures.length + ' of ' + entries.length +
+          ' file' + (entries.length !== 1 ? 's' : '') + ' - ' + failures.join('; '));
+        return;
+      }
+      closeDownloadModal();
+      if (fellBackToDownloads) {
+        (onError || showVariantError)('The chosen save folder was not available, so the file(s) were downloaded to your browser\'s Downloads folder instead. Pick the folder again with "Change folder…".');
+      }
     }).catch(function (err) {
+      showDlModalError((err && err.message) || 'Failed to save files.');
       (onError || showVariantError)((err && err.message) || 'Failed to save files.');
       resetButtons();
     });
