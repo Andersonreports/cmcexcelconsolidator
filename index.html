@@ -1782,6 +1782,19 @@
     return pct.toFixed(2) + '%';
   }
 
+  // Normalizes any VAF value - a bare fraction (0.25), a >1 percentage number
+  // (25), or a formatted "25.00%" string - back to a 0-1 fraction, so the
+  // low-VAF threshold check below works regardless of which form the value
+  // is currently stored in. Returns NaN for empty/non-numeric input.
+  function vafAsFraction(value) {
+    if (value == null || value === '') return NaN;
+    var str = String(value).trim();
+    var hasPercent = str.indexOf('%') !== -1;
+    var num = parseFloat(str.replace('%', ''));
+    if (isNaN(num)) return NaN;
+    return (hasPercent || num > 1) ? num / 100 : num;
+  }
+
   function stripHgvsPrefix(value) {
     if (value == null) return '';
     var s = String(value);
@@ -2754,11 +2767,11 @@
         _hasFemale: hasCall2,
         zygosity1: hasCall1 ? (rawZygosity1 ? abbreviateZygosity(rawZygosity1, inheritanceCodes) : (deriveZygosityFromDepths(alleleDepths1, vaf1, isXLinked) || 'HET')) : '-',
         readDepths1: hasCall1 ? readDepths1 : '-',
-        vaf1: hasCall1 ? vaf1 : '-',
+        vaf1: hasCall1 ? formatVafPercent(vaf1) : '-',
         alleleDepths1: hasCall1 ? alleleDepths1 : '-',
         zygosity2: hasCall2 ? (rawZygosity2 ? abbreviateZygosity(rawZygosity2, inheritanceCodes) : (deriveZygosityFromDepths(alleleDepths2, vaf2, isXLinked) || 'HET')) : '-',
         readDepths2: hasCall2 ? readDepths2 : '-',
-        vaf2: hasCall2 ? vaf2 : '-',
+        vaf2: hasCall2 ? formatVafPercent(vaf2) : '-',
         alleleDepths2: hasCall2 ? alleleDepths2 : '-',
         clinvar: clinvarValue,
         inheritance: abbreviateInheritanceGrouped(get('omimInheritance')),
@@ -2990,7 +3003,7 @@
         });
         vafColIdxs.forEach(function (colIdx) {
           var val = row[COUPLE_EXPORT_COLUMNS[colIdx].key];
-          if (val != null && val !== '' && !isNaN(Number(val)) && Number(val) < 0.3) {
+          if (val != null && val !== '' && vafAsFraction(val) < 0.3) {
             dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
           }
         });
@@ -3280,8 +3293,7 @@
       });
       input.addEventListener('blur', hideCellPopover);
       if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
-        var vafNum = Number(input.value);
-        input.style.color = (input.value !== '' && !isNaN(vafNum) && vafNum < 0.3) ? '#c2293a' : '';
+        input.style.color = (input.value !== '' && vafAsFraction(input.value) < 0.3) ? '#c2293a' : '';
       }
       // A plain <input> can't color just the low number within a "ref,alt"
       // pair like the exported cell does - flag the whole box red instead as
@@ -3303,8 +3315,7 @@
         if (cellPopoverAnchor === e.target) showCellPopover(e.target, e.target.value);
         updateInheritanceColor();
         if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
-          var newVaf = Number(e.target.value);
-          e.target.style.color = (e.target.value !== '' && !isNaN(newVaf) && newVaf < 0.3) ? '#c2293a' : '';
+          e.target.style.color = (e.target.value !== '' && vafAsFraction(e.target.value) < 0.3) ? '#c2293a' : '';
         }
         if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') {
           var newAdRich = alleleDepthRichText(e.target.value);
@@ -3746,7 +3757,7 @@
     });
     maps.vafColIdxs.forEach(function (colIdx) {
       var val = row[columns[colIdx].key];
-      if (val != null && val !== '' && !isNaN(Number(val)) && Number(val) < 0.3) {
+      if (val != null && val !== '' && vafAsFraction(val) < 0.3) {
         dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
       }
     });
