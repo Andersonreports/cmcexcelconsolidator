@@ -1568,7 +1568,9 @@
     zygosity: { header: 'Zygosity' },
     filter: { header: 'Filter' },
     genotype: { header: '0/1 Genotypes (GT)' },
-    vaf: { header: 'Variant Allele Freq' },
+    // Different VarSeq exports have used both "Variant Allele Freq" and
+    // "Variant Allele Fraction" - match the shared prefix so either is found.
+    vaf: { headerStartsWith: 'Variant Allele Fr' },
     alleleDepths: { header: 'Allelic Depths (AD)' },
     readDepths: { header: 'Read Depths (DP)' },
     clinvarClass: { header: 'Classification', groupIncludes: ['ClinVar'] },
@@ -4702,7 +4704,7 @@
                       || col('CLINVAR', vcol('clinvar'));
     var zygosityCol = col('ZYGOSITY', 'ZYGOSITY', vcol('zygosity'));
     var inheritCol   = col('INHERTIANCE', 'INHERITANCE', 'INHERTIANCE', vcol('inheritance'));
-    var vafCol       = col('VAF(%)', 'VARIANT ALLELE FREQ',    vcol('vaf'));
+    var vafCol       = col('VAF(%)', 'VARIANT ALLELE FREQ', 'VARIANT ALLELE FRACTION', vcol('vaf'));
     var allelicCol   = col('ALLELIC DEPTH', 'ALLELIC DEPTHS (AD)', vcol('alleleDepths'));
     // Smart read-depth fallback: if allelic resolved at the app-export position, the read-depth
     // column is also at its app-export position. If allelic was found by header in a VarSeq file
