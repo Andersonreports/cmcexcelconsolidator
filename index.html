@@ -1342,6 +1342,7 @@
     { key: 'inhouseMerged', header: 'Inhouse merged' },
     { key: 'inhouseCount', header: 'Hematology Inhouse count' },
     { key: 'inhouseSampleNames', header: 'Hematology inhouse sample name' },
+    { key: 'cohortTest', header: 'Cohort Sample Count' },
     { key: 'vaf', header: 'VAF(%)' },
     { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
     { key: 'readDepths', header: 'READ DEPTH' },
@@ -1505,6 +1506,7 @@
     inhouseMerged: 'Samples2',
     inhouseCount: '# Samples',
     inhouseSampleNames: 'Sample Names',
+    cohortTest: 'Sample Count, under a "Cohort" group (e.g. "Cohort_test Variant Frequencies")',
     vaf: 'Variant Allele Freq (formatted as a percentage)',
     alleleDepths: 'Allelic Depths (AD)',
     readDepths: 'Read Depths (DP)',
@@ -1598,6 +1600,12 @@
     inhouseSamples2: { header: 'Samples2' },
     inhouseCount: { header: '# Samples' },
     inhouseSampleNames: { header: 'Sample Names' },
+    // Newer VarSeq exports add a separate cohort group (seen so far as
+    // "Cohort_test Variant Frequencies (N Samples)") with its own single
+    // "Sample Count" column - matched generically on "Cohort" in the group
+    // name so any similarly-named cohort group is picked up too, not just
+    // this exact one.
+    cohortTest: { header: 'Sample Count', groupIncludes: ['Cohort'] },
     alphaMissense: { header: 'Classification', groupIncludes: ['AlphaMissense'] },
     revel: { header: 'REVEL' },
     // Single-mode: gnomAD South Asian male allele counts (genome + exome 4.1)
@@ -2596,6 +2604,7 @@
         inhouseMerged: get('inhouseSamples2'),
         inhouseCount: get('inhouseCount'),
         inhouseSampleNames: get('inhouseSampleNames'),
+        cohortTest: get('cohortTest'),
         vaf: formatVafPercent(get('vaf')),
         vafRaw: get('vaf'),
         alleleDepths: get('alleleDepths'),
