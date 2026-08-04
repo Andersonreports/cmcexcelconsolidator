@@ -131,6 +131,14 @@
   }
   .error-banner[hidden] { display: none; }
   .error-banner::before { content: "⚠"; line-height: 1.4; font-weight: 600; }
+  /* Reuses the same banner element/position for a save confirmation - the
+     File System Access API writes straight to disk with no browser download
+     notification, so without this a successful save looks identical to doing
+     nothing. */
+  .error-banner.success {
+    background: var(--primary-light); color: var(--accent); border-color: var(--accent); border-left-color: var(--accent);
+  }
+  .error-banner.success::before { content: "✓"; }
 
   .table-wrapper { overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -3634,6 +3642,7 @@
   }
 
   function showVariantError(message) {
+    variantError.classList.remove('success');
     if (message) {
       variantError.textContent = message;
       variantError.hidden = false;
@@ -3644,6 +3653,17 @@
     } else {
       variantError.hidden = true;
     }
+  }
+
+  // Save-to-folder (File System Access API) writes straight to disk with no
+  // browser download notification/icon, so a successful save is otherwise
+  // silent - this confirms it actually happened, reusing the same banner
+  // spot/scroll-into-view behavior as showVariantError.
+  function showVariantSuccess(message) {
+    variantError.classList.add('success');
+    variantError.textContent = message;
+    variantError.hidden = false;
+    if (variantError.scrollIntoView) variantError.scrollIntoView({ block: 'nearest' });
   }
 
   function genderSalutation(gender) {
@@ -4451,6 +4471,7 @@
     // files went to the browser's Downloads folder instead.
     var fellBackToDownloads = false;
     var failures = [];
+    var usedDirHandle = null; // set below once resolveSaveDirHandle() settles - drives the success message
 
     // Called directly (not behind a .then) so the click's user activation is
     // still live for requestPermission()/showDirectoryPicker(); the try/catch
@@ -4464,6 +4485,7 @@
     }
 
     return dirPromise.then(function (dirHandle) {
+      usedDirHandle = dirHandle;
       // Build + write each file sequentially so we don't hold many workbooks
       // in memory at once.
       var chain = Promise.resolve();
@@ -4496,6 +4518,13 @@
       closeDownloadModal();
       if (fellBackToDownloads) {
         (onError || showVariantError)('The chosen save folder was not available, so the file(s) were downloaded to your browser\'s Downloads folder instead. Pick the folder again with "Change folder…".');
+      } else if (usedDirHandle) {
+        // Writing straight into a chosen folder via the File System Access API
+        // never touches the browser's Downloads list/notification, so without
+        // this the save looks like it did nothing even though it succeeded.
+        showVariantSuccess('Saved ' + names.length + ' file' + (names.length !== 1 ? 's' : '') + ' to "' + usedDirHandle.name + '".');
+      } else {
+        showVariantSuccess('Downloaded ' + names.length + ' file' + (names.length !== 1 ? 's' : '') + ' to your browser\'s Downloads folder.');
       }
     }).catch(function (err) {
       showDlModalError((err && err.message) || 'Failed to save files.');
