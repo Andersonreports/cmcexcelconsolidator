@@ -2212,26 +2212,63 @@
   // ── Franklin (Genoox) auto-classification ──────────────────────────────────
   var FRANKLIN_PROXY_URL = 'https://script.google.com/macros/s/AKfycbxZho7Jig9dKaCIVZIqwSv6FvUJxU9vx6yLwpqvoRjlt3ZQHKkQljthA8QOG9vYq6E3/exec';
 
+  // Franklin/ClinVar lookups run through this instead of a bare fetch() so a
+  // stuck request (slow proxy, Apps Script queued past its concurrency quota,
+  // dead network) can't hang a row forever - without this, a hung fetch never
+  // resolves *or* rejects, so it never falls back to ClinVar and that cell is
+  // left blank with no error and no retry.
+  function fetchWithTimeout(url, options, ms) {
+    if (typeof AbortController === 'undefined') return fetch(url, options);
+    var controller = new AbortController();
+    var opts = Object.assign({}, options, { signal: controller.signal });
+    var timer = setTimeout(function () { controller.abort(); }, ms);
+    return fetch(url, opts).then(
+      function (r) { clearTimeout(timer); return r; },
+      function (err) { clearTimeout(timer); throw err; }
+    );
+  }
+
   function isGenericVus(value) {
     return String(value || '').trim().toUpperCase() === 'VUS';
   }
 
+  // Rows are resolved through a small worker pool rather than all at once:
+  // firing every row's request together (previously staggered by just
+  // 250ms/row) can exceed the Franklin proxy's concurrent-execution quota on
+  // a large batch, queuing most of the requests server-side for a very long
+  // time. A fixed number of in-flight lookups keeps steady throughput without
+  // overwhelming it.
+  var FRANKLIN_CONCURRENCY = 4;
+
   function resolveFranklinForRows(rows, batchIdx) {
-    var pending = rows.map(function (row, rowIdx) {
+    var queue = [];
+    rows.forEach(function (row, rowIdx) {
       var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
       if (row.franklin && !isGenericVus(row.franklin)) {
         if (linkEl) linkEl.textContent = '↗';
-        return null;
+        return;
       }
-      if (!row.gene && !row.variant) return null;
+      if (!row.gene && !row.variant) return;
       if (linkEl) linkEl.textContent = isGenericVus(row.franklin) ? '↗' : '…';
-      return new Promise(function (resolve) {
-        setTimeout(function () {
-          fetchFranklinForRow(row, rowIdx, batchIdx).then(resolve);
-        }, rowIdx * 250);
-      });
+      queue.push(rowIdx);
     });
-    return Promise.all(pending);
+    if (!queue.length) return Promise.resolve();
+
+    return new Promise(function (resolveAll) {
+      var next = 0;
+      var remaining = queue.length;
+      function worker() {
+        if (next >= queue.length) return;
+        var rowIdx = queue[next++];
+        fetchFranklinForRow(rows[rowIdx], rowIdx, batchIdx).then(function () {
+          remaining--;
+          if (remaining === 0) resolveAll();
+          else worker();
+        });
+      }
+      var starters = Math.min(FRANKLIN_CONCURRENCY, queue.length);
+      for (var i = 0; i < starters; i++) worker();
+    });
   }
 
   function fetchFranklinForRow(row, rowIdx, batchIdx) {
@@ -2249,7 +2286,7 @@
       '?gene=' + encodeURIComponent(row.gene || '') +
       '&variant=' + encodeURIComponent(row.variant || '');
 
-    return fetch(url, { headers: { 'Accept': 'application/json' } })
+    return fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 20000)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var linkEl = document.getElementById(linkId);
@@ -2300,14 +2337,14 @@
       return '(' + (gene ? gene + '[gene] AND ' : '') + '"' + v + '"[All Fields])';
     });
 
-    return fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
-          '?db=clinvar&term=' + encodeURIComponent(parts.join(' OR ')) + '&retmax=5&retmode=json')
+    return fetchWithTimeout('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
+          '?db=clinvar&term=' + encodeURIComponent(parts.join(' OR ')) + '&retmax=5&retmode=json', null, 10000)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var ids = (data.esearchresult && data.esearchresult.idlist) || [];
         if (!ids.length) return null;
-        return fetch('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi' +
-                     '?db=clinvar&id=' + ids.slice(0, 3).join(',') + '&retmode=json')
+        return fetchWithTimeout('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi' +
+                     '?db=clinvar&id=' + ids.slice(0, 3).join(',') + '&retmode=json', null, 10000)
           .then(function (r) { return r.json(); })
           .then(function (data) {
             var result = data.result || {};
