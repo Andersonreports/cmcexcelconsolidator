@@ -2236,12 +2236,41 @@
   // firing every row's request together (previously staggered by just
   // 250ms/row) can exceed the Franklin proxy's concurrent-execution quota on
   // a large batch, queuing most of the requests server-side for a very long
-  // time. A fixed number of in-flight lookups keeps steady throughput without
-  // overwhelming it.
+  // time. The queue/counter below are module-level (not local to one
+  // resolveFranklinForRows call) because multiple files can have their rows
+  // queued at once - e.g. "download all as ZIP" builds every file's buffer
+  // in parallel, each calling resolveFranklinForRows for its own rows. A
+  // per-call pool would let N files each open their own 4 connections,
+  // multiplying total load right back up; routing every row through one
+  // shared queue keeps a fixed number of lookups in flight system-wide.
   var FRANKLIN_CONCURRENCY = 4;
+  var franklinQueue = [];
+  var franklinActive = 0;
+
+  function pumpFranklinQueue() {
+    while (franklinActive < FRANKLIN_CONCURRENCY && franklinQueue.length) {
+      runFranklinTask(franklinQueue.shift());
+    }
+  }
+
+  function runFranklinTask(task) {
+    franklinActive++;
+    fetchFranklinForRow(task.row, task.rowIdx, task.batchIdx).then(function () {
+      franklinActive--;
+      task.resolve();
+      pumpFranklinQueue();
+    });
+  }
+
+  function enqueueFranklinLookup(row, rowIdx, batchIdx) {
+    return new Promise(function (resolve) {
+      franklinQueue.push({ row: row, rowIdx: rowIdx, batchIdx: batchIdx, resolve: resolve });
+      pumpFranklinQueue();
+    });
+  }
 
   function resolveFranklinForRows(rows, batchIdx) {
-    var queue = [];
+    var pending = [];
     rows.forEach(function (row, rowIdx) {
       var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
       if (row.franklin && !isGenericVus(row.franklin)) {
@@ -2250,25 +2279,9 @@
       }
       if (!row.gene && !row.variant) return;
       if (linkEl) linkEl.textContent = isGenericVus(row.franklin) ? '↗' : '…';
-      queue.push(rowIdx);
+      pending.push(enqueueFranklinLookup(row, rowIdx, batchIdx));
     });
-    if (!queue.length) return Promise.resolve();
-
-    return new Promise(function (resolveAll) {
-      var next = 0;
-      var remaining = queue.length;
-      function worker() {
-        if (next >= queue.length) return;
-        var rowIdx = queue[next++];
-        fetchFranklinForRow(rows[rowIdx], rowIdx, batchIdx).then(function () {
-          remaining--;
-          if (remaining === 0) resolveAll();
-          else worker();
-        });
-      }
-      var starters = Math.min(FRANKLIN_CONCURRENCY, queue.length);
-      for (var i = 0; i < starters; i++) worker();
-    });
+    return Promise.all(pending);
   }
 
   function fetchFranklinForRow(row, rowIdx, batchIdx) {
