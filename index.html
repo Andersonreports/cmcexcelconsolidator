@@ -1572,15 +1572,14 @@
   // VarSeq happened to build that merge from ("Variants <file>.vcf(.gz)
   // [merged with N other(s)]"), and the current stable one
   // ("Inhouse_Hematology Variant Frequencies (496 Samples)"). Some exports
-  // carry BOTH blocks side by side - the legacy one left over as a stale,
-  // near-empty leftover from an older/smaller merge, and the stable one
-  // holding the real, current cohort data - so the stable form must always
-  // be tried first; the legacy pattern is only a fallback for exports that
-  // never got the stable block at all. The stable block's own sample-count
-  // column has also been seen under two different header names ("# Samples"
-  // and "Sample Count") across export versions.
+  // carry BOTH blocks side by side - the legacy one is a stale, near-empty
+  // leftover from an older/smaller merge, so it's never used as a source for
+  // the Listed Variants export (see findInhouseHematologyColumn below) - only
+  // the stable block's values are ever shown, even when the legacy block is
+  // all a file has. The stable block's own sample-count column has also been
+  // seen under two different header names ("# Samples" and "Sample Count")
+  // across export versions.
   var INHOUSE_HEMATOLOGY_STABLE_REGEX = /Inhouse_Hematology Variant Frequencies/i;
-  var INHOUSE_HEMATOLOGY_LEGACY_REGEX = /^Variants\s+.+\.vcf(?:\.gz)?\s*\[merged with \d+ other\(s\)\]$/i;
 
   // Each VarSeq export can include a different set/order of annotation
   // columns (e.g. some runs add a "ClinGen Expert Curated" group, some omit
@@ -1744,21 +1743,19 @@
   }
 
   // Finds the in-house hematology cohort's "# Samples" / "Sample Names"
-  // columns, preferring the stable "Inhouse_Hematology Variant Frequencies"
-  // block over the legacy auto-named merge block when a file has both (see
-  // INHOUSE_HEMATOLOGY_STABLE_REGEX above) - tries every given header text
-  // against the stable block first, only falling back to the legacy block if
-  // none of them are found there. `headers` lets the same call handle a
-  // column whose text has varied across export versions (e.g. the count
-  // column has appeared as both "# Samples" and "Sample Count").
+  // columns, matching only the stable "Inhouse_Hematology Variant
+  // Frequencies" block (see INHOUSE_HEMATOLOGY_STABLE_REGEX above). The
+  // legacy auto-named merge block ("Variants <file>.vcf(.gz) [merged with N
+  // other(s)]") is deliberately never used as a source here, even as a
+  // fallback - it's a stale leftover from an older/smaller merge and its
+  // values must never reach the Listed Variants export, whether or not the
+  // stable block is also present in the file. `headers` lets the same call
+  // handle a column whose text has varied across export versions (e.g. the
+  // count column has appeared as both "# Samples" and "Sample Count").
   function findInhouseHematologyColumn(groupRow, headerRow, colCount, headers) {
     for (var i = 0; i < headers.length; i++) {
       var stableCol = findVarSeqColumn(groupRow, headerRow, colCount, { header: headers[i], groupRegex: INHOUSE_HEMATOLOGY_STABLE_REGEX });
       if (stableCol) return stableCol;
-    }
-    for (var j = 0; j < headers.length; j++) {
-      var legacyCol = findVarSeqColumn(groupRow, headerRow, colCount, { header: headers[j], groupRegex: INHOUSE_HEMATOLOGY_LEGACY_REGEX });
-      if (legacyCol) return legacyCol;
     }
     return null;
   }
@@ -2625,7 +2622,10 @@
     // the current stable "Inhouse_Hematology Variant Frequencies" block in
     // the same file - the generic per-key scan above would pick whichever
     // comes first in column order, which is usually the stale legacy block.
-    // Re-resolve these two columns with the stable-first priority instead.
+    // Re-resolve these two columns against the stable block only - the
+    // legacy block's values must never appear in this export (see
+    // findInhouseHematologyColumn), so a file with only the legacy block now
+    // leaves these columns blank rather than showing its stale data.
     cols.inhouseCount = findInhouseHematologyColumn(groupRow, headerRow, colCount, ['# Samples', 'Sample Count']);
     cols.inhouseSampleNames = findInhouseHematologyColumn(groupRow, headerRow, colCount, ['Sample Names']);
 
