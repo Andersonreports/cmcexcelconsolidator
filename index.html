@@ -1566,6 +1566,22 @@
     });
   }
 
+  // The in-house hematology cohort's group label (row 1, over the
+  // "# Samples" / "Sample Names" columns) has appeared in two forms across
+  // real exports: an older auto-generated one naming whatever seed VCF
+  // VarSeq happened to build that merge from ("Variants <file>.vcf(.gz)
+  // [merged with N other(s)]"), and the current stable one
+  // ("Inhouse_Hematology Variant Frequencies (496 Samples)"). Some exports
+  // carry BOTH blocks side by side - the legacy one left over as a stale,
+  // near-empty leftover from an older/smaller merge, and the stable one
+  // holding the real, current cohort data - so the stable form must always
+  // be tried first; the legacy pattern is only a fallback for exports that
+  // never got the stable block at all. The stable block's own sample-count
+  // column has also been seen under two different header names ("# Samples"
+  // and "Sample Count") across export versions.
+  var INHOUSE_HEMATOLOGY_STABLE_REGEX = /Inhouse_Hematology Variant Frequencies/i;
+  var INHOUSE_HEMATOLOGY_LEGACY_REGEX = /^Variants\s+.+\.vcf(?:\.gz)?\s*\[merged with \d+ other\(s\)\]$/i;
+
   // Each VarSeq export can include a different set/order of annotation
   // columns (e.g. some runs add a "ClinGen Expert Curated" group, some omit
   // a "Variants" flag column), so columns are located by matching the
@@ -1606,8 +1622,12 @@
     genomeAsia: { header: 'South Asian Alt Allele Counts (AC_SAS)', groupIncludes: ['GenomeAsia'] },
     gnomadExome2: { header: 'South Asian Allele Count (AC_SAS)', groupIncludes: ['gnomAD Exomes', '2.0.1'] },
     inhouseSamples2: { header: 'Samples2' },
-    inhouseCount: { header: '# Samples' },
-    inhouseSampleNames: { header: 'Sample Names' },
+    // Overridden after this map is applied - see findInhouseHematologyColumn -
+    // to prefer the stable "Inhouse_Hematology Variant Frequencies" block
+    // over the legacy one when both are present in the same file. Left here
+    // only so the key has a documented fallback shape.
+    inhouseCount: { header: '# Samples', groupRegex: INHOUSE_HEMATOLOGY_STABLE_REGEX },
+    inhouseSampleNames: { header: 'Sample Names', groupRegex: INHOUSE_HEMATOLOGY_STABLE_REGEX },
     // Newer VarSeq exports add a separate cohort group (seen so far as
     // "Cohort_test Variant Frequencies (N Samples)") with its own single
     // "Sample Count" column - matched generically on "Cohort" in the group
@@ -1661,6 +1681,19 @@
 
   var INHERITANCE_PRIORITY = ['MF', 'AD', 'AR', 'XLR', 'XLD', 'XL'];
 
+  // VarSeq labels the in-house merged-VCF annotation group (the "# Samples" /
+  // "Sample Names" columns) with whatever seed file it happened to build that
+  // merge from, e.g. "Variants <some_file>.vcf.gz [merged with 219 other(s)]"
+  // - the seed filename and count drift from export to export even though
+  // it's the same underlying in-house hematology cohort. Normalize any label
+  // in that shape to a stable, clinician-facing name wherever it's displayed
+  // (never for column *detection*, which matches on the header row instead).
+  var INHOUSE_MERGED_GROUP_PATTERN = /^Variants\s+.+\.vcf(?:\.gz)?\s*\[merged with \d+ other\(s\)\]$/i;
+  var INHOUSE_HEMATOLOGY_GROUP_LABEL = '  Inhouse_Hematology Variant Frequencies (496 Samples)';
+  function normalizeInhouseGroupLabel(text) {
+    return INHOUSE_MERGED_GROUP_PATTERN.test(text) ? INHOUSE_HEMATOLOGY_GROUP_LABEL : text;
+  }
+
   // sheet.columnCount can under-report the true width of an uploaded VarSeq
   // export (it trusts the file's stored dimension range, which some
   // export/edit tools don't recalculate after columns are appended). Take the
@@ -1708,6 +1741,26 @@
       matches.push(c);
     }
     return matches;
+  }
+
+  // Finds the in-house hematology cohort's "# Samples" / "Sample Names"
+  // columns, preferring the stable "Inhouse_Hematology Variant Frequencies"
+  // block over the legacy auto-named merge block when a file has both (see
+  // INHOUSE_HEMATOLOGY_STABLE_REGEX above) - tries every given header text
+  // against the stable block first, only falling back to the legacy block if
+  // none of them are found there. `headers` lets the same call handle a
+  // column whose text has varied across export versions (e.g. the count
+  // column has appeared as both "# Samples" and "Sample Count").
+  function findInhouseHematologyColumn(groupRow, headerRow, colCount, headers) {
+    for (var i = 0; i < headers.length; i++) {
+      var stableCol = findVarSeqColumn(groupRow, headerRow, colCount, { header: headers[i], groupRegex: INHOUSE_HEMATOLOGY_STABLE_REGEX });
+      if (stableCol) return stableCol;
+    }
+    for (var j = 0; j < headers.length; j++) {
+      var legacyCol = findVarSeqColumn(groupRow, headerRow, colCount, { header: headers[j], groupRegex: INHOUSE_HEMATOLOGY_LEGACY_REGEX });
+      if (legacyCol) return legacyCol;
+    }
+    return null;
   }
 
   // ExcelJS returns rich-text/hyperlink cells as objects (e.g. { richText: [...] }
@@ -2567,6 +2620,14 @@
     Object.keys(VARSEQ_COLUMN_SPECS).forEach(function (key) {
       cols[key] = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS[key]);
     });
+
+    // Some exports carry both the legacy auto-named in-house merge block and
+    // the current stable "Inhouse_Hematology Variant Frequencies" block in
+    // the same file - the generic per-key scan above would pick whichever
+    // comes first in column order, which is usually the stale legacy block.
+    // Re-resolve these two columns with the stable-first priority instead.
+    cols.inhouseCount = findInhouseHematologyColumn(groupRow, headerRow, colCount, ['# Samples', 'Sample Count']);
+    cols.inhouseSampleNames = findInhouseHematologyColumn(groupRow, headerRow, colCount, ['Sample Names']);
 
     console.log('Column detection results:', {
       geneNames: cols.geneNames,
@@ -3484,7 +3545,7 @@
       var headers = [];
       for (var c = 1; c <= colCount; c++) {
         headers.push({
-          group: cellText(groupRow.getCell(c).value) || '',
+          group: normalizeInhouseGroupLabel(cellText(groupRow.getCell(c).value) || ''),
           header: cellText(headerRow.getCell(c).value) || '',
         });
       }
@@ -4176,6 +4237,15 @@
           // group label, row 2 the actual column name - style them
           // differently so that distinction is visible, not one flat bar.
           var exportColCount = effectiveVarSeqColCount(sheet, sheet.getRow(1), sheet.getRow(2));
+          // Relabel the in-house merged-VCF group header (see
+          // normalizeInhouseGroupLabel) so the export shows a stable name
+          // instead of whatever seed file/count VarSeq happened to record.
+          var exportGroupRow = sheet.getRow(1);
+          for (var gc = 1; gc <= exportColCount; gc++) {
+            var groupCell = exportGroupRow.getCell(gc);
+            var normalized = normalizeInhouseGroupLabel(cellText(groupCell.value) || '');
+            if (normalized !== (cellText(groupCell.value) || '')) groupCell.value = normalized;
+          }
           highlightGroupHeaderRow(sheet.getRow(1), exportColCount);
           highlightHeaderRow(sheet.getRow(2), exportColCount);
           sheet.getRow(1).height = 20;
