@@ -1591,13 +1591,21 @@
     hgvsC: { headerStartsWith: 'HGVS c.' },
     hgvsP: { headerStartsWith: 'HGVS p.' },
     zygosity: { header: 'Zygosity' },
-    filter: { header: 'Filter' },
-    genotype: { header: '0/1 Genotypes (GT)' },
+    // VarSeq repeats the per-sample FORMAT columns (Filter, VAF, AD, DP, GT, …)
+    // in a "Complex Variants <vcf> for <run>" block that VarSeq always writes
+    // but only populates for multi-allelic/overlapping variants - for an
+    // ordinary file every row in that block is blank. The real, always-populated
+    // values live in the later block grouped under the plain run name. Both
+    // blocks share identical header text, so without groupExcludes the first
+    // (blank) block would win and these columns would render empty even though
+    // the source file has the data.
+    filter: { header: 'Filter', groupExcludes: ['Complex Variants'] },
+    genotype: { header: '0/1 Genotypes (GT)', groupExcludes: ['Complex Variants'] },
     // Different VarSeq exports have used both "Variant Allele Freq" and
     // "Variant Allele Fraction" - match the shared prefix so either is found.
-    vaf: { headerStartsWith: 'Variant Allele Fr' },
-    alleleDepths: { header: 'Allelic Depths (AD)' },
-    readDepths: { header: 'Read Depths (DP)' },
+    vaf: { headerStartsWith: 'Variant Allele Fr', groupExcludes: ['Complex Variants'] },
+    alleleDepths: { header: 'Allelic Depths (AD)', groupExcludes: ['Complex Variants'] },
+    readDepths: { header: 'Read Depths (DP)', groupExcludes: ['Complex Variants'] },
     clinvarClass: { header: 'Classification', groupIncludes: ['ClinVar'] },
     // Different VarSeq exports label this group slightly differently
     // ("ACMG Sample Classifier" vs "Variant Site ACMG Classifier") - match on
@@ -1719,6 +1727,7 @@
       if (spec.header && header !== spec.header) continue;
       if (spec.headerStartsWith && header.indexOf(spec.headerStartsWith) !== 0) continue;
       if (spec.groupIncludes && !spec.groupIncludes.every(function (needle) { return groupText.indexOf(needle) !== -1; })) continue;
+      if (spec.groupExcludes && spec.groupExcludes.some(function (needle) { return groupText.indexOf(needle) !== -1; })) continue;
       if (spec.groupRegex && !spec.groupRegex.test(groupText)) continue;
       return c;
     }
@@ -1736,6 +1745,7 @@
       if (spec.header && header !== spec.header) continue;
       if (spec.headerStartsWith && header.indexOf(spec.headerStartsWith) !== 0) continue;
       if (spec.groupIncludes && !spec.groupIncludes.every(function (needle) { return groupText.indexOf(needle) !== -1; })) continue;
+      if (spec.groupExcludes && spec.groupExcludes.some(function (needle) { return groupText.indexOf(needle) !== -1; })) continue;
       if (spec.groupRegex && !spec.groupRegex.test(groupText)) continue;
       matches.push(c);
     }
