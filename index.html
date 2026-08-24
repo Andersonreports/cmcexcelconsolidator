@@ -1843,19 +1843,41 @@
     });
   }
 
+  // Moves a decimal string's point left by `places` using string manipulation
+  // (not float division), so every digit VarSeq stored is preserved exactly -
+  // no rounding, no truncation, no floating-point division artifacts.
+  function shiftDecimalLeft(numStr, places) {
+    var sign = '';
+    if (numStr.charAt(0) === '-' || numStr.charAt(0) === '+') {
+      sign = numStr.charAt(0) === '-' ? '-' : '';
+      numStr = numStr.slice(1);
+    }
+    var dotIdx = numStr.indexOf('.');
+    var intPart = dotIdx === -1 ? numStr : numStr.slice(0, dotIdx);
+    var fracPart = dotIdx === -1 ? '' : numStr.slice(dotIdx + 1);
+    var digits = intPart + fracPart;
+    var pointPos = intPart.length - places;
+    var result = pointPos <= 0
+      ? '0.' + '0'.repeat(-pointPos) + digits
+      : digits.slice(0, pointPos) + (digits.slice(pointPos) ? '.' + digits.slice(pointPos) : '');
+    result = result.replace(/^0+(?=\d)/, '');
+    return sign + result;
+  }
+
   function formatVafPercent(value) {
     if (value == null || value === '') return '';
     var str = String(value).trim();
     var hasPercent = str.indexOf('%') !== -1;
-    var num = parseFloat(str.replace('%', ''));
+    var cleaned = str.replace('%', '').trim();
+    var num = parseFloat(cleaned);
     if (isNaN(num)) return value;
     // Values written with a "%" sign — or any magnitude > 1 — are on the
-    // 0–100 percentage scale (e.g. "31.79%" or a bare 31.79) and get divided
+    // 0–100 percentage scale (e.g. "31.79%" or a bare 31.79) and get shifted
     // back down to a 0–1 fraction, matching VarSeq's own "Variant Allele
-    // Fraction" column (0.3179). Bare fractions already in 0–1 pass through
-    // unscaled, so we never double-divide.
-    var fraction = (hasPercent || num > 1) ? num / 100 : num;
-    return fraction.toFixed(4);
+    // Fraction" column (0.3179), with every digit VarSeq stored kept intact.
+    // Bare fractions already in 0–1 pass through as-is, unscaled and
+    // unrounded, so we never lose precision VarSeq itself reports.
+    return (hasPercent || num > 1) ? shiftDecimalLeft(cleaned, 2) : cleaned;
   }
 
   // Normalizes any VAF value - a bare fraction (0.25), a >1 percentage number
@@ -4922,7 +4944,7 @@
         zygosity:     cellText(row.getCell(zygosityCol).value),
         inheritance:  cellText(row.getCell(inheritCol).value),
         // Excel auto-converts "100.00%" strings to the numeric 1.0 —
-        // reapply formatVafPercent so we always get a consistent "0.XXXX" fraction string.
+        // reapply formatVafPercent so we always get a consistent 0-1 fraction string.
         vaf:          formatVafPercent(row.getCell(vafCol).value),
         alleleDepths: cellText(row.getCell(allelicCol).value),
         readDepths:   cellText(row.getCell(readDepthCol).value),
