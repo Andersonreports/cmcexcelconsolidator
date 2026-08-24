@@ -1855,7 +1855,7 @@
     // "31.79%"). Only bare fractions in 0–1 (Excel's numeric form of "100%" →
     // 1.0) get scaled up, so we never double-multiply.
     var pct = (hasPercent || num > 1) ? num : num * 100;
-    return pct.toFixed(2);
+    return pct.toFixed(4);
   }
 
   // Normalizes any VAF value - a bare fraction (0.25), a >1 percentage number
