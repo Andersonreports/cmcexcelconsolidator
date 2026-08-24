@@ -1849,12 +1849,13 @@
     var hasPercent = str.indexOf('%') !== -1;
     var num = parseFloat(str.replace('%', ''));
     if (isNaN(num)) return value;
-    // Values written with a "%" sign — or any magnitude > 1 — are already on the
-    // 0–100 percentage scale (e.g. the Listed Variant Excel stores "100.00%" /
-    // "31.79%"). Only bare fractions in 0–1 (Excel's numeric form of "100%" →
-    // 1.0) get scaled up, so we never double-multiply.
-    var pct = (hasPercent || num > 1) ? num : num * 100;
-    return pct.toFixed(4);
+    // Values written with a "%" sign — or any magnitude > 1 — are on the
+    // 0–100 percentage scale (e.g. "31.79%" or a bare 31.79) and get divided
+    // back down to a 0–1 fraction, matching VarSeq's own "Variant Allele
+    // Fraction" column (0.3179). Bare fractions already in 0–1 pass through
+    // unscaled, so we never double-divide.
+    var fraction = (hasPercent || num > 1) ? num / 100 : num;
+    return fraction.toFixed(4);
   }
 
   // Normalizes any VAF value - a bare fraction (0.25), a >1 percentage number
@@ -4921,7 +4922,7 @@
         zygosity:     cellText(row.getCell(zygosityCol).value),
         inheritance:  cellText(row.getCell(inheritCol).value),
         // Excel auto-converts "100.00%" strings to the numeric 1.0 —
-        // reapply formatVafPercent so we always get a consistent "XX.XX" string.
+        // reapply formatVafPercent so we always get a consistent "0.XXXX" fraction string.
         vaf:          formatVafPercent(row.getCell(vafCol).value),
         alleleDepths: cellText(row.getCell(allelicCol).value),
         readDepths:   cellText(row.getCell(readDepthCol).value),
