@@ -1665,11 +1665,11 @@
     refAltCombined: { header: 'Ref/Alt' },
     // Matched by prefix, not the exact phrase - VarSeq exports have shown
     // both "(Combined)" and "(Clinically Relevant)" suffixes for Sequence
-    // Ontology, and "Transcript Name" with or without a suffix, across
-    // different runs.
+    // Ontology, Transcript Name, and Exon Number, with or without a suffix,
+    // across different runs.
     seqOntology: { headerStartsWith: 'Sequence Ontology' },
     transcriptName: { headerStartsWith: 'Transcript Name' },
-    exonNumber: { header: 'Exon Number (Clinically Relevant)' },
+    exonNumber: { headerStartsWith: 'Exon Number' },
     clinvarVariantId: { header: 'Variant ID', groupIncludes: ['ClinVar'] },
     omimGeneId: { header: 'Gene OMIM ID', groupIncludes: ['OMIM'] },
     omimIdField: { header: 'OMIM ID', groupIncludes: ['OMIM'] },
@@ -1855,7 +1855,7 @@
     // "31.79%"). Only bare fractions in 0–1 (Excel's numeric form of "100%" →
     // 1.0) get scaled up, so we never double-multiply.
     var pct = (hasPercent || num > 1) ? num : num * 100;
-    return pct.toFixed(2) + '%';
+    return pct.toFixed(2);
   }
 
   // Normalizes any VAF value - a bare fraction (0.25), a >1 percentage number
@@ -4922,7 +4922,7 @@
         zygosity:     cellText(row.getCell(zygosityCol).value),
         inheritance:  cellText(row.getCell(inheritCol).value),
         // Excel auto-converts "100.00%" strings to the numeric 1.0 —
-        // reapply formatVafPercent so we always get a "XX.XX%" string.
+        // reapply formatVafPercent so we always get a consistent "XX.XX" string.
         vaf:          formatVafPercent(row.getCell(vafCol).value),
         alleleDepths: cellText(row.getCell(allelicCol).value),
         readDepths:   cellText(row.getCell(readDepthCol).value),
