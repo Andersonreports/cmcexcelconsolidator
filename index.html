@@ -1487,6 +1487,20 @@
     return VARIANT_COLUMNS;
   }
 
+  // The in-house hematology cohort's size (see extractSampleCountFromGroupLabel)
+  // is per-upload, not a fixed constant - this builds a { columnKey: header }
+  // map with that count appended, for whichever batch item is being displayed
+  // or exported, so preview/export column names read e.g. "Hematology Inhouse
+  // count (496)" instead of a static label that goes stale as the cohort grows.
+  function inhouseHematologyHeaderOverrides(item) {
+    if (!item || !item.inhouseHematologyCount) return null;
+    var n = item.inhouseHematologyCount;
+    return {
+      inhouseCount: 'Hematology Inhouse count (' + n + ')',
+      inhouseSampleNames: 'Hematology inhouse sample name (' + n + ')'
+    };
+  }
+
   // Reference only - shown in the "Check column mapping" bar so it's easy to
   // check what feeds each consolidated column. Not used by the actual
   // mapping logic below; safe to delete along with that bar without
@@ -1565,6 +1579,15 @@
   // seen under two different header names ("# Samples" and "Sample Count")
   // across export versions.
   var INHOUSE_HEMATOLOGY_STABLE_REGEX = /Inhouse_Hematology Variant Frequencies/i;
+
+  // Pulls the cohort size (e.g. "496") out of a group label like
+  // "Inhouse_Hematology Variant Frequencies (496 Samples)" so it can be
+  // shown alongside the column name in the consolidated export instead of
+  // going stale as the in-house cohort grows over time.
+  function extractSampleCountFromGroupLabel(text) {
+    var m = String(text || '').match(/\((\d+)\s*Samples?\)/i);
+    return m ? m[1] : null;
+  }
 
   // Each VarSeq export can include a different set/order of annotation
   // columns (e.g. some runs add a "ClinGen Expert Curated" group, some omit
@@ -1711,6 +1734,21 @@
       return c;
     }
     return null;
+  }
+
+  // The group label carried into a given column (same "blank cells carry
+  // the last label forward" rule findVarSeqColumn uses) - lets a caller who
+  // already resolved a column index read back its full group text, e.g. to
+  // pull the sample count out of "Inhouse_Hematology Variant Frequencies
+  // (496 Samples)".
+  function groupTextAtColumn(groupRow, colCount, col) {
+    if (!col) return '';
+    var lastGroup = '';
+    for (var c = 1; c <= Math.min(col, colCount); c++) {
+      var v = String(groupRow.getCell(c).value || '');
+      if (v) lastGroup = v;
+    }
+    return lastGroup;
   }
 
   function findVarSeqColumns(groupRow, headerRow, colCount, spec) {
@@ -2641,6 +2679,13 @@
     cols.inhouseCount = findInhouseHematologyColumn(groupRow, headerRow, colCount, ['# Samples', 'Sample Count']);
     cols.inhouseSampleNames = findInhouseHematologyColumn(groupRow, headerRow, colCount, ['Sample Names']);
 
+    // Cohort size grows over time (e.g. "496" today, more later) - read it
+    // straight from this file's own group label rather than hardcoding it,
+    // so the consolidated export's column names never go stale.
+    var inhouseHematologyCount = cols.inhouseCount
+      ? extractSampleCountFromGroupLabel(groupTextAtColumn(groupRow, colCount, cols.inhouseCount))
+      : null;
+
     console.log('Column detection results:', {
       geneNames: cols.geneNames,
       hgvsC: cols.hgvsC,
@@ -2799,7 +2844,7 @@
     });
 
     rows.forEach(function (row, i) { row.sNo = i + 1; });
-    return { rows: rows, runName: runName };
+    return { rows: rows, runName: runName, inhouseHematologyCount: inhouseHematologyCount };
   }
 
   function processCoupleVarSeqWorkbook(workbook) {
@@ -3192,7 +3237,7 @@
   // or columns are reordered. `onReorder`, if given, runs right before `onToggle`
   // after a drag-drop reorder, so callers can sync any derived column list
   // (e.g. an export-only column array) to match the new order.
-  function buildGridHeaderRows(theadEl, columns, frozenCols, onToggle, onReorder) {
+  function buildGridHeaderRows(theadEl, columns, frozenCols, onToggle, onReorder, headerOverrides) {
     theadEl.innerHTML = '';
     var draggedIndex = null;
     var letterRow = document.createElement('tr');
@@ -3218,7 +3263,7 @@
       th.title = 'Drag to reorder this column';
       var isFrozen = frozenCols.has(c.key);
       var label = document.createElement('span');
-      label.textContent = c.header;
+      label.textContent = (headerOverrides && headerOverrides[c.key]) || c.header;
       th.appendChild(label);
       var freezeBtn = document.createElement('button');
       freezeBtn.type = 'button';
@@ -3644,9 +3689,10 @@
       var rawItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
       if (rawItem) renderRawVariantPreview(rawItem);
     } else {
+    var previewItemForHeader = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
     buildGridHeaderRows(variantTableHead, columns, variantFrozenCols, function () { renderVariantTable(batchIdx); }, function () {
       if (currentReportType === 'couple') syncCoupleExportColumns();
-    });
+    }, inhouseHematologyHeaderOverrides(previewItemForHeader));
 
     variantTableBody.innerHTML = '';
     if (variantRows.length === 0) {
@@ -3825,11 +3871,11 @@
   }
 
   // Writes the blue column-header row for a listed-variants section at `rowIdx`.
-  function writeVariantHeaderRow(sheet, rowIdx, columns) {
+  function writeVariantHeaderRow(sheet, rowIdx, columns, headerOverrides) {
     var headerRow = sheet.getRow(rowIdx);
     columns.forEach(function (c, i) {
       var cell = headerRow.getCell(i + 1);
-      cell.value = c.header;
+      cell.value = (headerOverrides && headerOverrides[c.key]) || c.header;
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -3930,7 +3976,7 @@
   // of the main list into its own highlighted "Secondary Findings" section at
   // the top (mirroring how the couple export pulls out shared/common variants),
   // so those clinically-reportable incidental findings can't be missed.
-  function buildVariantExcel(rows, title, columns, workbook, reportType) {
+  function buildVariantExcel(rows, title, columns, workbook, reportType, headerOverrides) {
     // Rows soft-deleted via the preview's ×/restore toggle are parked, not
     // spliced out, so they must be filtered here rather than at removal time.
     rows = rows.filter(function (r) { return !r._removed; });
@@ -3948,7 +3994,7 @@
     // Secondary Findings section (full rows), pulled to the top, if any.
     if (secondaryRows.length) {
       writeSecondaryFindingsTitle(sheet, cursor, columns.length); cursor++;
-      writeVariantHeaderRow(sheet, cursor, columns); cursor++;
+      writeVariantHeaderRow(sheet, cursor, columns, headerOverrides); cursor++;
       secondaryRows.forEach(function (row, i) {
         writeVariantDataRow(sheet, cursor, row, columns, reportType, maps, i + 1, SECONDARY_FINDING_ROW_FILL); cursor++;
       });
@@ -3963,7 +4009,7 @@
       sheet.getRow(cursor).alignment = { horizontal: 'center', vertical: 'middle' };
       cursor++;
     }
-    writeVariantHeaderRow(sheet, cursor, columns); cursor++;
+    writeVariantHeaderRow(sheet, cursor, columns, headerOverrides); cursor++;
     mainRows.forEach(function (row, i) {
       writeVariantDataRow(sheet, cursor, row, columns, reportType, maps, i + 1); cursor++;
     });
@@ -4273,7 +4319,7 @@
       if (item.reportType === 'couple') {
         return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
       }
-      return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook, item.reportType);
+      return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook, item.reportType, inhouseHematologyHeaderOverrides(item));
     });
   }
 
@@ -4331,6 +4377,7 @@
               rawBuffer: rawBuffer,
               runName: result.runName,
               title: autoTitle,
+              inhouseHematologyCount: result.inhouseHematologyCount,
               loadedAt: new Date().toLocaleDateString(),
               error: null
             };
