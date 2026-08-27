@@ -1347,10 +1347,10 @@
     { key: 'clingenClass', header: 'CLINGEN CLASSIFICATION' },
     { key: 'zygosity', header: 'ZYGOSITY' },
     { key: 'inheritance', header: 'INHERTIANCE' },
-    { key: 'inhouseMerged', header: 'Inhouse merged' },
     { key: 'inhouseCount', header: 'Hematology Inhouse count' },
     { key: 'inhouseSampleNames', header: 'Hematology inhouse sample name' },
-    { key: 'cohortTest', header: 'Cohort Sample Count' },
+    { key: 'cohort6060Count', header: 'Cohort 6060 Sample Count' },
+    { key: 'cohort6060SampleNames', header: 'Cohort 6060 Sample Names' },
     { key: 'vaf', header: 'VAF(%)' },
     { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
     { key: 'readDepths', header: 'READ DEPTH' },
@@ -1389,12 +1389,8 @@
     { key: 'clinvar', header: 'CLINVAR' },
     { key: 'zygosity', header: 'ZYGOSITY' },
     { key: 'inheritance', header: 'INHERITANCE' },
-    { key: 'inhouse947', header: 'INHOUSE - 947 Mar 2024' },
-    { key: 'inhouse595', header: 'INHOUSE - 595 Mar 2024' },
-    { key: 'inhouseGM98', header: 'INHOUSE - GM 98' },
-    { key: 'inhouseGM535', header: 'INHOUSE - GM 535' },
-    { key: 'inhouseGM343', header: 'Inhouse_343 Jan2025_to_Mar2025' },
-    { key: 'inhouseGM669', header: 'Inhouse__669_Mar2025_to_June2025' },
+    { key: 'cohort6060Count', header: 'Cohort 6060 Sample Count' },
+    { key: 'cohort6060SampleNames', header: 'Cohort 6060 Sample Names' },
     { key: 'vafRaw', header: 'VAF(%)' },
     { key: 'alleleDepths', header: 'ALLELIC DEPTH' },
     { key: 'readDepths', header: 'DEP(X)' },
@@ -1436,12 +1432,8 @@
     { key: 'acmg', header: 'ACMG' },
     { key: 'franklin', header: 'FRANKLIN' },
     { key: 'clinvar', header: 'CLINVAR' },
-    { key: 'inhouse947', header: 'INHOUSE - 947 Jun 2023' },
-    { key: 'inhouse595', header: 'INHOUSE - 595 Mar 2024' },
-    { key: 'inhouseGM98', header: 'INHOUSE - GM 98' },
-    { key: 'inhouseGM535', header: 'Genemind_inhouse_535_june_2024' },
-    { key: 'inhouseGM343', header: 'Genemind_inhouse_Jan2025_to_Mar2025_343' },
-    { key: 'inhouseGM669', header: 'Genemind_inhouse_Mar2025_to_June2025_669' },
+    { key: 'cohort6060Count', header: 'Cohort 6060 Sample Count' },
+    { key: 'cohort6060SampleNames', header: 'Cohort 6060 Sample Names' },
     { key: 'readDepths1', header: 'READ DEPTH' },
     { key: 'vaf1', header: 'VAF(%)' },
     { key: 'alleleDepths1', header: 'ALLELIC DEPTH' },
@@ -1510,10 +1502,10 @@
     genotype: '0/1 Genotypes (GT)',
     filter: 'Filter',
     inheritance: 'Inheritance, under the "OMIM" group (abbreviated: AD/AR/XLD/XLR/XL/MF)',
-    inhouseMerged: 'Samples2',
     inhouseCount: '# Samples',
     inhouseSampleNames: 'Sample Names',
-    cohortTest: 'Sample Count, under a "Cohort" group (e.g. "Cohort_test Variant Frequencies")',
+    cohort6060Count: 'Sample Count, under the "6060" cohort group (e.g. "Cohort variant frequency (6060 Samples)")',
+    cohort6060SampleNames: 'Sample Names, under the "6060" cohort group',
     vaf: 'Variant Allele Freq (formatted as a percentage)',
     alleleDepths: 'Allelic Depths (AD)',
     readDepths: 'Read Depths (DP)',
@@ -1537,12 +1529,6 @@
     revel: 'REVEL',
     gnomadGenome4SAMale: 'South Asian Male Allele Count, under "gnomAD Genomes" / "4.1"',
     gnomadExome4SAMale: 'South Asian Male Allele Count, under "gnomAD Exomes" / "4.1"',
-    inhouse947: '# Samples, under the in-house 947 cohort group',
-    inhouse595: '# Samples, under the in-house 595 cohort group',
-    inhouseGM98: '# Samples, under the in-house GM 98 cohort group',
-    inhouseGM535: '# Samples, under the in-house GM 535 cohort group',
-    inhouseGM343: '# Samples, under the in-house GM 343 cohort group',
-    inhouseGM669: '# Samples, under the in-house GM 669 cohort group',
     phenoRank: 'Gene Rank, under the "PhoRank" group',
   };
 
@@ -1627,32 +1613,26 @@
     gnomadGenome3Female: { header: 'South Asian Female Allele Count (AC_SAS_XX)', groupIncludes: ['3.1.2'] },
     genomeAsia: { header: 'South Asian Alt Allele Counts (AC_SAS)', groupIncludes: ['GenomeAsia'] },
     gnomadExome2: { header: 'South Asian Allele Count (AC_SAS)', groupIncludes: ['gnomAD Exomes', '2.0.1'] },
-    inhouseSamples2: { header: 'Samples2' },
     // Overridden after this map is applied - see findInhouseHematologyColumn -
     // to prefer the stable "Inhouse_Hematology Variant Frequencies" block
     // over the legacy one when both are present in the same file. Left here
     // only so the key has a documented fallback shape.
     inhouseCount: { header: '# Samples', groupRegex: INHOUSE_HEMATOLOGY_STABLE_REGEX },
     inhouseSampleNames: { header: 'Sample Names', groupRegex: INHOUSE_HEMATOLOGY_STABLE_REGEX },
-    // Newer VarSeq exports add a separate cohort group (seen so far as
-    // "Cohort_test Variant Frequencies (N Samples)") with its own single
-    // "Sample Count" column - matched generically on "Cohort" in the group
-    // name so any similarly-named cohort group is picked up too, not just
-    // this exact one.
-    cohortTest: { header: 'Sample Count', groupIncludes: ['Cohort'] },
+    // Cohort group specific to sample batch "6060" (e.g. "Cohort variant
+    // frequency (6060 Samples)") - matched by the batch number embedded in
+    // the group name, same idiom as the numbered in-house cohorts below, so
+    // it keeps matching if the group's date/label wording changes but the
+    // number doesn't. Replaces the older generic "Cohort_test Variant
+    // Frequencies" group, which is no longer rendered in the consolidated
+    // export.
+    cohort6060Count: { header: 'Sample Count', groupRegex: /(?<!\d)6060(?!\d)/ },
+    cohort6060SampleNames: { header: 'Sample Names', groupRegex: /(?<!\d)6060(?!\d)/ },
     alphaMissense: { header: 'Classification', groupIncludes: ['AlphaMissense'] },
     revel: { header: 'REVEL' },
     // Single-mode: gnomAD South Asian male allele counts (genome + exome 4.1)
     gnomadGenome4SAMale: { header: 'South Asian Male Allele Count', groupIncludes: ['gnomAD Genomes', '4.1'] },
     gnomadExome4SAMale: { header: 'South Asian Male Allele Count', groupIncludes: ['gnomAD Exomes', '4.1'] },
-    // Single-mode: the six named in-house cohort counts, matched by the batch number
-    // embedded in the dataset-group name (survives the group's date/label changing).
-    inhouse947: { header: '# Samples', groupRegex: /(?<!\d)947(?!\d)/ },
-    inhouse595: { header: '# Samples', groupRegex: /(?<!\d)595(?!\d)/ },
-    inhouseGM98: { header: '# Samples', groupRegex: /(?<!\d)98(?!\d)/ },
-    inhouseGM535: { header: '# Samples', groupRegex: /(?<!\d)535(?!\d)/ },
-    inhouseGM343: { header: '# Samples', groupRegex: /(?<!\d)343(?!\d)/ },
-    inhouseGM669: { header: '# Samples', groupRegex: /(?<!\d)669(?!\d)/ },
     phenoRank: { header: 'Gene Rank', groupIncludes: ['PhoRank'] },
     // Genomic coordinates — used to build direct Franklin links
     variantChr: { header: 'Chr' },
@@ -2752,10 +2732,10 @@
         filter: get('filter'),
         genotype: get('genotype'),
         inheritance: currentReportType === 'cmc' ? inheritanceCodes.join('/') : abbreviateInheritanceGrouped(rawInheritance),
-        inhouseMerged: get('inhouseSamples2'),
         inhouseCount: get('inhouseCount'),
         inhouseSampleNames: get('inhouseSampleNames'),
-        cohortTest: get('cohortTest'),
+        cohort6060Count: get('cohort6060Count'),
+        cohort6060SampleNames: get('cohort6060SampleNames'),
         vaf: formatVafPercent(get('vaf')),
         vafRaw: get('vaf'),
         alleleDepths: get('alleleDepths'),
@@ -2779,12 +2759,6 @@
         gnomadExome2: get('gnomadExome2'),
         gnomadGenome4SAMale: get('gnomadGenome4SAMale'),
         gnomadExome4SAMale: get('gnomadExome4SAMale'),
-        inhouse947: get('inhouse947'),
-        inhouse595: get('inhouse595'),
-        inhouseGM98: get('inhouseGM98'),
-        inhouseGM535: get('inhouseGM535'),
-        inhouseGM343: get('inhouseGM343'),
-        inhouseGM669: get('inhouseGM669'),
         phenoRank: get('phenoRank'),
         alphaMissense: get('alphaMissense'),
         revel: get('revel'),
@@ -2797,7 +2771,6 @@
           clinvar: (clinvarValue && gene && variant) ? clinVarWebUrl(gene, variant) : null,
           varseq: hyperlinks.acmgClass,
           inheritance: hyperlinks.omimInheritance,
-          inhouseMerged: hyperlinks.inhouseSamples2,
           // Gene-search links, not carried over from the source file, and only
           // attached when the cell actually has a value (an empty cell means
           // nothing was found for this variant, so a link icon would mislead).
@@ -2960,12 +2933,8 @@
         gnomadGenome3Female: get('gnomadGenome3Female'),
         genomeAsia: get('genomeAsia'),
         gnomadExome2: get('gnomadExome2'),
-        inhouse947: get('inhouse947'),
-        inhouse595: get('inhouse595'),
-        inhouseGM98: get('inhouseGM98'),
-        inhouseGM535: get('inhouseGM535'),
-        inhouseGM343: get('inhouseGM343'),
-        inhouseGM669: get('inhouseGM669'),
+        cohort6060Count: get('cohort6060Count'),
+        cohort6060SampleNames: get('cohort6060SampleNames'),
         alphaMissense: get('alphaMissense'),
         spliceGeneSplicer: get('spliceGeneSplicer'),
         spliceMaxEntScan: get('spliceMaxEntScan'),
