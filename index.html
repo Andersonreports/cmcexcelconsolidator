@@ -1898,6 +1898,37 @@
     return (hasPercent || num > 1) ? shiftDecimalLeft(cleaned, 2) : cleaned;
   }
 
+  // Moves a decimal string's point right by `places` (the inverse of
+  // shiftDecimalLeft), padding with trailing zeros as needed, so every digit
+  // VarSeq stored is preserved exactly with no rounding.
+  function shiftDecimalRight(numStr, places) {
+    var sign = '';
+    if (numStr.charAt(0) === '-' || numStr.charAt(0) === '+') {
+      sign = numStr.charAt(0) === '-' ? '-' : '';
+      numStr = numStr.slice(1);
+    }
+    var dotIdx = numStr.indexOf('.');
+    var intPart = dotIdx === -1 ? numStr : numStr.slice(0, dotIdx);
+    var fracPart = dotIdx === -1 ? '' : numStr.slice(dotIdx + 1);
+    if (fracPart.length < places) fracPart += '0'.repeat(places - fracPart.length);
+    var newIntPart = (intPart + fracPart.slice(0, places)).replace(/^0+(?=\d)/, '');
+    var newFracPart = fracPart.slice(places);
+    return sign + newIntPart + (newFracPart ? '.' + newFracPart : '');
+  }
+
+  // CMC-only VAF display (Listed Variant Excel / Sample Final Consolidate):
+  // renders as a 0-100 percentage string (e.g. "50.52%"), unlike the 0-1
+  // fraction formatVafPercent produces for Single/Couple.
+  function formatVafPercentDisplay(value) {
+    if (value == null || value === '') return '';
+    var str = String(value).trim();
+    var hasPercent = str.indexOf('%') !== -1;
+    var cleaned = str.replace('%', '').trim();
+    var num = parseFloat(cleaned);
+    if (isNaN(num)) return value;
+    return ((hasPercent || num > 1) ? cleaned : shiftDecimalRight(cleaned, 2)) + '%';
+  }
+
   // Normalizes any VAF value - a bare fraction (0.25), a >1 percentage number
   // (25), or a formatted "25.00%" string - back to a 0-1 fraction, so the
   // low-VAF threshold check below works regardless of which form the value
@@ -2781,7 +2812,7 @@
         inhouseSampleNames: get('inhouseSampleNames'),
         cohort6060Count: get('cohort6060Count'),
         cohort6060SampleNames: get('cohort6060SampleNames'),
-        vaf: formatVafPercent(get('vaf')),
+        vaf: formatVafPercentDisplay(get('vaf')),
         vafRaw: get('vaf'),
         alleleDepths: get('alleleDepths'),
         readDepths: get('readDepths'),
@@ -4960,8 +4991,8 @@
         zygosity:     cellText(row.getCell(zygosityCol).value),
         inheritance:  cellText(row.getCell(inheritCol).value),
         // Excel auto-converts "100.00%" strings to the numeric 1.0 —
-        // reapply formatVafPercent so we always get a consistent 0-1 fraction string.
-        vaf:          formatVafPercent(row.getCell(vafCol).value),
+        // reapply formatVafPercentDisplay so we always get a consistent "XX.XX%" string.
+        vaf:          formatVafPercentDisplay(row.getCell(vafCol).value),
         alleleDepths: cellText(row.getCell(allelicCol).value),
         readDepths:   cellText(row.getCell(readDepthCol).value),
         omimTitle:    omimTitleCol ? cellText(omimRaw) : null,
