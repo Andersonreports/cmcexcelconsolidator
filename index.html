@@ -1942,6 +1942,12 @@
     return (hasPercent || num > 1) ? num / 100 : num;
   }
 
+  // Low-VAF red-flag cutoff, per VAF column key: Single/Couple flag below
+  // 0.2, CMC keeps its existing 0.3 cutoff.
+  function vafLowThreshold(key) {
+    return key === 'vaf' ? 0.3 : 0.2;
+  }
+
   function stripHgvsPrefix(value) {
     if (value == null) return '';
     var s = String(value);
@@ -3208,7 +3214,7 @@
         });
         vafColIdxs.forEach(function (colIdx) {
           var val = row[COUPLE_EXPORT_COLUMNS[colIdx].key];
-          if (val != null && val !== '' && vafAsFraction(val) < 0.3) {
+          if (val != null && val !== '' && vafAsFraction(val) < 0.2) {
             dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
           }
         });
@@ -3497,8 +3503,8 @@
         if (isCellTruncated(e.target)) showCellPopover(e.target, e.target.value);
       });
       input.addEventListener('blur', hideCellPopover);
-      if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
-        input.style.color = (input.value !== '' && vafAsFraction(input.value) < 0.3) ? '#c2293a' : '';
+      if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2') {
+        input.style.color = (input.value !== '' && vafAsFraction(input.value) < vafLowThreshold(c.key)) ? '#c2293a' : '';
       }
       // A plain <input> can't color just the low number within a "ref,alt"
       // pair like the exported cell does - flag the whole box red instead as
@@ -3519,8 +3525,8 @@
         e.target.title = e.target.value;
         if (cellPopoverAnchor === e.target) showCellPopover(e.target, e.target.value);
         updateInheritanceColor();
-        if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') {
-          e.target.style.color = (e.target.value !== '' && vafAsFraction(e.target.value) < 0.3) ? '#c2293a' : '';
+        if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2') {
+          e.target.style.color = (e.target.value !== '' && vafAsFraction(e.target.value) < vafLowThreshold(c.key)) ? '#c2293a' : '';
         }
         if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') {
           var newAdRich = alleleDepthRichText(e.target.value);
@@ -3887,7 +3893,7 @@
         return acc;
       }, []),
       vafColIdxs: columns.reduce(function (acc, c, i) {
-        if (c.key === 'vaf' || c.key === 'vaf1' || c.key === 'vaf2') acc.push(i);
+        if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2') acc.push(i);
         return acc;
       }, []),
       alleleDepthColIdxs: columns.reduce(function (acc, c, i) {
@@ -3975,7 +3981,7 @@
     });
     maps.vafColIdxs.forEach(function (colIdx) {
       var val = row[columns[colIdx].key];
-      if (val != null && val !== '' && vafAsFraction(val) < 0.3) {
+      if (val != null && val !== '' && vafAsFraction(val) < vafLowThreshold(columns[colIdx].key)) {
         dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
       }
     });
