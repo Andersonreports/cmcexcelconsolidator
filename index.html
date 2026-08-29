@@ -1616,9 +1616,18 @@
     readDepths: { header: 'Read Depths (DP)', groupExcludes: ['Complex Variants'] },
     clinvarClass: { header: 'Classification', groupIncludes: ['ClinVar'] },
     // Different VarSeq exports label this group slightly differently
-    // ("ACMG Sample Classifier" vs "Variant Site ACMG Classifier") - match on
-    // both key words rather than the exact phrase so either form is found.
-    acmgClass: { header: 'Classification', groupIncludes: ['ACMG', 'Classifier'] },
+    // ("ACMG Sample Classifier" vs "Variant Site ACMG Classifier"). A couple
+    // export can carry BOTH at once: a "ACMG Sample Classifier for <run>"
+    // block scoped to just one partner (blank for variants only the other
+    // partner carries) alongside the shared, per-variant "Variant Site ACMG
+    // Classifier" block. Try the unambiguous "Variant Site" wording first so
+    // that shared block wins over the single-partner one; fall back to the
+    // old loose match for exports that only ever have one ACMG block, under
+    // either name.
+    acmgClass: [
+      { header: 'Classification', groupIncludes: ['Variant Site', 'ACMG'] },
+      { header: 'Classification', groupIncludes: ['ACMG', 'Classifier'] },
+    ],
     omimInheritance: { header: 'Inheritance', groupIncludes: ['OMIM'] },
     omimTitle: { header: 'Title', groupIncludes: ['OMIM'] },
     omimPhenotypes: { header: 'Phenotypes', groupIncludes: ['OMIM'] },
@@ -1715,7 +1724,7 @@
     return Math.max(fromSheet, fromGroup, fromHeader, 100);
   }
 
-  function findVarSeqColumn(groupRow, headerRow, colCount, spec) {
+  function findVarSeqColumnSingleSpec(groupRow, headerRow, colCount, spec) {
     var lastGroup = '';
     for (var c = 1; c <= colCount; c++) {
       var group = String(groupRow.getCell(c).value || '');
@@ -1736,6 +1745,19 @@
     return null;
   }
 
+  // `spec` is normally one {header/groupIncludes/...} matcher, but can also be
+  // an array of them tried in order - the first spec with any match wins,
+  // letting a preferred, more specific matcher take priority over a looser
+  // fallback that would otherwise also match (see acmgClass above).
+  function findVarSeqColumn(groupRow, headerRow, colCount, spec) {
+    var specs = Array.isArray(spec) ? spec : [spec];
+    for (var s = 0; s < specs.length; s++) {
+      var found = findVarSeqColumnSingleSpec(groupRow, headerRow, colCount, specs[s]);
+      if (found) return found;
+    }
+    return null;
+  }
+
   // The group label carried into a given column (same "blank cells carry
   // the last label forward" rule findVarSeqColumn uses) - lets a caller who
   // already resolved a column index read back its full group text, e.g. to
@@ -1751,7 +1773,7 @@
     return lastGroup;
   }
 
-  function findVarSeqColumns(groupRow, headerRow, colCount, spec) {
+  function findVarSeqColumnsSingleSpec(groupRow, headerRow, colCount, spec) {
     var matches = [];
     var lastGroup = '';
     for (var c = 1; c <= colCount; c++) {
@@ -1767,6 +1789,19 @@
       matches.push(c);
     }
     return matches;
+  }
+
+  // Same array-of-fallback-specs support as findVarSeqColumn (see there) - the
+  // first spec that matches anything wins outright, rather than pooling
+  // matches across specs, so a preferred specific matcher isn't diluted by a
+  // looser fallback that would also match unrelated columns.
+  function findVarSeqColumns(groupRow, headerRow, colCount, spec) {
+    var specs = Array.isArray(spec) ? spec : [spec];
+    for (var s = 0; s < specs.length; s++) {
+      var matches = findVarSeqColumnsSingleSpec(groupRow, headerRow, colCount, specs[s]);
+      if (matches.length) return matches;
+    }
+    return [];
   }
 
   // Finds the in-house hematology cohort's "# Samples" / "Sample Names"
@@ -2919,7 +2954,6 @@
       var genes = splitList(get('geneNames'));
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
-      var acmgList = splitList(get('acmgClass'));
 
       // When a row lists multiple overlapping genes/transcripts, use whichever
       // entry has a coding ("c.") HGVS notation - not just the first listed -
@@ -2949,6 +2983,29 @@
       var hasCall1 = !!(rawZygosity1 || readDepths1 || alleleDepths1 || vaf1);
       var hasCall2 = !!(rawZygosity2 || readDepths2 || alleleDepths2 || vaf2);
       if (!hasCall1 && !hasCall2) return;
+
+      // ACMG classification is usually one "Variant Site ACMG Classifier"
+      // block shared by both partners (acmgClass's preferred spec matches
+      // just that), but some exports only carry a per-partner "ACMG Sample
+      // Classifier for <run>" block for each of them instead - those match
+      // positionally the same way zygosity/read depths above do (index 0 =
+      // partner 1, index 1 = partner 2). When two such blocks were found,
+      // read each partner's own block rather than defaulting to whichever
+      // came first in the sheet, so a female-only (or male-only) variant
+      // still gets its classification instead of reading a blank cell from
+      // the other partner's block.
+      var acmgList;
+      if ((colsAll.acmgClass || []).length >= 2) {
+        var acmgList1 = splitList(getNth('acmgClass', 0));
+        var acmgList2 = splitList(getNth('acmgClass', 1));
+        if (hasCall1 && hasCall2) {
+          acmgList = acmgList1[0] ? acmgList1 : acmgList2;
+        } else {
+          acmgList = hasCall1 ? acmgList1 : acmgList2;
+        }
+      } else {
+        acmgList = splitList(get('acmgClass'));
+      }
 
       var variant = stripHgvsPrefix(hgvsCList[codingIdx]);
       var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
