@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
 <title>Anderson-Bioinfo Excel Consolidator</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23faf2e2' stroke='%231c1812' stroke-width='2'/%3E%3Ctext x='32' y='43' font-size='30' font-family='Georgia,serif' font-weight='600' fill='%231c1812' text-anchor='middle'%3EC%3C/text%3E%3C/svg%3E" />
+<link rel="icon" href="logo.jpg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
@@ -436,6 +436,7 @@
 <div class="app-shell">
   <header class="top-bar">
     <div style="display: flex; align-items: center; gap: 16px;">
+      <img src="logo.jpg" alt="Anderson-Bioinfo Excel Consolidator logo" style="height: 36px; width: 36px; border-radius: 8px; object-fit: cover;" />
       <span class="top-bar-title">Anderson-Bioinfo Excel Consolidator</span>
       <button type="button" id="global-undo-btn" title="Undo the last change (Ctrl+Z)" disabled
         style="display:flex;align-items:center;gap:6px;font:600 13px var(--sans);padding:6px 12px;border:1px solid rgba(0,0,0,.3);border-radius:6px;background:rgba(255,255,255,.5);color:var(--ink);cursor:pointer;">
@@ -2051,12 +2052,18 @@
     return result.join(',');
   }
 
-  function abbreviateZygosity(value, inheritanceCodes) {
+  function abbreviateZygosity(value, inheritanceCodes, isFemale) {
     if (!value) return '';
     var norm = String(value).trim().toUpperCase();
     var isXLinked = inheritanceCodes.indexOf('XLD') !== -1 || inheritanceCodes.indexOf('XLR') !== -1 || inheritanceCodes.indexOf('XL') !== -1;
     if (norm === 'HETEROZYGOUS') return 'HET';
-    if (norm === 'HOMOZYGOUS' || norm === 'HOMOZYGOUS VARIANT') return isXLinked ? 'HEMI' : 'HOM';
+    // A "Homozygous" call at an X-linked locus is usually a variant-calling
+    // artifact of treating chrX as diploid in a male sample (who only has one
+    // X), so it's reported as HEMI. A female sample genuinely has two X
+    // copies, so the same call is a real homozygous genotype - only override
+    // to HOM when the sample's sex is confirmed female; unknown sex keeps the
+    // existing HEMI behavior.
+    if (norm === 'HOMOZYGOUS' || norm === 'HOMOZYGOUS VARIANT') return (isXLinked && !isFemale) ? 'HEMI' : 'HOM';
     if (norm === 'HEMIZYGOUS') return 'HEMI';
     return norm;
   }
@@ -2704,6 +2711,35 @@
     return 'LISTED VARIANTS FOR ' + (runName || base);
   }
 
+  // Same filename conventions as extractPatientTitle above, but returns just
+  // the sample's sex ('M'/'F') so callers can tell a true X-linked homozygous
+  // call (possible in females) apart from the hemizygous artifact that shows
+  // up as "Homozygous" for X-linked calls in males. Returns null when the
+  // filename doesn't carry a recognizable gender marker.
+  function extractGenderFromFilename(filename) {
+    var base = filename.replace(/\.[^.]+$/, '');
+
+    var nameMatch = base.match(/^[^_]+_(.+?)\s*\(([^)]+)\)/);
+    if (nameMatch) {
+      var ageGenderMatch = nameMatch[2].match(/(\d+)\s*Y\s*\/?\s*([MF])\s*$/i);
+      if (ageGenderMatch) return ageGenderMatch[2].toUpperCase();
+    }
+
+    var m = base.match(/_?(MR|MRS|MS|MASTER)_([A-Z0-9]+)_([A-Z]{1,3})_(\d+)_(\d+)Y_?([MF])/i);
+    if (m) return m[6].toUpperCase();
+
+    var m2 = base.match(/_?(MR|MRS|MS|MASTER)_([A-Z0-9]+)_(\d+)_(\d+)Y_?([MF])/i);
+    if (m2) return m2[5].toUpperCase();
+
+    var m3 = base.match(/_?(MR|MRS|MS|MASTER)_/i);
+    if (m3) {
+      var sal = m3[1].toUpperCase();
+      return (sal === 'MR' || sal === 'MASTER') ? 'M' : 'F';
+    }
+
+    return null;
+  }
+
   function extractCoupleNamesFromFilename(filename) {
     var base = filename.replace(/\.[^.]+$/, '').replace(/\s*\(\d+\)\s*$/, '');
     var starts = [];
@@ -2727,9 +2763,11 @@
     });
   }
 
-  function processVarSeqWorkbook(workbook) {
+  function processVarSeqWorkbook(workbook, filename) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in the uploaded file.');
+
+    var isFemale = filename && extractGenderFromFilename(filename) === 'F';
 
     var groupRow = sheet.getRow(1);
     var headerRow = sheet.getRow(2);
@@ -2845,7 +2883,7 @@
         _franklinUrl: null,
         clinvar: clinvarValue,
         varseq: get('acmgClass') || '',
-        zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes),
+        zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes, isFemale),
         filter: get('filter'),
         genotype: get('genotype'),
         inheritance: currentReportType === 'cmc' ? inheritanceCodes.join('/') : abbreviateInheritanceGrouped(rawInheritance),
@@ -4463,7 +4501,7 @@
             };
           } else {
             // Use standard VarSeq processing
-            var result = processVarSeqWorkbook(workbook);
+            var result = processVarSeqWorkbook(workbook, file.name);
             var autoTitle = extractPatientTitle(file.name, result.runName);
             return {
               fileName: file.name,
