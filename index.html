@@ -538,22 +538,6 @@
           <span class="progress-text" id="franklin-progress-text"></span>
           <button type="button" class="upload-remove-btn" id="franklin-file-remove" title="Remove ACMG reference file">×</button>
         </div>
-        <div class="upload-row" id="couple-gender-row" style="display:none;">
-          <label class="upload-label" style="flex:0 0 auto;">
-            1st column-group in the raw Excel is
-            <select id="couple-gender-select-1">
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-            </select>
-          </label>
-          <label class="upload-label" style="flex:0 0 auto;">
-            2nd column-group in the raw Excel is
-            <select id="couple-gender-select-2">
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-            </select>
-          </label>
-        </div>
         <div id="variant-batch-list" class="batch-list" hidden></div>
         <div class="error-banner" id="variant-error" hidden></div>
         <!-- Keep hidden for legacy JS compatibility -->
@@ -567,7 +551,25 @@
             <h3 style="font-size: 14px; font-weight: 600; margin: 0 0 4px 0; color: var(--ink);">DNA Variant Extraction Interface</h3>
             <p style="font-size: 12px; color: var(--text-secondary); margin: 0;">Preview and manage extracted genomic variants</p>
           </div>
-          <button style="all: unset; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); color: var(--ink); cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s;" id="variant-filter-btn">Filter</button>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div id="couple-gender-row" style="display:none; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary);">
+              <label style="display: flex; align-items: center; gap: 4px;">
+                1st group:
+                <select id="couple-gender-select-1" style="font-size: 12px; padding: 3px 6px;">
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px;">
+                2nd group:
+                <select id="couple-gender-select-2" style="font-size: 12px; padding: 3px 6px;">
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                </select>
+              </label>
+            </div>
+            <button style="all: unset; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); color: var(--ink); cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s;" id="variant-filter-btn">Filter</button>
+          </div>
         </div>
         <details class="mapping-toggle" id="variant-mapping-toggle">
           <summary>Check column mapping</summary>
