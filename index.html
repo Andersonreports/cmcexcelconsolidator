@@ -454,6 +454,7 @@
         <option value="cmc">CMC</option>
         <option value="single">Single</option>
         <option value="couple">Couple</option>
+        <option value="cnv">CNV Variants</option>
       </select>
     </div>
   </header>
@@ -466,6 +467,8 @@
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="single" hidden>Listed Variant Excel</button>
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="couple" hidden>Listed Variant Excel</button>
+
+    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cnv" hidden>Listed Variant Excel</button>
   </nav>
 
   <main class="main-content">
@@ -1547,6 +1550,31 @@
     { key: 'exonNumber', header: 'Exon' },
   ];
 
+  // CNV report layout - a curated subset of the raw CNV caller export's ~30
+  // columns (see processCnvWorkbook). Several raw columns (Common CNV freq,
+  // IDs and % overlap, the per-copy-state CN0_freq..CN8_freq counts) are
+  // deliberately dropped - they're verbose technical detail duplicating what
+  // "Overlapping CNVs" already summarizes, and some raw cells run past
+  // 5,000 characters, unusable in a review sheet.
+  var CNV_VARIANT_COLUMNS = [
+    { key: 'sNo', header: 'S.NO' },
+    { key: 'gene', header: 'GENE' },
+    { key: 'chromosome', header: 'CHROMOSOME' },
+    { key: 'start', header: 'START' },
+    { key: 'end', header: 'END' },
+    { key: 'width', header: 'SIZE (bp)' },
+    { key: 'copyNumber', header: 'COPY NUMBER' },
+    { key: 'type', header: 'TYPE' },
+    { key: 'classification', header: 'CLASSIFICATION' },
+    { key: 'totalScore', header: 'SCORE' },
+    { key: 'omim', header: 'OMIM' },
+    { key: 'hpo', header: 'HPO' },
+    { key: 'dosageSensitiveGenes', header: 'DOSAGE-SENSITIVE GENES' },
+    { key: 'allProteinCodingGene', header: 'PROTEIN CODING GENES' },
+    { key: 'sampleName', header: 'SAMPLE NAME' },
+    { key: 'overlappingCnvs', header: 'OVERLAPPING CNVs' },
+  ];
+
   var COUPLE_VARIANT_COLUMNS = [{ key: 'sNo', header: 'S.NO' }].concat(COUPLE_EXPORT_COLUMNS);
 
   // COUPLE_VARIANT_COLUMNS is a separate array from COUPLE_EXPORT_COLUMNS (concat
@@ -1563,6 +1591,7 @@
   function getVariantColumns(reportType) {
     if (reportType === 'single') return SINGLE_VARIANT_COLUMNS;
     if (reportType === 'couple') return COUPLE_VARIANT_COLUMNS;
+    if (reportType === 'cnv') return CNV_VARIANT_COLUMNS;
     return VARIANT_COLUMNS;
   }
 
@@ -2592,7 +2621,11 @@
         if (linkEl) linkEl.textContent = '↗';
         return;
       }
-      if (!row.gene && !row.variant) return;
+      // A CNV row has a gene but no HGVS variant (Franklin/ClinVar classify
+      // point mutations, not copy-number calls) - require both, not just
+      // one, so those rows are skipped instead of querying Franklin/ClinVar
+      // with a blank variant.
+      if (!row.gene || !row.variant) return;
       if (linkEl) linkEl.textContent = isGenericVus(row.franklin) ? '↗' : '…';
       pending.push(enqueueFranklinLookup(row, rowIdx, batchIdx));
     });
@@ -3418,6 +3451,99 @@
       sample1Name: extractSampleName(groupHeaderAt(readDepthCols[maleIdx])),
       sample2Name: extractSampleName(groupHeaderAt(readDepthCols[femaleIdx])),
     };
+  }
+
+  // Maps a CNV_VARIANT_COLUMNS-style field key to the raw CNV export's exact
+  // column header text. Unlike the VarSeq SNV format, a CNV caller's export
+  // is a single flat header row (no group row), so plain header-text lookup
+  // is enough - no group-aware column matching needed.
+  var CNV_RAW_HEADERS = {
+    gene: 'Gene',
+    omim: 'OMIM',
+    hpo: 'HPO',
+    chromosome: 'Chromosome',
+    start: 'Start',
+    end: 'End',
+    width: 'width',
+    sampleName: 'sampleName',
+    copyNumber: 'Copy Number',
+    type: 'Type',
+    classification: 'Classification',
+    totalScore: 'Total score',
+    dosageSensitiveGenes: 'Known or predicted dosage-sensitive genes',
+    allProteinCodingGene: 'All protein coding gene',
+    overlappingCnvs: 'Overlapping CNVs',
+  };
+
+  // The raw HPO cell lists one "|"-separated term per phenotype-source
+  // overlap and can run past 5,000 characters, mostly repeats - collapse it
+  // to the first few distinct terms plus a "+N more" count so the exported
+  // sheet stays readable.
+  function summarizeCnvHpoTerms(raw) {
+    if (!raw) return '';
+    var seen = {};
+    var unique = [];
+    String(raw).split('|').forEach(function (t) {
+      t = t.trim();
+      if (t && !seen[t]) { seen[t] = true; unique.push(t); }
+    });
+    if (!unique.length) return '';
+    var shown = unique.slice(0, 5).join('; ');
+    return unique.length > 5 ? shown + ' (+' + (unique.length - 5) + ' more)' : shown;
+  }
+
+  // Reads a CNV caller's export (Gene/Chromosome/Start/End/Copy Number/Type/
+  // Classification/... - one row per called CNV, single flat header row) and
+  // extracts the curated CNV_VARIANT_COLUMNS fields for the Listed Variants
+  // sheet. Every row is kept (no filtering by classification) - same
+  // "analyst manually removes whatever isn't wanted" philosophy as CMC.
+  function processCnvWorkbook(workbook) {
+    var sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found in the uploaded file.');
+
+    var headerRow = sheet.getRow(1);
+    var colCount = Math.max(sheet.columnCount || 0, headerRow.actualCellCount || 0, 40);
+    var cols = {};
+    for (var c = 1; c <= colCount; c++) {
+      var h = String(headerRow.getCell(c).value || '').trim();
+      if (!h) continue;
+      Object.keys(CNV_RAW_HEADERS).forEach(function (key) {
+        if (!cols[key] && CNV_RAW_HEADERS[key] === h) cols[key] = c;
+      });
+    }
+
+    var rows = [];
+    sheet.eachRow(function (row, r) {
+      if (r <= 1) return;
+      function get(key) {
+        if (!cols[key]) return null;
+        return cellText(row.getCell(cols[key]).value);
+      }
+      var gene = get('gene') || '';
+      if (!gene) return;
+
+      rows.push({
+        sNo: '',
+        gene: gene,
+        chromosome: get('chromosome') || '',
+        start: get('start') || '',
+        end: get('end') || '',
+        width: get('width') || '',
+        copyNumber: get('copyNumber') || '',
+        type: get('type') || '',
+        classification: get('classification') || '',
+        totalScore: get('totalScore') || '',
+        omim: get('omim') || '',
+        hpo: summarizeCnvHpoTerms(get('hpo')),
+        dosageSensitiveGenes: get('dosageSensitiveGenes') || '',
+        allProteinCodingGene: get('allProteinCodingGene') || '',
+        sampleName: get('sampleName') || '',
+        overlappingCnvs: get('overlappingCnvs') || '',
+      });
+    });
+
+    rows.forEach(function (row, i) { row.sNo = i + 1; });
+    return { rows: rows };
   }
 
   // Splits couple rows into four sections the target report template uses:
@@ -4680,23 +4806,30 @@
           // sheet's readable, uncongested look) before centering content.
           autoFitColumnWidths(sheet, 12, 42);
           centerAlignSheet(sheet);
-          // VarSeq exports use a 2-row header: row 1 is the annotation-source
-          // group label, row 2 the actual column name - style them
-          // differently so that distinction is visible, not one flat bar.
-          var exportColCount = effectiveVarSeqColCount(sheet, sheet.getRow(1), sheet.getRow(2));
-          // Relabel the in-house merged-VCF group header (see
-          // normalizeInhouseGroupLabel) so the export shows a stable name
-          // instead of whatever seed file/count VarSeq happened to record.
-          var exportGroupRow = sheet.getRow(1);
-          for (var gc = 1; gc <= exportColCount; gc++) {
-            var groupCell = exportGroupRow.getCell(gc);
-            var normalized = normalizeInhouseGroupLabel(cellText(groupCell.value) || '');
-            if (normalized !== (cellText(groupCell.value) || '')) groupCell.value = normalized;
+          if (item.reportType === 'cnv') {
+            // CNV caller exports are a single flat header row, not VarSeq's
+            // group-row+header-row layout - style just that one row.
+            highlightHeaderRow(sheet.getRow(1), sheet.columnCount || 40);
+            sheet.getRow(1).height = 22;
+          } else {
+            // VarSeq exports use a 2-row header: row 1 is the annotation-source
+            // group label, row 2 the actual column name - style them
+            // differently so that distinction is visible, not one flat bar.
+            var exportColCount = effectiveVarSeqColCount(sheet, sheet.getRow(1), sheet.getRow(2));
+            // Relabel the in-house merged-VCF group header (see
+            // normalizeInhouseGroupLabel) so the export shows a stable name
+            // instead of whatever seed file/count VarSeq happened to record.
+            var exportGroupRow = sheet.getRow(1);
+            for (var gc = 1; gc <= exportColCount; gc++) {
+              var groupCell = exportGroupRow.getCell(gc);
+              var normalized = normalizeInhouseGroupLabel(cellText(groupCell.value) || '');
+              if (normalized !== (cellText(groupCell.value) || '')) groupCell.value = normalized;
+            }
+            highlightGroupHeaderRow(sheet.getRow(1), exportColCount);
+            highlightHeaderRow(sheet.getRow(2), exportColCount);
+            sheet.getRow(1).height = 20;
+            sheet.getRow(2).height = 22;
           }
-          highlightGroupHeaderRow(sheet.getRow(1), exportColCount);
-          highlightHeaderRow(sheet.getRow(2), exportColCount);
-          sheet.getRow(1).height = 20;
-          sheet.getRow(2).height = 22;
         }
         return workbook;
       });
@@ -4738,6 +4871,25 @@
           return workbook.xlsx.load(buffer).then(function () { return workbook; });
         })
         .then(function (workbook) {
+          if (currentReportType === 'cnv') {
+            // CNV caller exports are a single flat header row, nothing like
+            // VarSeq's group-row+header-row SNV layout - handled entirely
+            // separately, before any of the VarSeq-specific detection below
+            // (which would otherwise misread the CNV file's row 2 as a
+            // header row instead of its first data row).
+            var cnvResult = processCnvWorkbook(workbook);
+            var cnvTitle = 'LISTED VARIANTS FOR ' + file.name.replace(/\.[^.]+$/, '');
+            return {
+              fileName: file.name,
+              rows: cnvResult.rows,
+              rawBuffer: rawBuffer,
+              runName: '',
+              title: cnvTitle,
+              loadedAt: new Date().toLocaleDateString(),
+              error: null
+            };
+          }
+
           // Detect if this is a couple file (has multiple sample columns).
           // Sample group headers can land on any column depending on how many
           // annotation columns precede them, so check by counting "Read
