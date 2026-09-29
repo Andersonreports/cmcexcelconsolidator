@@ -2095,6 +2095,34 @@
     };
   }
 
+  // A handful of other VarSeq columns (Read Depths, VAF, Filter, Genotype,
+  // Zygosity) can ALSO be comma-separated one-value-per-overlapping-gene,
+  // the same way Gene Names/HGVS c./HGVS p. are - not always a single value
+  // shared by every gene in the cell. Pick the split row's own value when
+  // the raw cell actually has more than one entry; otherwise fall back to
+  // the single shared value untouched, so a file that doesn't split these
+  // per gene (the common case) renders exactly as before.
+  function pickPerGeneValue(rawValue, indices, n) {
+    var list = splitList(rawValue);
+    if (list.length <= 1) return rawValue;
+    var v = list[indices[n]];
+    return (v != null && v !== '') ? v : (list[0] != null ? list[0] : rawValue);
+  }
+
+  // Allelic Depths is a "ref,alt" PAIR, so a comma already separates the two
+  // numbers of a single gene's own value - a multi-gene cell flattens to
+  // "ref1,alt1,ref2,alt2,...". Only treat it as multi-gene when the token
+  // count is a multiple of 2 greater than 2 (i.e. more than one pair);
+  // otherwise it's just one gene's ordinary "ref,alt" and stays untouched.
+  function pickPerGeneDepthPair(rawValue, indices, n) {
+    var parts = splitList(rawValue);
+    if (parts.length < 4 || parts.length % 2 !== 0) return rawValue;
+    var pairs = [];
+    for (var i = 0; i < parts.length; i += 2) pairs.push(parts[i] + ',' + parts[i + 1]);
+    var idx = indices[n];
+    return pairs[idx] || pairs[0] || rawValue;
+  }
+
   function abbreviateInheritanceValue(norm) {
     if (norm === 'AUTOSOMAL DOMINANT') return 'AD';
     if (norm === 'AUTOSOMAL RECESSIVE') return 'AR';
@@ -2992,22 +3020,23 @@
 
       // Fields identical across every split row for this VarSeq source row -
       // gene-specific fields (gene/variant/proteinPos/franklin/varseq/OMIM
-      // link) are layered on top per index below.
+      // link, plus zygosity/filter/genotype/VAF/depths when THIS file
+      // happens to list those per gene too) are layered on top per index
+      // below.
+      var rawFilterCell = get('filter');
+      var rawGenotypeCell = get('genotype');
+      var rawVafCell = get('vaf');
+      var rawAlleleDepthsCell = get('alleleDepths');
+      var rawReadDepthsCell = get('readDepths');
+
       var sharedFields = {
         sNo: '',
         clinvar: clinvarValue,
-        zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes, isFemale),
-        filter: get('filter'),
-        genotype: get('genotype'),
         inheritance: currentReportType === 'cmc' ? inheritanceCodes.join('/') : abbreviateInheritanceGrouped(rawInheritance),
         inhouseCount: get('inhouseCount'),
         inhouseSampleNames: get('inhouseSampleNames'),
         cohort6060Count: get('cohort6060Count'),
         cohort6060SampleNames: get('cohort6060SampleNames'),
-        vaf: formatVafPercentDisplay(get('vaf')),
-        vafRaw: get('vaf'),
-        alleleDepths: get('alleleDepths'),
-        readDepths: get('readDepths'),
         omimIdField: omimIdValue,
         omimTitle: omimTitleValue,
         omimPhenotypes: get('omimPhenotypes'),
@@ -3036,6 +3065,7 @@
 
       indices.forEach(function (idx, n) {
         var g = geneList[n], v = variantList[n], p = proteinPosList[n];
+        var ownVaf = pickPerGeneValue(rawVafCell, indices, n);
 
         // OMIM TITLE links to the specific entry page (by MIM number) in CMC
         // so clicking navigates to that phenotype's OMIM page, not a gene
@@ -3054,6 +3084,13 @@
           franklin: lookupFranklin(g, v),
           _franklinUrl: null,
           varseq: acmgList[n],
+          zygosity: abbreviateZygosity(pickPerGeneValue(rawZygosity, indices, n), inheritanceCodes, isFemale),
+          filter: pickPerGeneValue(rawFilterCell, indices, n),
+          genotype: pickPerGeneValue(rawGenotypeCell, indices, n),
+          vaf: formatVafPercentDisplay(ownVaf),
+          vafRaw: ownVaf,
+          alleleDepths: pickPerGeneDepthPair(rawAlleleDepthsCell, indices, n),
+          readDepths: pickPerGeneValue(rawReadDepthsCell, indices, n),
           _multiGeneGroupId: multiGeneGroupId,
           _hyperlinks: Object.assign({}, hyperlinks, {
             gene: hyperlinks.geneNames,
@@ -3255,26 +3292,15 @@
 
       // Fields identical across every split row for this VarSeq source row -
       // gene-specific fields (gene/variant/proteinPos/acmg/franklin/OMIM
-      // link) are layered on top per index below.
+      // link, plus zygosity/VAF/depths when THIS file happens to list those
+      // per gene too, on top of the per-partner split above) are layered on
+      // top per index below.
       var sharedFields = {
         sNo: '',
         chrPos: chrPos || '',
         refAlt: refAlt || '',
         _hasMale: hasCall1,
         _hasFemale: hasCall2,
-        // Field "1" is always MALE and "2" is always FEMALE (see the export's
-        // fixed "MALE"/"FEMALE" column headers) - only the male side is
-        // eligible for the HOM->HEMI X-linked override, since a homozygous
-        // call at an X-linked locus is only a hemizygous artifact for a
-        // single-X (male) sample.
-        zygosity1: hasCall1 ? (rawZygosity1 ? abbreviateZygosity(rawZygosity1, inheritanceCodes, false) : (deriveZygosityFromDepths(alleleDepths1, vaf1, isXLinked, false) || 'HET')) : '-',
-        readDepths1: hasCall1 ? readDepths1 : '-',
-        vaf1: hasCall1 ? formatVafPercent(vaf1) : '-',
-        alleleDepths1: hasCall1 ? alleleDepths1 : '-',
-        zygosity2: hasCall2 ? (rawZygosity2 ? abbreviateZygosity(rawZygosity2, inheritanceCodes, true) : (deriveZygosityFromDepths(alleleDepths2, vaf2, isXLinked, true) || 'HET')) : '-',
-        readDepths2: hasCall2 ? readDepths2 : '-',
-        vaf2: hasCall2 ? formatVafPercent(vaf2) : '-',
-        alleleDepths2: hasCall2 ? alleleDepths2 : '-',
         clinvar: clinvarValue,
         inheritance: abbreviateInheritanceGrouped(get('omimInheritance')),
         phenoRank: get('phenoRank'),
@@ -3322,6 +3348,8 @@
 
       indices.forEach(function (idx, n) {
         var g = geneList[n], v = variantList[n], p = proteinPosList[n];
+        var ownVaf1 = pickPerGeneValue(vaf1, indices, n);
+        var ownVaf2 = pickPerGeneValue(vaf2, indices, n);
         rows.push(Object.assign({}, sharedFields, {
           gene: g,
           variant: v,
@@ -3330,6 +3358,19 @@
           franklin: lookupFranklin(g, v),
           _franklinUrl: null,
           _multiGeneGroupId: multiGeneGroupId,
+          // Field "1" is always MALE and "2" is always FEMALE (see the export's
+          // fixed "MALE"/"FEMALE" column headers) - only the male side is
+          // eligible for the HOM->HEMI X-linked override, since a homozygous
+          // call at an X-linked locus is only a hemizygous artifact for a
+          // single-X (male) sample.
+          zygosity1: hasCall1 ? (rawZygosity1 ? abbreviateZygosity(pickPerGeneValue(rawZygosity1, indices, n), inheritanceCodes, false) : (deriveZygosityFromDepths(pickPerGeneDepthPair(alleleDepths1, indices, n), ownVaf1, isXLinked, false) || 'HET')) : '-',
+          readDepths1: hasCall1 ? pickPerGeneValue(readDepths1, indices, n) : '-',
+          vaf1: hasCall1 ? formatVafPercent(ownVaf1) : '-',
+          alleleDepths1: hasCall1 ? pickPerGeneDepthPair(alleleDepths1, indices, n) : '-',
+          zygosity2: hasCall2 ? (rawZygosity2 ? abbreviateZygosity(pickPerGeneValue(rawZygosity2, indices, n), inheritanceCodes, true) : (deriveZygosityFromDepths(pickPerGeneDepthPair(alleleDepths2, indices, n), ownVaf2, isXLinked, true) || 'HET')) : '-',
+          readDepths2: hasCall2 ? pickPerGeneValue(readDepths2, indices, n) : '-',
+          vaf2: hasCall2 ? formatVafPercent(ownVaf2) : '-',
+          alleleDepths2: hasCall2 ? pickPerGeneDepthPair(alleleDepths2, indices, n) : '-',
           // Preserve any hyperlinks the source VarSeq cells carried so
           // preview/export can render them as real links. Most keys already
           // match the row field name; the renamed ones are re-mapped here.
