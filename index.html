@@ -555,14 +555,14 @@
             <div id="couple-gender-row" style="display:none; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary);">
               <label style="display: flex; align-items: center; gap: 4px;">
                 1st group:
-                <select id="couple-gender-select-1" style="font-size: 12px; padding: 3px 6px;">
+                <select id="couple-gender-select-1" class="couple-gender-select" style="padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s;">
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                 </select>
               </label>
               <label style="display: flex; align-items: center; gap: 4px;">
                 2nd group:
-                <select id="couple-gender-select-2" style="font-size: 12px; padding: 3px 6px;">
+                <select id="couple-gender-select-2" class="couple-gender-select" style="padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.2s;">
                   <option value="female">Female</option>
                   <option value="male">Male</option>
                 </select>
@@ -724,10 +724,23 @@
   var coupleMaleGroupIndex = 0;
   var coupleGenderSelect1 = document.getElementById('couple-gender-select-1');
   var coupleGenderSelect2 = document.getElementById('couple-gender-select-2');
+  var GENDER_FILL = { male: { bg: '#2563eb', fg: '#fff' }, female: { bg: '#db2777', fg: '#fff' } };
+  function paintGenderSelect(select) {
+    if (!select) return;
+    var fill = GENDER_FILL[select.value] || GENDER_FILL.male;
+    select.style.background = fill.bg;
+    select.style.color = fill.fg;
+    select.style.borderColor = fill.bg;
+  }
+  function paintGenderSelects() {
+    paintGenderSelect(coupleGenderSelect1);
+    paintGenderSelect(coupleGenderSelect2);
+  }
   function setCoupleMaleGroupIndex(idx) {
     coupleMaleGroupIndex = idx;
     if (coupleGenderSelect1) coupleGenderSelect1.value = idx === 0 ? 'male' : 'female';
     if (coupleGenderSelect2) coupleGenderSelect2.value = idx === 0 ? 'female' : 'male';
+    paintGenderSelects();
   }
   if (coupleGenderSelect1) {
     coupleGenderSelect1.addEventListener('change', function () {
@@ -739,6 +752,7 @@
       setCoupleMaleGroupIndex(coupleGenderSelect2.value === 'male' ? 1 : 0);
     });
   }
+  paintGenderSelects();
 
   function switchReportType(reportType) {
     currentReportType = reportType;
