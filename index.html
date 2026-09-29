@@ -724,13 +724,16 @@
   var coupleMaleGroupIndex = 0;
   var coupleGenderSelect1 = document.getElementById('couple-gender-select-1');
   var coupleGenderSelect2 = document.getElementById('couple-gender-select-2');
-  var GENDER_FILL = { male: { bg: '#2563eb', fg: '#fff' }, female: { bg: '#db2777', fg: '#fff' } };
+  var GENDER_FILL = {
+    male: { bg: '#dbeafe', fg: '#1e40af', border: '#93c5fd' },
+    female: { bg: '#fce7f3', fg: '#9d174d', border: '#f9a8d4' }
+  };
   function paintGenderSelect(select) {
     if (!select) return;
     var fill = GENDER_FILL[select.value] || GENDER_FILL.male;
     select.style.background = fill.bg;
     select.style.color = fill.fg;
-    select.style.borderColor = fill.bg;
+    select.style.borderColor = fill.border;
   }
   function paintGenderSelects() {
     paintGenderSelect(coupleGenderSelect1);
