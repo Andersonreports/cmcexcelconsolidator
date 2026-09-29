@@ -1991,6 +1991,27 @@
     return idx === -1 ? s.trim() : s.slice(idx + 1).trim();
   }
 
+  // A VarSeq row can list 2-3 overlapping genes/transcripts for the same
+  // variant call (parallel comma-separated Gene Names / HGVS c. / HGVS p.
+  // cells). Every entry that has its own coding ("c.") HGVS notation is kept
+  // and joined into the row rather than picking just one - dropping a
+  // second gene silently used to hide it from the analyst entirely, so
+  // instead all of them show up together and the analyst deletes whichever
+  // gene/variant they don't want from the exported sheet.
+  function pickCodingVariant(genes, hgvsCList, hgvsPList) {
+    var indices = [];
+    hgvsCList.forEach(function (v, i) {
+      if (/^c\./i.test(stripHgvsPrefix(v))) indices.push(i);
+    });
+    if (indices.length === 0) return null;
+    return {
+      indices: indices,
+      gene: indices.map(function (i) { return genes[i] || ''; }).join(', '),
+      variant: indices.map(function (i) { return stripHgvsPrefix(hgvsCList[i] || ''); }).join(', '),
+      proteinPos: indices.map(function (i) { return stripHgvsPrefix(hgvsPList[i] || ''); }).join(', ')
+    };
+  }
+
   function abbreviateInheritanceValue(norm) {
     if (norm === 'AUTOSOMAL DOMINANT') return 'AD';
     if (norm === 'AUTOSOMAL RECESSIVE') return 'AR';
@@ -2843,21 +2864,22 @@
       // manually remove whatever isn't wanted - so none of the three skips
       // below apply there. Single (which shares this function) and couple
       // (its own function) keep their existing behavior unchanged.
-      var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
-      if (codingIdx === -1) {
+      var picked = pickCodingVariant(genes, hgvsCList, hgvsPList);
+      if (!picked) {
         if (currentReportType !== 'cmc') { debugRowsSkipped.nonCoding++; return; }
-        codingIdx = 0; // CMC: no coding transcript - fall back to whichever is first
+        // CMC: no coding transcript - fall back to whichever is first
+        picked = { gene: genes[0] || '', variant: stripHgvsPrefix(hgvsCList[0] || ''), proteinPos: stripHgvsPrefix(hgvsPList[0] || '') };
       }
 
-      var gene = genes[codingIdx] || genes[0] || '';
+      var gene = picked.gene;
       if (!gene && currentReportType !== 'cmc') { debugRowsSkipped.noGene++; return; }
-      var variant = stripHgvsPrefix(hgvsCList[codingIdx] || hgvsCList[0] || '');
+      var variant = picked.variant;
 
       var rawZygosity    = get('zygosity');
       var rawInheritance = get('omimInheritance');
       if (!rawZygosity && !rawInheritance && currentReportType !== 'cmc') { debugRowsSkipped.noZygOrInherit++; return; }
 
-      var proteinPos = stripHgvsPrefix(hgvsPList[codingIdx] || hgvsPList[0] || '');
+      var proteinPos = picked.proteinPos;
 
       var inheritanceCodes = abbreviateInheritance(splitList(rawInheritance));
       var clinvarValue = get('clinvarClass') || '';
@@ -2993,18 +3015,19 @@
       var hgvsCList = splitList(get('hgvsC'));
       var hgvsPList = splitList(get('hgvsP'));
 
-      // When a row lists multiple overlapping genes/transcripts, use whichever
-      // entry has a coding ("c.") HGVS notation - not just the first listed -
-      // and drop the row if none of them do (e.g. a non-coding RNA locus with
-      // only an "n." transcript).
-      var codingIdx = hgvsCList.findIndex(function (v) { return /^c\./i.test(stripHgvsPrefix(v)); });
-      if (codingIdx === -1) return;
+      // When a row lists multiple overlapping genes/transcripts, keep every
+      // entry that has a coding ("c.") HGVS notation - not just the first
+      // listed - joining them into the row so the analyst decides which to
+      // keep, and drop the row if none of them do (e.g. a non-coding RNA
+      // locus with only an "n." transcript).
+      var picked = pickCodingVariant(genes, hgvsCList, hgvsPList);
+      if (!picked) return;
 
       // Every gene/variant is carried over regardless of classification -
       // Benign/Likely Benign is flagged with a green Franklin font (see
       // franklinColor) instead of being dropped. The analyst reviews and
       // removes unwanted rows manually via the delete button.
-      var gene = genes[codingIdx] || genes[0] || '';
+      var gene = picked.gene;
       if (!gene) return;
 
       var rawZygosity1 = getNth('zygosity', 0);
@@ -3045,7 +3068,7 @@
         acmgList = splitList(get('acmgClass'));
       }
 
-      var variant = stripHgvsPrefix(hgvsCList[codingIdx]);
+      var variant = picked.variant;
       var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
       var isXLinked = inheritanceCodes.indexOf('XLD') !== -1 || inheritanceCodes.indexOf('XLR') !== -1 || inheritanceCodes.indexOf('XL') !== -1;
 
@@ -3069,8 +3092,8 @@
         refAlt: refAlt || '',
         gene: gene,
         variant: variant,
-        proteinPos: stripHgvsPrefix(hgvsPList[codingIdx] || hgvsPList[0] || ''),
-        acmg: acmgList[codingIdx] || acmgList[0] || '',
+        proteinPos: picked.proteinPos,
+        acmg: picked.indices.map(function (i) { return acmgList[i] || acmgList[0] || ''; }).join(', '),
         franklin: lookupFranklin(gene, variant),
         _franklinUrl: null,
         _hasMale: hasCall1,
@@ -3189,27 +3212,41 @@
     };
   }
 
-  // Splits couple rows into the three sections the target report template
-  // uses: rows for genes where BOTH partners carry at least one variant
-  // (each partner's row listed separately - same gene, not necessarily the
-  // same variant, since two different variants in one AR gene is exactly
-  // the compound-het carrier risk the combined section is meant to flag),
-  // then the remaining partner-1-only and partner-2-only rows. Shared by
-  // the Excel export and the on-screen preview so they never drift apart.
+  // Splits couple rows into four sections the target report template uses:
+  // - combined: both partners carry the exact same variant (same gene AND
+  //   same HGVS c. notation) - a truly shared finding.
+  // - compound: both partners have a variant in the same gene, but not the
+  //   same variant - the compound-het carrier scenario, kept separate from
+  //   "combined" since it's a different finding (each partner carries a
+  //   different allele of the same gene, not the same call).
+  // - sample1/sample2: the remaining partner-only rows, where the gene
+  //   itself isn't shared with the other partner at all.
+  // Shared by the Excel export and the on-screen preview so they never
+  // drift apart.
   function splitCoupleRowsByGene(rows) {
-    var maleGenes = {}, femaleGenes = {};
+    function geneKey(r) { return String(r.gene || '').trim().toUpperCase(); }
+
+    var maleVariants = {}, femaleVariants = {}, maleGenes = {}, femaleGenes = {};
     rows.forEach(function (r) {
-      if (r._hasMale) maleGenes[r.gene] = true;
-      if (r._hasFemale) femaleGenes[r.gene] = true;
+      var key = normalizeGeneVariantKey(r.gene, r.variant);
+      var g = geneKey(r);
+      if (r._hasMale) { maleVariants[key] = true; maleGenes[g] = true; }
+      if (r._hasFemale) { femaleVariants[key] = true; femaleGenes[g] = true; }
     });
+    var sharedVariants = {};
+    Object.keys(maleVariants).forEach(function (k) { if (femaleVariants[k]) sharedVariants[k] = true; });
     var sharedGenes = {};
     Object.keys(maleGenes).forEach(function (g) { if (femaleGenes[g]) sharedGenes[g] = true; });
 
-    return {
-      combinedRows: rows.filter(function (r) { return sharedGenes[r.gene]; }),
-      sample1Rows: rows.filter(function (r) { return r._hasMale && !sharedGenes[r.gene]; }),
-      sample2Rows: rows.filter(function (r) { return r._hasFemale && !sharedGenes[r.gene]; }),
-    };
+    var combinedRows = [], compoundRows = [], sample1Rows = [], sample2Rows = [];
+    rows.forEach(function (r) {
+      if (sharedVariants[normalizeGeneVariantKey(r.gene, r.variant)]) combinedRows.push(r);
+      else if (sharedGenes[geneKey(r)]) compoundRows.push(r);
+      else if (r._hasMale) sample1Rows.push(r);
+      else if (r._hasFemale) sample2Rows.push(r);
+    });
+
+    return { combinedRows: combinedRows, compoundRows: compoundRows, sample1Rows: sample1Rows, sample2Rows: sample2Rows };
   }
 
   // Builds the three-section couple Excel: section 1 lists rows for genes
@@ -3334,7 +3371,8 @@
     var secondaryRows = rows.filter(isSecondaryFindingRow);
     var nonSecondaryRows = rows.filter(function (r) { return !isSecondaryFindingRow(r); });
     var split = splitCoupleRowsByGene(nonSecondaryRows);
-    var combinedRows = split.combinedRows, sample1Rows = split.sample1Rows, sample2Rows = split.sample2Rows;
+    var combinedRows = split.combinedRows, compoundRows = split.compoundRows,
+        sample1Rows = split.sample1Rows, sample2Rows = split.sample2Rows;
 
     var startRow = 1;
     if (secondaryRows.length) {
@@ -3344,6 +3382,10 @@
 
     var nextRow = writeSection(startRow, title, combinedRows);
     nextRow++; // blank separator row
+    if (compoundRows.length) {
+      nextRow = writeSection(nextRow, 'Compound Heterozygous (Same Gene, Different Variant)', compoundRows);
+      nextRow++; // blank separator row
+    }
     nextRow = writeSection(nextRow, title1, sample1Rows);
     nextRow++; // blank separator row
     writeSection(nextRow, title2, sample2Rows);
@@ -3848,24 +3890,21 @@
 
       if (currentReportType === 'couple') {
         // Secondary findings lead the preview in their own highlighted section;
-        // the remaining rows feed the usual combined / partner sections.
-        var secondaryEntries = [];
-        var maleGenes = {}, femaleGenes = {};
+        // the remaining rows feed the usual combined / compound / partner
+        // sections - delegated to splitCoupleRowsByGene so the preview can
+        // never drift from the Excel export's classification.
+        var secondaryEntries = [], nonSecondaryEntries = [];
         activeRowEntries.forEach(function (entry) {
-          if (isSecondaryFindingRow(entry.row)) return; // excluded from the partner split
-          if (entry.row._hasMale) maleGenes[entry.row.gene] = true;
-          if (entry.row._hasFemale) femaleGenes[entry.row.gene] = true;
+          (isSecondaryFindingRow(entry.row) ? secondaryEntries : nonSecondaryEntries).push(entry);
         });
-        var sharedGenes = {};
-        Object.keys(maleGenes).forEach(function (g) { if (femaleGenes[g]) sharedGenes[g] = true; });
+        var entryByRow = new Map();
+        nonSecondaryEntries.forEach(function (entry) { entryByRow.set(entry.row, entry); });
+        var split = splitCoupleRowsByGene(nonSecondaryEntries.map(function (entry) { return entry.row; }));
+        var combinedEntries = split.combinedRows.map(function (r) { return entryByRow.get(r); });
+        var compoundEntries = split.compoundRows.map(function (r) { return entryByRow.get(r); });
+        var sample1Entries = split.sample1Rows.map(function (r) { return entryByRow.get(r); });
+        var sample2Entries = split.sample2Rows.map(function (r) { return entryByRow.get(r); });
 
-        var combinedEntries = [], sample1Entries = [], sample2Entries = [];
-        activeRowEntries.forEach(function (entry) {
-          if (isSecondaryFindingRow(entry.row)) { secondaryEntries.push(entry); return; }
-          if (sharedGenes[entry.row.gene]) combinedEntries.push(entry);
-          else if (entry.row._hasMale) sample1Entries.push(entry);
-          else if (entry.row._hasFemale) sample2Entries.push(entry);
-        });
         var previewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
         if (secondaryEntries.length) {
           variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
@@ -3877,6 +3916,12 @@
         combinedEntries.forEach(function (entry, i) {
           variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
         });
+        if (compoundEntries.length) {
+          variantTableBody.appendChild(buildGridSectionHeaderRow('Compound Heterozygous (Same Gene, Different Variant)', columns.length));
+          compoundEntries.forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          });
+        }
         variantTableBody.appendChild(buildGridSectionHeaderRow((previewItem && previewItem.title1) || 'Sample 1', columns.length));
         sample1Entries.forEach(function (entry, i) {
           variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
@@ -5074,9 +5119,22 @@
     var entries = [];
     sheet.eachRow(function (row, r) {
       if (r <= headerRowIndex) return;
-      // VarSeq "Gene Names" can be "GENE1;GENE2" — take only the first.
-      var gene    = String(row.getCell(geneCol).value || '').trim().split(';')[0].trim();
-      var variant = String(row.getCell(variantCol).value || '').trim();
+      var gene, variant;
+      if (isVarSeqFormat) {
+        // VarSeq "Gene Names"/"HGVS c."/"HGVS p." cells can list 2-3
+        // overlapping genes (";" or "," separated) for the same call - keep
+        // every one that has its own coding ("c.") HGVS notation, same as
+        // the Listed Variant extraction, instead of only taking the first.
+        var genesList = String(row.getCell(geneCol).value || '').trim().split(/[;,]/).map(function (s) { return s.trim(); });
+        var hgvsCListRaw = splitList(row.getCell(variantCol).value);
+        var hgvsPListRaw = proteinCol ? splitList(row.getCell(proteinCol).value) : [];
+        var picked = pickCodingVariant(genesList, hgvsCListRaw, hgvsPListRaw);
+        gene    = picked ? picked.gene : (genesList[0] || '');
+        variant = picked ? picked.variant : stripHgvsPrefix(hgvsCListRaw[0] || '');
+      } else {
+        gene    = String(row.getCell(geneCol).value || '').trim().split(';')[0].trim();
+        variant = String(row.getCell(variantCol).value || '').trim();
+      }
       if (!gene || !variant) return;
       var clinvarRaw = row.getCell(clinvarCol).value;
       var omimRaw    = omimTitleCol ? row.getCell(omimTitleCol).value : null;
@@ -5085,7 +5143,7 @@
         // Normalize every text cell through cellText(): OMIM/ClinVar (and
         // sometimes others) come in as rich-text/hyperlink objects, which
         // otherwise render as "[object Object]" in the preview and export.
-        proteinPos:   cellText(row.getCell(proteinCol).value),
+        proteinPos:   (isVarSeqFormat && picked) ? picked.proteinPos : cellText(row.getCell(proteinCol).value),
         clinvar:      cellText(clinvarRaw),
         // Preserve the source cell's own hyperlink target when present.
         clinvarUrl:   cellHyperlink(clinvarRaw) || '',
