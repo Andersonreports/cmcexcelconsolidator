@@ -56,7 +56,7 @@
     flex-wrap: wrap; gap: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   }
   .top-bar-title { font-size: clamp(18px, 2.4vw, 24px); font-weight: 700; color: var(--ink); }
-  #global-undo-btn:hover:not(:disabled) { background: rgba(255,255,255,.8); }
+  #global-undo-btn:hover:not(:disabled) { background: var(--bg-page); border-color: var(--accent-2); }
   #global-undo-btn:disabled { opacity: .45; cursor: not-allowed; }
 
   .top-tabs {
@@ -448,10 +448,6 @@
     <div style="display: flex; align-items: center; gap: 16px;">
       <img src="logo.jpg" alt="Anderson-Bioinfo Excel Consolidator logo" style="height: 36px; width: 36px; border-radius: 8px; object-fit: cover;" />
       <span class="top-bar-title">Anderson-Bioinfo Excel Consolidator</span>
-      <button type="button" id="global-undo-btn" title="Undo the last change (Ctrl+Z)" disabled
-        style="display:flex;align-items:center;gap:6px;font:600 13px var(--sans);padding:6px 12px;border:1px solid rgba(0,0,0,.3);border-radius:6px;background:rgba(255,255,255,.5);color:var(--ink);cursor:pointer;">
-        <span aria-hidden="true">↶</span> Undo
-      </button>
     </div>
     <div class="report-type-selector">
       <select id="report-type-select" class="report-type-select">
@@ -558,8 +554,14 @@
       <div class="card">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
           <div>
-            <h3 style="font-size: 14px; font-weight: 600; margin: 0 0 4px 0; color: var(--ink);">DNA Variant Extraction Interface</h3>
-            <p style="font-size: 12px; color: var(--text-secondary); margin: 0;">Preview and manage extracted genomic variants</p>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <h3 style="font-size: 14px; font-weight: 600; margin: 0; color: var(--ink);">DNA Variant Extraction Interface</h3>
+              <button type="button" id="global-undo-btn" title="Undo the last change (Ctrl+Z)" disabled
+                style="display:flex;align-items:center;gap:6px;font:600 12px var(--sans);padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--ink);cursor:pointer;">
+                <span aria-hidden="true">↶</span> Undo
+              </button>
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0 0 0;">Preview and manage extracted genomic variants</p>
           </div>
           <div style="display: flex; align-items: center; gap: 10px;">
             <div id="couple-gender-row" style="display:none; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary);">
