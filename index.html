@@ -2325,6 +2325,31 @@
     return '';
   }
 
+  // Franklin's classification depends on which gene/transcript a variant is
+  // being evaluated against, so a row listing 2-3 overlapping genes (see
+  // pickCodingVariant) needs its own Franklin lookup per gene rather than
+  // one combined "GENE1, GENE2" query - Franklin can't resolve that to
+  // anything meaningful, and whichever result it happened to return wasn't
+  // reliably tied to either gene. `_geneList`/`_variantList`/`_franklinParts`
+  // are only set (non-undefined) for the multi-gene case, so the async
+  // Franklin refresh code (fetchFranklinForRow) can tell a row apart from
+  // the common single-gene row and take its original, simpler path.
+  function computeFranklinFields(picked, genes, hgvsCList) {
+    var indices = picked.indices || [0];
+    if (indices.length <= 1) {
+      return { franklin: lookupFranklin(picked.gene, picked.variant) };
+    }
+    var geneList = indices.map(function (i) { return genes[i] || ''; });
+    var variantList = indices.map(function (i) { return stripHgvsPrefix(hgvsCList[i] || ''); });
+    var parts = geneList.map(function (g, i) { return lookupFranklin(g, variantList[i]) || ''; });
+    return {
+      franklin: parts.some(Boolean) ? parts.join(', ') : '',
+      _geneList: geneList,
+      _variantList: variantList,
+      _franklinParts: parts
+    };
+  }
+
   // ── OMIM links: always via NCBI, never omim.org directly ────────────────
   // DO NOT point these at omim.org. Excel pre-flights a hyperlink with its own
   // HTTP client before handing it to the browser, and omim.org sits behind
@@ -2409,6 +2434,14 @@
 
   function reapplyFranklinLookup() {
     variantRows.forEach(function (row) {
+      if (row._geneList && row._geneList.length > 1) {
+        var parts = row._geneList.map(function (g, i) { return lookupFranklin(g, row._variantList[i]) || ''; });
+        if (parts.some(Boolean)) {
+          row._franklinParts = parts;
+          row.franklin = parts.join(', ');
+        }
+        return;
+      }
       var code = lookupFranklin(row.gene, row.variant);
       if (code) row.franklin = code;
     });
@@ -2448,7 +2481,7 @@
 
   function isFalseCall() { return false; }
 
-  function franklinColor(value) {
+  function franklinColorSingle(value) {
     var v = String(value || '').trim().toUpperCase();
     if (v === 'P')      return '#c2293a';
     if (v === 'LP')     return '#c2293a';
@@ -2458,6 +2491,26 @@
     if (v === 'VUS/LP') return '#000000';
     if (v === 'VUS')    return '#2E74B5';
     return '';
+  }
+
+  // A multi-gene row's FRANKLIN cell can hold several comma-joined
+  // classifications (one per gene - see fetchFranklinForMultiGeneRow), and a
+  // single text input can't color individual comma-separated parts
+  // differently, so color for whichever one is most clinically significant
+  // (Pathogenic/Likely Pathogenic outranks everything else). Every render
+  // path (preview grid, Excel export) calls this one function, so the color
+  // stays consistent everywhere without each call site needing its own
+  // multi-value handling.
+  var FRANKLIN_SEVERITY_RANK = { P: 6, LP: 5, 'VUS/LP': 4, VUS: 3, 'B/VUS': 2, LB: 1, B: 0 };
+  function franklinColor(value) {
+    var v = String(value || '').trim();
+    if (v.indexOf(',') === -1) return franklinColorSingle(v);
+    var worst = v.split(',').map(function (p) { return p.trim(); }).reduce(function (acc, p) {
+      var rank = FRANKLIN_SEVERITY_RANK[p.toUpperCase()];
+      var accRank = FRANKLIN_SEVERITY_RANK[String(acc).toUpperCase()];
+      return (rank != null && (accRank == null || rank > accRank)) ? p : acc;
+    }, '');
+    return franklinColorSingle(worst);
   }
 
   function alleleDepthRichText(value) {
@@ -2539,11 +2592,23 @@
     });
   }
 
+  // A multi-gene row (row._geneList set - see computeFranklinFields) is
+  // "resolved" only once every gene's own slot in _franklinParts is filled;
+  // a partially-filled joined string (e.g. "P, ") is still truthy and not
+  // literally "VUS", so the plain single-gene check below would otherwise
+  // treat it as done and never fetch the remaining genes.
+  function needsFranklinFetch(row) {
+    if (row._geneList && row._geneList.length > 1) {
+      return !row._franklinParts || row._franklinParts.some(function (v) { return !v; });
+    }
+    return !row.franklin || isGenericVus(row.franklin);
+  }
+
   function resolveFranklinForRows(rows, batchIdx) {
     var pending = [];
     rows.forEach(function (row, rowIdx) {
       var linkEl = document.getElementById('flink-' + batchIdx + '-' + rowIdx);
-      if (row.franklin && !isGenericVus(row.franklin)) {
+      if (!needsFranklinFetch(row)) {
         if (linkEl) linkEl.textContent = '↗';
         return;
       }
@@ -2554,7 +2619,114 @@
     return Promise.all(pending);
   }
 
+  // One (gene, variant) pair's Franklin lookup - factored out of
+  // fetchFranklinForRow so fetchFranklinForMultiGeneRow below can run it
+  // once per gene for a row listing several overlapping genes.
+  function fetchFranklinAbbrForPair(gene, variant) {
+    if (!FRANKLIN_PROXY_URL) return Promise.resolve(null);
+    var url = FRANKLIN_PROXY_URL +
+      '?gene=' + encodeURIComponent(gene || '') +
+      '&variant=' + encodeURIComponent(variant || '');
+    return fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 20000)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!(data && data.ok && data.abbr)) return null;
+        var franklinUrl = (data.chrom && data.pos && data.ref && data.alt)
+          ? 'https://franklin.genoox.com/clinical-db/variant/snp/chr' +
+            data.chrom + '-' + data.pos + '-' + data.ref + '-' + data.alt + '-hg38'
+          : null;
+        return { abbr: data.abbr, url: franklinUrl };
+      })
+      .catch(function () { return null; });
+  }
+
+  // One (gene, variant) pair's ClinVar lookup - the same eutils search/
+  // summary query fetchClinVarClass below runs for a single-gene row,
+  // factored out so a multi-gene row can run it once per gene instead of
+  // sending the whole "GENE1, GENE2" text as one unparseable gene symbol.
+  function fetchClinVarAbbrForPair(gene, variant) {
+    gene = String(gene || '').trim();
+    variant = String(variant || '').trim();
+    if (!gene && !variant) return Promise.resolve(null);
+
+    var varForms = [variant];
+    var dm = variant.match(/^(c\.[0-9_+\-*]+)del[ACGT]+$/i);
+    if (dm) varForms.push(dm[1] + 'del');
+    var dupm = variant.match(/^(c\.[0-9_+\-*]+)dup[ACGT]+$/i);
+    if (dupm) varForms.push(dupm[1] + 'dup');
+
+    var parts = varForms.map(function (v) {
+      return '(' + (gene ? gene + '[gene] AND ' : '') + '"' + v + '"[All Fields])';
+    });
+
+    return fetchWithTimeout('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' +
+          '?db=clinvar&term=' + encodeURIComponent(parts.join(' OR ')) + '&retmax=5&retmode=json', null, 10000)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var ids = (data.esearchresult && data.esearchresult.idlist) || [];
+        if (!ids.length) return null;
+        return fetchWithTimeout('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi' +
+                     '?db=clinvar&id=' + ids.slice(0, 3).join(',') + '&retmode=json', null, 10000)
+          .then(function (r) { return r.json(); })
+          .then(function (summary) {
+            var result = summary.result || {};
+            for (var i = 0; i < ids.length; i++) {
+              var e = result[ids[i]];
+              if (!e) continue;
+              var desc = (e.clinical_significance && e.clinical_significance.description) || '';
+              var abbr = abbreviateClinSigText(desc);
+              if (abbr) return abbr;
+            }
+            return null;
+          });
+      })
+      .catch(function () { return null; });
+  }
+
+  // Runs Franklin (then ClinVar as fallback) once per gene in a multi-gene
+  // row and shows every result side by side, in the same order as the GENE
+  // column, so the analyst can tell which classification goes with which
+  // gene instead of one ambiguous combined result.
+  function fetchFranklinForMultiGeneRow(row, rowIdx, batchIdx) {
+    var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
+    var inputId = 'finput-' + batchIdx + '-' + rowIdx;
+    var genes = row._geneList, variants = row._variantList;
+    if (!row._franklinParts) row._franklinParts = genes.map(function () { return ''; });
+
+    var tasks = genes.map(function (g, i) {
+      if (row._franklinParts[i]) return Promise.resolve();
+      return fetchFranklinAbbrForPair(g, variants[i]).then(function (res) {
+        if (res && res.abbr) { row._franklinParts[i] = res.abbr; return; }
+        return fetchClinVarAbbrForPair(g, variants[i]).then(function (abbr) {
+          if (abbr) row._franklinParts[i] = abbr;
+        });
+      });
+    });
+
+    return Promise.all(tasks).then(function () {
+      row.franklin = row._franklinParts.some(Boolean) ? row._franklinParts.map(function (v) { return v || ''; }).join(', ') : '';
+      var inputEl = document.getElementById(inputId);
+      if (inputEl) {
+        inputEl.value = row._franklinParts.map(function (v) { return v ? franklinDisplayText(v) : ''; }).join(', ');
+        // franklinColor already picks the most clinically significant part
+        // out of a comma-joined multi-gene value, so every render path
+        // (this one, the preview grid, Excel export) colors it the same way.
+        var color = franklinColor(row.franklin);
+        inputEl.style.color = color || '';
+        inputEl.style.fontWeight = color ? '700' : '';
+      }
+      var linkEl = document.getElementById(linkId);
+      if (linkEl) linkEl.textContent = '↗';
+    }).catch(function () {
+      var linkEl2 = document.getElementById(linkId);
+      if (linkEl2) linkEl2.textContent = '↗';
+    });
+  }
+
   function fetchFranklinForRow(row, rowIdx, batchIdx) {
+    if (row._geneList && row._geneList.length > 1) {
+      return fetchFranklinForMultiGeneRow(row, rowIdx, batchIdx);
+    }
     var linkId  = 'flink-'  + batchIdx + '-' + rowIdx;
     var inputId = 'finput-' + batchIdx + '-' + rowIdx;
     var refiningGenericVus = isGenericVus(row.franklin);
@@ -2748,7 +2920,13 @@
       function next() {
         if (i >= targets.length) { resolve(); return; }
         var row = targets[i];
-        fetchMostRecentClinVarClassification(String(row.gene).trim(), String(row.variant).trim())
+        // A multi-gene row's ClinVar record is keyed by genomic position, not
+        // by gene, so any one of its overlapping genes locates the same
+        // record - use the first rather than sending eutils the whole
+        // unparseable "GENE1, GENE2" text as a gene symbol.
+        var lookupGene = (row._geneList && row._geneList[0]) || row.gene;
+        var lookupVariant = (row._variantList && row._variantList[0]) || row.variant;
+        fetchMostRecentClinVarClassification(String(lookupGene).trim(), String(lookupVariant).trim())
           .then(function (desc) {
             var abbr = desc ? abbreviateClinSigText(desc) : null;
             if (abbr && abbr !== 'Conflicting') row.clinvar = 'Conflicting - ' + abbr;
@@ -2966,13 +3144,18 @@
         ? omimEntryLink(omimMim)
         : (gene ? omimSearchUrl(gene) : null);
 
+      var franklinFields = computeFranklinFields(picked, genes, hgvsCList);
+
       rows.push({
         sNo: '',
         gene: gene,
         variant: variant,
         proteinPos: proteinPos,
-        franklin: lookupFranklin(gene, variant),
+        franklin: franklinFields.franklin,
         _franklinUrl: null,
+        _geneList: franklinFields._geneList,
+        _variantList: franklinFields._variantList,
+        _franklinParts: franklinFields._franklinParts,
         clinvar: clinvarValue,
         varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes, isFemale),
@@ -3014,8 +3197,14 @@
           variant: hyperlinks.hgvsC,
           proteinPos: hyperlinks.hgvsP,
           // Only link CLINVAR when this row actually has a reported value -
-          // most variants have none, so most rows stay plain text here.
-          clinvar: (clinvarValue && gene && variant) ? clinVarWebUrl(gene, variant) : null,
+          // most variants have none, so most rows stay plain text here. A
+          // multi-gene row's ClinVar record is keyed by genomic position, so
+          // any one of its overlapping genes finds the same record - use the
+          // first instead of the unparseable joined "GENE1, GENE2" text.
+          clinvar: (clinvarValue && gene && variant)
+            ? clinVarWebUrl((franklinFields._geneList && franklinFields._geneList[0]) || gene,
+                            (franklinFields._variantList && franklinFields._variantList[0]) || variant)
+            : null,
           varseq: hyperlinks.acmgClass,
           inheritance: hyperlinks.omimInheritance,
           // Gene-search links, not carried over from the source file, and only
@@ -3201,6 +3390,7 @@
       var omimIdValue = get('omimIdField') || '';
       var omimTitleValue = get('omimTitle') || '';
       var diseaseLabelValue = get('clingenDiseaseLabel') || '';
+      var franklinFields = computeFranklinFields(picked, genes, hgvsCList);
 
       rows.push({
         sNo: '',
@@ -3210,8 +3400,11 @@
         variant: variant,
         proteinPos: picked.proteinPos,
         acmg: picked.indices.map(function (i) { return acmgList[i] || acmgList[0] || ''; }).join(', '),
-        franklin: lookupFranklin(gene, variant),
+        franklin: franklinFields.franklin,
         _franklinUrl: null,
+        _geneList: franklinFields._geneList,
+        _variantList: franklinFields._variantList,
+        _franklinParts: franklinFields._franklinParts,
         _hasMale: hasCall1,
         _hasFemale: hasCall2,
         // Field "1" is always MALE and "2" is always FEMALE (see the export's
@@ -3278,8 +3471,14 @@
           variant: hyperlinks.hgvsC,
           proteinPos: hyperlinks.hgvsP,
           // Only link CLINVAR when this row actually has a reported value -
-          // most variants have none, so most rows stay plain text here.
-          clinvar: (clinvarValue && gene && variant) ? clinVarWebUrl(gene, variant) : null,
+          // most variants have none, so most rows stay plain text here. A
+          // multi-gene row's ClinVar record is keyed by genomic position, so
+          // any one of its overlapping genes finds the same record - use the
+          // first instead of the unparseable joined "GENE1, GENE2" text.
+          clinvar: (clinvarValue && gene && variant)
+            ? clinVarWebUrl((franklinFields._geneList && franklinFields._geneList[0]) || gene,
+                            (franklinFields._variantList && franklinFields._variantList[0]) || variant)
+            : null,
           inheritance: hyperlinks.omimInheritance,
           // Gene-search links, not carried over from the source file, and only
           // attached when the cell actually has a value (an empty cell means
