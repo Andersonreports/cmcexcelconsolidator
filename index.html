@@ -223,6 +223,16 @@
   .excel-grid tbody tr.variant-row-removed td input {
     color: #999;
   }
+  /* Whole-row tint pairing up the split rows of a multi-gene cell (see
+     _multiGeneGroupId) - a distinct color from secondary-finding-row's
+     purple, so the analyst can spot which rows are alternative gene calls
+     for the same variant and delete whichever they don't want. Cleared
+     automatically (in JS, at render time) once only one row of the group
+     is still active. */
+  .excel-grid tbody tr.variant-row-multigene td:not(.grid-row-number),
+  .excel-grid tbody tr.variant-row-multigene td.frozen-col { background: #FFF3D6; }
+  .excel-grid tbody tr.variant-row-multigene:hover td:not(.grid-row-number),
+  .excel-grid tbody tr.variant-row-multigene:hover td.frozen-col { background: #FFE9B3; }
   .excel-grid tbody td input {
     width: 100%; min-width: 90px; font: 12px/1.4 var(--mono); padding: 5px 8px;
     border: none; border-radius: 0; background: transparent; color: var(--ink); text-align: center;
@@ -2064,6 +2074,11 @@
   // second gene silently used to hide it from the analyst entirely, so
   // instead all of them show up together and the analyst deletes whichever
   // gene/variant they don't want from the exported sheet.
+  // Shared across processVarSeqWorkbook and processCoupleVarSeqWorkbook so
+  // every multi-gene row split across either function gets its own unique
+  // group id (see _multiGeneGroupId), even across multiple uploaded files.
+  var multiGeneGroupCounter = 0;
+
   function pickCodingVariant(genes, hgvsCList, hgvsPList) {
     var indices = [];
     hgvsCList.forEach(function (v, i) {
@@ -2935,21 +2950,36 @@
       // below apply there. Single (which shares this function) and couple
       // (its own function) keep their existing behavior unchanged.
       var picked = pickCodingVariant(genes, hgvsCList, hgvsPList);
+      var indices;
       if (!picked) {
         if (currentReportType !== 'cmc') { debugRowsSkipped.nonCoding++; return; }
-        // CMC: no coding transcript - fall back to whichever is first
-        picked = { gene: genes[0] || '', variant: stripHgvsPrefix(hgvsCList[0] || ''), proteinPos: stripHgvsPrefix(hgvsPList[0] || '') };
+        indices = [0]; // CMC: no coding transcript - fall back to whichever is first
+      } else {
+        indices = picked.indices;
       }
 
-      var gene = picked.gene;
+      // A cell listing 2-3 overlapping genes/transcripts for the same call
+      // becomes one row PER gene (not one row with joined "GENE1, GENE2"
+      // text) - _multiGeneGroupId (set below, once split is known) ties them
+      // together so the preview can highlight the group and the analyst
+      // just deletes whichever row they don't want.
+      var geneList = indices.map(function (i) { return genes[i] || genes[0] || ''; });
+      var variantList = indices.map(function (i) { return stripHgvsPrefix(hgvsCList[i] || hgvsCList[0] || ''); });
+      var proteinPosList = indices.map(function (i) { return stripHgvsPrefix(hgvsPList[i] || hgvsPList[0] || ''); });
+      // ACMG classification can genuinely differ per gene (it's evaluated
+      // against that gene's own disease/inheritance model) - split it the
+      // same way when the raw cell lists one value per gene, falling back to
+      // the single shared value when it doesn't (the common case).
+      var acmgRawList = splitList(get('acmgClass'));
+      var acmgList = indices.map(function (i) { return acmgRawList[i] || acmgRawList[0] || ''; });
+
+      var gene = geneList[0];
       if (!gene && currentReportType !== 'cmc') { debugRowsSkipped.noGene++; return; }
-      var variant = picked.variant;
+      var variant = variantList[0];
 
       var rawZygosity    = get('zygosity');
       var rawInheritance = get('omimInheritance');
       if (!rawZygosity && !rawInheritance && currentReportType !== 'cmc') { debugRowsSkipped.noZygOrInherit++; return; }
-
-      var proteinPos = picked.proteinPos;
 
       var inheritanceCodes = abbreviateInheritance(splitList(rawInheritance));
       var clinvarValue = get('clinvarClass') || '';
@@ -2958,23 +2988,12 @@
       var omimPhenotypesValue = get('omimPhenotypes');
       var diseaseLabelValue = get('clingenDiseaseLabel') || '';
 
-      // OMIM TITLE links to the specific entry page (by MIM number) in CMC so
-      // clicking navigates to that phenotype's OMIM page, not a gene search.
-      var omimMim = (gene ? omimGeneMap.get(gene.toUpperCase()) : '') ||
-                    extractMimNumber(omimPhenotypesValue) || extractMimNumber(omimIdValue);
-      var omimEntryUrl = (currentReportType === 'cmc' && omimMim)
-        ? omimEntryLink(omimMim)
-        : (gene ? omimSearchUrl(gene) : null);
-
-      rows.push({
+      // Fields identical across every split row for this VarSeq source row -
+      // gene-specific fields (gene/variant/proteinPos/franklin/varseq/OMIM
+      // link) are layered on top per index below.
+      var sharedFields = {
         sNo: '',
-        gene: gene,
-        variant: variant,
-        proteinPos: proteinPos,
-        franklin: lookupFranklin(gene, variant),
-        _franklinUrl: null,
         clinvar: clinvarValue,
-        varseq: get('acmgClass') || '',
         zygosity: abbreviateZygosity(get('zygosity'), inheritanceCodes, isFemale),
         filter: get('filter'),
         genotype: get('genotype'),
@@ -3009,33 +3028,59 @@
         phenoRank: get('phenoRank'),
         alphaMissense: get('alphaMissense'),
         revel: get('revel'),
-        _hyperlinks: Object.assign({}, hyperlinks, {
-          gene: hyperlinks.geneNames,
-          variant: hyperlinks.hgvsC,
-          proteinPos: hyperlinks.hgvsP,
-          // Only link CLINVAR when this row actually has a reported value -
-          // most variants have none, so most rows stay plain text here.
-          clinvar: (clinvarValue && gene && variant) ? clinVarWebUrl(gene, variant) : null,
-          varseq: hyperlinks.acmgClass,
-          inheritance: hyperlinks.omimInheritance,
-          // Gene-search links, not carried over from the source file, and only
-          // attached when the cell actually has a value (an empty cell means
-          // nothing was found for this variant, so a link icon would mislead).
-          // OMIM TITLE always carries the OMIM link (not OMIM ID) - OMIM ID is
-          // an optional column that can be missing from a given export, while
-          // OMIM TITLE is populated whenever there's any OMIM annotation at
-          // all, so it's the reliable place to put the link. CONDITIONS and
-          // CLINGEN CLASSIFICATION are always text-only (explicitly nulled so
-          // a source-file hyperlink on those cells, if any, doesn't leak
-          // through the base spread above).
-          omimIdField: null,
-          omimTitle: (omimTitleValue && gene) ? omimEntryUrl : null,
-          omimPhenotypes: null,
-          omimDescription: null,
-          diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
-          clingenClass: null,
-          vafRaw: hyperlinks.vaf,
-        }),
+      };
+
+      var multiGeneGroupId = indices.length > 1 ? ('mg' + (++multiGeneGroupCounter)) : null;
+
+      indices.forEach(function (idx, n) {
+        var g = geneList[n], v = variantList[n], p = proteinPosList[n];
+
+        // OMIM TITLE links to the specific entry page (by MIM number) in CMC
+        // so clicking navigates to that phenotype's OMIM page, not a gene
+        // search - recomputed per gene since different overlapping genes can
+        // map to different OMIM entries.
+        var omimMim = (g ? omimGeneMap.get(g.toUpperCase()) : '') ||
+                      extractMimNumber(omimPhenotypesValue) || extractMimNumber(omimIdValue);
+        var omimEntryUrl = (currentReportType === 'cmc' && omimMim)
+          ? omimEntryLink(omimMim)
+          : (g ? omimSearchUrl(g) : null);
+
+        rows.push(Object.assign({}, sharedFields, {
+          gene: g,
+          variant: v,
+          proteinPos: p,
+          franklin: lookupFranklin(g, v),
+          _franklinUrl: null,
+          varseq: acmgList[n],
+          _multiGeneGroupId: multiGeneGroupId,
+          _hyperlinks: Object.assign({}, hyperlinks, {
+            gene: hyperlinks.geneNames,
+            variant: hyperlinks.hgvsC,
+            proteinPos: hyperlinks.hgvsP,
+            // Only link CLINVAR when this row actually has a reported value -
+            // most variants have none, so most rows stay plain text here.
+            clinvar: (clinvarValue && g && v) ? clinVarWebUrl(g, v) : null,
+            varseq: hyperlinks.acmgClass,
+            inheritance: hyperlinks.omimInheritance,
+            // Gene-search links, not carried over from the source file, and only
+            // attached when the cell actually has a value (an empty cell means
+            // nothing was found for this variant, so a link icon would mislead).
+            // OMIM TITLE always carries the OMIM link (not OMIM ID) - OMIM ID is
+            // an optional column that can be missing from a given export, while
+            // OMIM TITLE is populated whenever there's any OMIM annotation at
+            // all, so it's the reliable place to put the link. CONDITIONS and
+            // CLINGEN CLASSIFICATION are always text-only (explicitly nulled so
+            // a source-file hyperlink on those cells, if any, doesn't leak
+            // through the base spread above).
+            omimIdField: null,
+            omimTitle: (omimTitleValue && g) ? omimEntryUrl : null,
+            omimPhenotypes: null,
+            omimDescription: null,
+            diseaseLabel: (diseaseLabelValue && g) ? clingenSearchUrl(g) : null,
+            clingenClass: null,
+            vafRaw: hyperlinks.vaf,
+          }),
+        }));
       });
     });
 
@@ -3129,17 +3174,21 @@
 
       // When a row lists multiple overlapping genes/transcripts, keep every
       // entry that has a coding ("c.") HGVS notation - not just the first
-      // listed - joining them into the row so the analyst decides which to
-      // keep, and drop the row if none of them do (e.g. a non-coding RNA
-      // locus with only an "n." transcript).
+      // listed - as its own row (see _multiGeneGroupId below) so the analyst
+      // decides which to keep, and drop the row if none of them do (e.g. a
+      // non-coding RNA locus with only an "n." transcript).
       var picked = pickCodingVariant(genes, hgvsCList, hgvsPList);
       if (!picked) return;
+      var indices = picked.indices;
+      var geneList = indices.map(function (i) { return genes[i] || genes[0] || ''; });
+      var variantList = indices.map(function (i) { return stripHgvsPrefix(hgvsCList[i] || hgvsCList[0] || ''); });
+      var proteinPosList = indices.map(function (i) { return stripHgvsPrefix(hgvsPList[i] || hgvsPList[0] || ''); });
 
       // Every gene/variant is carried over regardless of classification -
       // Benign/Likely Benign is flagged with a green Franklin font (see
       // franklinColor) instead of being dropped. The analyst reviews and
       // removes unwanted rows manually via the delete button.
-      var gene = picked.gene;
+      var gene = geneList[0];
       if (!gene) return;
 
       // "1"/"male" fields always come from whichever raw column-group the
@@ -3184,7 +3233,7 @@
         acmgList = splitList(get('acmgClass'));
       }
 
-      var variant = picked.variant;
+      var variant = variantList[0];
       var inheritanceCodes = abbreviateInheritance(splitList(get('omimInheritance')));
       var isXLinked = inheritanceCodes.indexOf('XLD') !== -1 || inheritanceCodes.indexOf('XLR') !== -1 || inheritanceCodes.indexOf('XL') !== -1;
 
@@ -3202,16 +3251,13 @@
       var omimTitleValue = get('omimTitle') || '';
       var diseaseLabelValue = get('clingenDiseaseLabel') || '';
 
-      rows.push({
+      // Fields identical across every split row for this VarSeq source row -
+      // gene-specific fields (gene/variant/proteinPos/acmg/franklin/OMIM
+      // link) are layered on top per index below.
+      var sharedFields = {
         sNo: '',
         chrPos: chrPos || '',
         refAlt: refAlt || '',
-        gene: gene,
-        variant: variant,
-        proteinPos: picked.proteinPos,
-        acmg: picked.indices.map(function (i) { return acmgList[i] || acmgList[0] || ''; }).join(', '),
-        franklin: lookupFranklin(gene, variant),
-        _franklinUrl: null,
         _hasMale: hasCall1,
         _hasFemale: hasCall2,
         // Field "1" is always MALE and "2" is always FEMALE (see the export's
@@ -3268,35 +3314,50 @@
         dbnsfpSift: get('dbnsfpSift'),
         dbnsfpLrt: get('dbnsfpLrt'),
         dbnsfpMutTaster: get('dbnsfpMutTaster'),
-        // Preserve any hyperlinks the source VarSeq cells carried so
-        // preview/export can render them as real links. Most keys already
-        // match the row field name; the renamed ones are re-mapped here.
-        _hyperlinks: Object.assign({}, hyperlinks, {
-          chrPos: hyperlinks.chrPosCombined,
-          refAlt: hyperlinks.refAltCombined,
-          gene: hyperlinks.geneNames,
-          variant: hyperlinks.hgvsC,
-          proteinPos: hyperlinks.hgvsP,
-          // Only link CLINVAR when this row actually has a reported value -
-          // most variants have none, so most rows stay plain text here.
-          clinvar: (clinvarValue && gene && variant) ? clinVarWebUrl(gene, variant) : null,
-          inheritance: hyperlinks.omimInheritance,
-          // Gene-search links, not carried over from the source file, and only
-          // attached when the cell actually has a value (an empty cell means
-          // nothing was found for this variant, so a link icon would mislead).
-          // OMIM TITLE always carries the OMIM link (not OMIM ID) - OMIM ID is
-          // an optional column that can be missing from a given export, while
-          // OMIM TITLE is populated whenever there's any OMIM annotation at
-          // all, so it's the reliable place to put the link. CONDITIONS and
-          // CLINGEN CLASSIFICATION are always text-only (explicitly nulled so
-          // a source-file hyperlink on those cells, if any, doesn't leak
-          // through the base `hyperlinks` spread above).
-          omimIdField: null,
-          omimTitle: (omimTitleValue && gene) ? omimSearchUrl(gene) : null,
-          omimPhenotypes: null,
-          diseaseLabel: (diseaseLabelValue && gene) ? clingenSearchUrl(gene) : null,
-          clingenClass: null,
-        }),
+      };
+
+      var multiGeneGroupId = indices.length > 1 ? ('mg' + (++multiGeneGroupCounter)) : null;
+
+      indices.forEach(function (idx, n) {
+        var g = geneList[n], v = variantList[n], p = proteinPosList[n];
+        rows.push(Object.assign({}, sharedFields, {
+          gene: g,
+          variant: v,
+          proteinPos: p,
+          acmg: acmgList[idx] || acmgList[0] || '',
+          franklin: lookupFranklin(g, v),
+          _franklinUrl: null,
+          _multiGeneGroupId: multiGeneGroupId,
+          // Preserve any hyperlinks the source VarSeq cells carried so
+          // preview/export can render them as real links. Most keys already
+          // match the row field name; the renamed ones are re-mapped here.
+          _hyperlinks: Object.assign({}, hyperlinks, {
+            chrPos: hyperlinks.chrPosCombined,
+            refAlt: hyperlinks.refAltCombined,
+            gene: hyperlinks.geneNames,
+            variant: hyperlinks.hgvsC,
+            proteinPos: hyperlinks.hgvsP,
+            // Only link CLINVAR when this row actually has a reported value -
+            // most variants have none, so most rows stay plain text here.
+            clinvar: (clinvarValue && g && v) ? clinVarWebUrl(g, v) : null,
+            inheritance: hyperlinks.omimInheritance,
+            // Gene-search links, not carried over from the source file, and only
+            // attached when the cell actually has a value (an empty cell means
+            // nothing was found for this variant, so a link icon would mislead).
+            // OMIM TITLE always carries the OMIM link (not OMIM ID) - OMIM ID is
+            // an optional column that can be missing from a given export, while
+            // OMIM TITLE is populated whenever there's any OMIM annotation at
+            // all, so it's the reliable place to put the link. CONDITIONS and
+            // CLINGEN CLASSIFICATION are always text-only (explicitly nulled so
+            // a source-file hyperlink on those cells, if any, doesn't leak
+            // through the base `hyperlinks` spread above).
+            omimIdField: null,
+            omimTitle: (omimTitleValue && g) ? omimSearchUrl(g) : null,
+            omimPhenotypes: null,
+            diseaseLabel: (diseaseLabelValue && g) ? clingenSearchUrl(g) : null,
+            clingenClass: null,
+          }),
+        }));
       });
     });
 
@@ -3668,10 +3729,25 @@
     return tr;
   }
 
+  // True when another row from the same multi-gene split (see
+  // _multiGeneGroupId, assigned in processVarSeqWorkbook/
+  // processCoupleVarSeqWorkbook) is still active - i.e. there's still an
+  // alternative gene call to compare against and decide between. Once the
+  // analyst deletes all but one row of a group, the remaining row's
+  // highlight naturally drops out on the next render since this returns
+  // false for it.
+  function hasActiveMultiGeneSibling(row) {
+    if (!row._multiGeneGroupId) return false;
+    return variantRows.some(function (r) {
+      return r !== row && r._multiGeneGroupId === row._multiGeneGroupId && !r._removed;
+    });
+  }
+
   function buildVariantDataRow(row, rowIndex, columns, batchIdx, displayNo, highlight) {
     var tr = document.createElement('tr');
     if (highlight) tr.classList.add('secondary-finding-row');
     if (row._removed) tr.classList.add('variant-row-removed');
+    if (!row._removed && hasActiveMultiGeneSibling(row)) tr.classList.add('variant-row-multigene');
     var inheritanceInput = null;
 
     function updateInheritanceColor() {
