@@ -538,6 +538,22 @@
           <span class="progress-text" id="franklin-progress-text"></span>
           <button type="button" class="upload-remove-btn" id="franklin-file-remove" title="Remove ACMG reference file">×</button>
         </div>
+        <div class="upload-row" id="couple-gender-row" style="display:none;">
+          <label class="upload-label" style="flex:0 0 auto;">
+            1st column-group in the raw Excel is
+            <select id="couple-gender-select-1">
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+            </select>
+          </label>
+          <label class="upload-label" style="flex:0 0 auto;">
+            2nd column-group in the raw Excel is
+            <select id="couple-gender-select-2">
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+            </select>
+          </label>
+        </div>
         <div id="variant-batch-list" class="batch-list" hidden></div>
         <div class="error-banner" id="variant-error" hidden></div>
         <!-- Keep hidden for legacy JS compatibility -->
@@ -699,6 +715,29 @@
   var globalUndoBtn = document.getElementById('global-undo-btn');
   var toolsLabels = document.querySelectorAll('.tools-label');
 
+  // Which raw column-group in an uploaded couple VarSeq file (0 = first, 1 =
+  // second) is the male partner - set via the couple upload panel's gender
+  // dropdowns, since nothing in the raw file itself identifies which sample
+  // is which sex.
+  var coupleMaleGroupIndex = 0;
+  var coupleGenderSelect1 = document.getElementById('couple-gender-select-1');
+  var coupleGenderSelect2 = document.getElementById('couple-gender-select-2');
+  function setCoupleMaleGroupIndex(idx) {
+    coupleMaleGroupIndex = idx;
+    if (coupleGenderSelect1) coupleGenderSelect1.value = idx === 0 ? 'male' : 'female';
+    if (coupleGenderSelect2) coupleGenderSelect2.value = idx === 0 ? 'female' : 'male';
+  }
+  if (coupleGenderSelect1) {
+    coupleGenderSelect1.addEventListener('change', function () {
+      setCoupleMaleGroupIndex(coupleGenderSelect1.value === 'male' ? 0 : 1);
+    });
+  }
+  if (coupleGenderSelect2) {
+    coupleGenderSelect2.addEventListener('change', function () {
+      setCoupleMaleGroupIndex(coupleGenderSelect2.value === 'male' ? 1 : 0);
+    });
+  }
+
   function switchReportType(reportType) {
     currentReportType = reportType;
 
@@ -718,6 +757,14 @@
     var franklinUploadRow = document.getElementById('franklin-upload-row');
     if (franklinUploadRow) {
       franklinUploadRow.style.display = reportType === 'cmc' ? 'block' : 'none';
+    }
+
+    // Hide/show the couple gender-order selector (only for couple mode) -
+    // the raw VarSeq columns don't say which sample is male vs female, so
+    // the analyst picks it here to match how their file is laid out.
+    var coupleGenderRow = document.getElementById('couple-gender-row');
+    if (coupleGenderRow) {
+      coupleGenderRow.style.display = reportType === 'couple' ? 'flex' : 'none';
     }
 
     // Reset to first tab of selected report type
@@ -2090,20 +2137,24 @@
   }
 
   
-  function deriveZygosityFromDepths(alleleDepthsRaw, vafRaw, isXLinked) {
+  function deriveZygosityFromDepths(alleleDepthsRaw, vafRaw, isXLinked, isFemale) {
+    // Same male/female distinction as abbreviateZygosity above: an X-linked
+    // homozygous-looking call is HEMI for a male (one X copy) but a genuine
+    // HOM for a confirmed female (two X copies).
+    var hemiOrHom = (isXLinked && !isFemale) ? 'HEMI' : 'HOM';
     if (alleleDepthsRaw) {
       var parts = String(alleleDepthsRaw).split(',');
       if (parts.length >= 2) {
         var ref = parseFloat(parts[0]);
         var alt = parseFloat(parts[1]);
         if (!isNaN(ref) && !isNaN(alt) && (ref > 0 || alt > 0)) {
-          return ref > 0 ? 'HET' : (isXLinked ? 'HEMI' : 'HOM');
+          return ref > 0 ? 'HET' : hemiOrHom;
         }
       }
     }
     if (vafRaw != null && vafRaw !== '') {
       var vaf = parseFloat(vafRaw);
-      if (!isNaN(vaf)) return vaf >= 0.85 ? (isXLinked ? 'HEMI' : 'HOM') : 'HET';
+      if (!isNaN(vaf)) return vaf >= 0.85 ? hemiOrHom : 'HET';
     }
     return '';
   }
@@ -2979,9 +3030,17 @@
     return { rows: rows, runName: runName, inhouseHematologyCount: inhouseHematologyCount };
   }
 
-  function processCoupleVarSeqWorkbook(workbook) {
+  function processCoupleVarSeqWorkbook(workbook, maleGroupIndex) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in the uploaded file.');
+
+    // Which raw column-group (0 = first sample block in the file, 1 =
+    // second) is the male partner - user-selected (see the couple upload
+    // panel's gender dropdowns), since nothing in the raw VarSeq columns
+    // themselves says which physical sample is male vs female. Defaults to
+    // the first group, matching the tool's previous (assumed) behavior.
+    var maleIdx = (maleGroupIndex === 1) ? 1 : 0;
+    var femaleIdx = maleIdx === 0 ? 1 : 0;
 
     var groupRow = sheet.getRow(1);
     var headerRow = sheet.getRow(2);
@@ -2993,6 +3052,32 @@
       colsAll[key] = findVarSeqColumns(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS[key]);
       cols[key] = colsAll[key][0] || null;
     });
+
+    // The sample group header (e.g. "GEN_T_2.0.spik_4347_...") sits in
+    // whichever column a merged group header cell anchors at - forward-fill
+    // from the last non-empty group cell, same as findVarSeqColumns does -
+    // precomputed once per column so per-row lookups below are O(1).
+    var groupTextAtCol = [];
+    (function () {
+      var lastGroup = '';
+      for (var c = 1; c <= colCount; c++) {
+        var v = String(groupRow.getCell(c).value || '');
+        if (v) lastGroup = v;
+        groupTextAtCol[c] = lastGroup;
+      }
+    })();
+    function groupHeaderAt(col) { return col ? (groupTextAtCol[col] || '') : ''; }
+
+    var readDepthCols = colsAll.readDepths || [];
+    // Some columns (e.g. "Zygosity") appear TWICE inside the same partner's
+    // own block of columns, so flattening every match across the whole sheet
+    // and indexing it positionally (match 0 = partner 1, match 1 = partner 2)
+    // silently reads partner 1's *second* Zygosity column as if it were
+    // partner 2's - mixing the two partners' calls together. Since every
+    // column belonging to one partner shares that partner's own group-header
+    // text (the sample ID merged across their whole block), resolve each
+    // partner's column by group membership instead of raw position.
+    var sampleGroupTexts = [groupHeaderAt(readDepthCols[0]), groupHeaderAt(readDepthCols[1])];
 
     var rows = [];
     sheet.eachRow(function (row, r) {
@@ -3008,6 +3093,14 @@
       }
       function getNth(key, index) {
         var matches = colsAll[key] || [];
+        var wantGroup = sampleGroupTexts[index];
+        if (wantGroup) {
+          for (var i = 0; i < matches.length; i++) {
+            if (groupHeaderAt(matches[i]) === wantGroup) return cellText(row.getCell(matches[i]).value);
+          }
+        }
+        // Fallback (e.g. a shared/non-sample-scoped block like ACMG, whose
+        // own group label isn't a sample ID): use the old positional match.
         return matches[index] ? cellText(row.getCell(matches[index]).value) : null;
       }
 
@@ -3030,14 +3123,18 @@
       var gene = picked.gene;
       if (!gene) return;
 
-      var rawZygosity1 = getNth('zygosity', 0);
-      var rawZygosity2 = getNth('zygosity', 1);
-      var readDepths1 = getNth('readDepths', 0);
-      var readDepths2 = getNth('readDepths', 1);
-      var vaf1 = getNth('vaf', 0);
-      var vaf2 = getNth('vaf', 1);
-      var alleleDepths1 = getNth('alleleDepths', 0);
-      var alleleDepths2 = getNth('alleleDepths', 1);
+      // "1"/"male" fields always come from whichever raw column-group the
+      // user designated as male (maleIdx), "2"/"female" from the other -
+      // not from raw file order, since the file itself doesn't say which
+      // sample is which sex.
+      var rawZygosity1 = getNth('zygosity', maleIdx);
+      var rawZygosity2 = getNth('zygosity', femaleIdx);
+      var readDepths1 = getNth('readDepths', maleIdx);
+      var readDepths2 = getNth('readDepths', femaleIdx);
+      var vaf1 = getNth('vaf', maleIdx);
+      var vaf2 = getNth('vaf', femaleIdx);
+      var alleleDepths1 = getNth('alleleDepths', maleIdx);
+      var alleleDepths2 = getNth('alleleDepths', femaleIdx);
       // Some exports skip the "Zygosity" column entirely - fall back to
       // whether that partner has any read depth/allele depth/VAF at all,
       // since that's what actually indicates a call was made for them.
@@ -3057,8 +3154,8 @@
       // the other partner's block.
       var acmgList;
       if ((colsAll.acmgClass || []).length >= 2) {
-        var acmgList1 = splitList(getNth('acmgClass', 0));
-        var acmgList2 = splitList(getNth('acmgClass', 1));
+        var acmgList1 = splitList(getNth('acmgClass', maleIdx));
+        var acmgList2 = splitList(getNth('acmgClass', femaleIdx));
         if (hasCall1 && hasCall2) {
           acmgList = acmgList1[0] ? acmgList1 : acmgList2;
         } else {
@@ -3098,11 +3195,16 @@
         _franklinUrl: null,
         _hasMale: hasCall1,
         _hasFemale: hasCall2,
-        zygosity1: hasCall1 ? (rawZygosity1 ? abbreviateZygosity(rawZygosity1, inheritanceCodes) : (deriveZygosityFromDepths(alleleDepths1, vaf1, isXLinked) || 'HET')) : '-',
+        // Field "1" is always MALE and "2" is always FEMALE (see the export's
+        // fixed "MALE"/"FEMALE" column headers) - only the male side is
+        // eligible for the HOM->HEMI X-linked override, since a homozygous
+        // call at an X-linked locus is only a hemizygous artifact for a
+        // single-X (male) sample.
+        zygosity1: hasCall1 ? (rawZygosity1 ? abbreviateZygosity(rawZygosity1, inheritanceCodes, false) : (deriveZygosityFromDepths(alleleDepths1, vaf1, isXLinked, false) || 'HET')) : '-',
         readDepths1: hasCall1 ? readDepths1 : '-',
         vaf1: hasCall1 ? formatVafPercent(vaf1) : '-',
         alleleDepths1: hasCall1 ? alleleDepths1 : '-',
-        zygosity2: hasCall2 ? (rawZygosity2 ? abbreviateZygosity(rawZygosity2, inheritanceCodes) : (deriveZygosityFromDepths(alleleDepths2, vaf2, isXLinked) || 'HET')) : '-',
+        zygosity2: hasCall2 ? (rawZygosity2 ? abbreviateZygosity(rawZygosity2, inheritanceCodes, true) : (deriveZygosityFromDepths(alleleDepths2, vaf2, isXLinked, true) || 'HET')) : '-',
         readDepths2: hasCall2 ? readDepths2 : '-',
         vaf2: hasCall2 ? formatVafPercent(vaf2) : '-',
         alleleDepths2: hasCall2 ? alleleDepths2 : '-',
@@ -3188,27 +3290,10 @@
       return runName;
     }
 
-    // The sample group header (e.g. "GEN_T_2.0.spik_4347_...") sits in
-    // whichever column a merged group header cell anchors at - not
-    // necessarily column 3/7 - so read the group text at each "Read Depths
-    // (DP)" column (forward-filling from the last non-empty group cell, same
-    // as findVarSeqColumns does) instead of assuming fixed columns.
-    function groupHeaderAt(col) {
-      if (!col) return '';
-      var lastGroup = '';
-      for (var c = 1; c <= col; c++) {
-        var v = String(groupRow.getCell(c).value || '');
-        if (v) lastGroup = v;
-      }
-      return lastGroup;
-    }
-
-    var readDepthCols = colsAll.readDepths || [];
-
     return {
       rows: rows,
-      sample1Name: extractSampleName(groupHeaderAt(readDepthCols[0])),
-      sample2Name: extractSampleName(groupHeaderAt(readDepthCols[1])),
+      sample1Name: extractSampleName(groupHeaderAt(readDepthCols[maleIdx])),
+      sample2Name: extractSampleName(groupHeaderAt(readDepthCols[femaleIdx])),
     };
   }
 
@@ -4529,10 +4614,15 @@
           if (isCoupleFile) {
             // Couple mode: one row per variant, both partners' genotype fields
             // side by side. Export splits this into two per-sample sections.
-            var result = processCoupleVarSeqWorkbook(workbook);
+            var maleIdx = coupleMaleGroupIndex;
+            var femaleIdx = maleIdx === 0 ? 1 : 0;
+            var result = processCoupleVarSeqWorkbook(workbook, maleIdx);
+            // Filename-parsed names follow the same raw column order as the
+            // sheet (first name = first column-group) - map them through the
+            // same male/female selection the user made for the columns.
             var coupleNames = extractCoupleNamesFromFilename(file.name);
-            var name1 = coupleNames[0] || result.sample1Name;
-            var name2 = coupleNames[1] || result.sample2Name;
+            var name1 = coupleNames[maleIdx] || result.sample1Name;
+            var name2 = coupleNames[femaleIdx] || result.sample2Name;
             return {
               fileName: file.name,
               rows: result.rows,
