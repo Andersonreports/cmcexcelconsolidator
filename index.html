@@ -3523,6 +3523,21 @@
       });
     }
 
+    // A wrong file type (e.g. a VarSeq SNV export, whose row 1 is a group-
+    // label row, not real headers) can coincidentally have a single cell
+    // reading "Gene" or similar among its hundreds of columns - matching
+    // just one column isn't enough to trust this is really a CNV export.
+    // Require several of the core columns together before proceeding, so a
+    // mismatched file fails clearly instead of silently producing a handful
+    // of garbage rows pulled from unrelated columns.
+    var coreCnvColumns = ['gene', 'chromosome', 'copyNumber', 'type'];
+    var missingCore = coreCnvColumns.filter(function (key) { return !cols[key]; });
+    if (missingCore.length) {
+      throw new Error('This doesn\'t look like a CNV export - missing column(s): ' +
+        missingCore.map(function (key) { return CNV_RAW_HEADERS[key]; }).join(', ') +
+        '. Upload the CNV caller\'s report (Gene/Chromosome/Copy Number/Type columns), not a VarSeq SNV export.');
+    }
+
     var rows = [];
     sheet.eachRow(function (row, r) {
       if (r <= 1) return;
