@@ -3612,8 +3612,16 @@
     { key: 'EGA_freq', spec: { header: 'European (Non-Finnish) Allele Frequency', groupIncludes: ['gnomAD Joint'] } },
     { key: 'EGA_AlleleCount', spec: { header: 'European (Non-Finnish) Allele Count', groupIncludes: ['gnomAD Joint'] } },
     { key: 'EGA_Homozygotes', spec: { header: 'European (Non-Finnish) Homozygous Count', groupIncludes: ['gnomAD Joint'] } },
-    { key: 'GenomeAsia_Freq', spec: { header: 'Alt Allele Freq (AF)', groupIncludes: ['GenomeAsia'] } },
-    { key: 'GenomeAsia_Het', spec: null },
+    // South Asian subset, not the overall AF - matches both GenomeAsia_Hom
+    // below (only population-specific Hom counts exist in this track, no
+    // overall one) and the existing single/CMC template's own GenomeAsia
+    // spec (VARSEQ_COLUMN_SPECS.genomeAsia), which already uses this same
+    // South Asian population for this lab's patient population.
+    { key: 'GenomeAsia_Freq', spec: { header: 'South Asian Alt Allele Freq (AF_SAS)', groupIncludes: ['GenomeAsia'] } },
+    // Per Dr. Robert's own note - the GenomeAsia 100K track has no dedicated
+    // heterozygote count field, only overall allele counts, so this is the
+    // closest available proxy rather than an exact equivalent.
+    { key: 'GenomeAsia_Het', spec: { header: 'Alt Allele Counts (AC)', groupIncludes: ['GenomeAsia'] } },
     { key: 'GenomeAsia_Hom', spec: { headerStartsWith: 'South Asian Homozygous', groupIncludes: ['GenomeAsia'] } },
     { key: 'Gnomad_v211_exome_AlleleCount', spec: { header: 'Alt Allele Count (AC)', groupIncludes: ['gnomAD Exomes', '2.0.1'] } },
     { key: 'Gnomad_v211_exome_Homozygotes', spec: { headerStartsWith: 'Homoz', groupIncludes: ['gnomAD Exomes', '2.0.1'] } },
@@ -3865,7 +3873,18 @@
       var safeName = String(name).replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
       var sheet = workbook.addWorksheet(safeName);
       sheet.addRow(headers);
-      sheet.getRow(1).font = { bold: true };
+      // Same header look as every other export (white bold on dark blue,
+      // centered, frozen) instead of a plain bold row, so Dr. Robert's sheets
+      // match the rest of the app's exports.
+      var headerRow = sheet.getRow(1);
+      headers.forEach(function (h, i) {
+        var cell = headerRow.getCell(i + 1);
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
+      headerRow.height = 22;
+      sheet.views = [{ state: 'frozen', ySplit: 1 }];
       headers.forEach(function (h, i) { sheet.getColumn(i + 1).width = 16; });
       sheetRows.forEach(function (r) {
         sheet.addRow(headers.map(function (h) { return r[h] != null ? r[h] : ''; }));
