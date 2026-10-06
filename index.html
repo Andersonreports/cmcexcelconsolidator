@@ -4616,6 +4616,30 @@
         sample2Entries.forEach(function (entry, i) {
           variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
         });
+      } else if (currentReportType === 'robert') {
+        // Mirrors Dr. Robert's own 6-sheet workbook (see
+        // buildRobertVariantExcel) directly in the preview - categorized
+        // with the same categorizeRobertRows the export uses, so the
+        // analyst can review HOM/HET/COMP/Clinsig before downloading
+        // instead of only seeing the split after export.
+        var robertEntryByRow = new Map();
+        activeRowEntries.forEach(function (entry) { robertEntryByRow.set(entry.row, entry); });
+        var robertCats = categorizeRobertRows(activeRowEntries.map(function (entry) { return entry.row; }));
+        function toRobertEntries(list) { return list.map(function (r) { return robertEntryByRow.get(r); }); }
+
+        var robertPreviewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+        var robertAllLabel = (robertPreviewItem && robertPreviewItem.patientName ? robertPreviewItem.patientName + '_final' : 'All Variants');
+        variantTableBody.appendChild(buildGridSectionHeaderRow(robertAllLabel, columns.length));
+        activeRowEntries.forEach(function (entry, i) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+        });
+        [['HOM', robertCats.hom], ['HET', robertCats.het], ['COMP', robertCats.comp], ['Clinsig', robertCats.clinsig]].forEach(function (pair) {
+          variantTableBody.appendChild(buildGridSectionHeaderRow(pair[0], columns.length));
+          toRobertEntries(pair[1]).forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          });
+        });
+        variantTableBody.appendChild(buildGridSectionHeaderRow('Candidate (fill in manually before exporting)', columns.length));
       } else {
         // Secondary findings are pulled out into a highlighted section at the top;
         // the rest follow in the normal list. Both are numbered from 1.
