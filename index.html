@@ -4044,16 +4044,30 @@
     writeRobertSheet(workbook, headers, name + '_Candidate', rows.filter(function (r) { return r._robertCandidate; }));
   }
 
-  // Just the HOM/HET/COMP/Clinsig/Candidate sheets (no flat "_final" list -
-  // the couple export's combined first sheet, sectioned the same way as the
-  // existing Couple template, covers that).
-  function writeRobertPersonCategorySheets(workbook, headers, rows, name) {
-    var cats = categorizeRobertRows(rows);
-    writeRobertSheet(workbook, headers, name + '_HOM', cats.hom);
-    writeRobertSheet(workbook, headers, name + '_HET', cats.het);
-    writeRobertSheet(workbook, headers, name + '_COMP', cats.comp);
-    writeRobertSheet(workbook, headers, name + '_Clinsig', cats.clinsig);
-    writeRobertSheet(workbook, headers, name + '_Candidate', rows.filter(function (r) { return r._robertCandidate; }));
+  // One HOM/HET/COMP/Clinsig/Candidate sheet EACH (not one per partner) -
+  // both partners' rows for that category live in the same sheet, told
+  // apart by their own titled section (name1's rows, then name2's), the
+  // same sectioned layout the combined first sheet uses. Each partner's
+  // categorization (categorizeRobertRows) is still computed independently -
+  // only where the results land changed, not how they're worked out.
+  function writeRobertCombinedCategorySheets(workbook, headers, maleRows, femaleRows, name1, name2) {
+    var maleCats = categorizeRobertRows(maleRows);
+    var femaleCats = categorizeRobertRows(femaleRows);
+    var maleCandidates = maleRows.filter(function (r) { return r._robertCandidate; });
+    var femaleCandidates = femaleRows.filter(function (r) { return r._robertCandidate; });
+
+    [
+      ['HOM', maleCats.hom, femaleCats.hom],
+      ['HET', maleCats.het, femaleCats.het],
+      ['COMP', maleCats.comp, femaleCats.comp],
+      ['Clinsig', maleCats.clinsig, femaleCats.clinsig],
+      ['Candidate', maleCandidates, femaleCandidates],
+    ].forEach(function (entry) {
+      writeRobertSectionedSheet(workbook, headers, entry[0], [
+        { title: name1 + ' - ' + entry[0], rows: entry[1], alwaysShow: true },
+        { title: name2 + ' - ' + entry[0], rows: entry[2], alwaysShow: true },
+      ]);
+    });
   }
 
   // One sheet made of several titled sections, each with its own header row
@@ -4123,8 +4137,7 @@
       { title: (name2 || 'Female') + ' only', rows: split.femaleRows, alwaysShow: true },
     ]);
 
-    writeRobertPersonCategorySheets(workbook, headers, activeMale, name1 || 'Male');
-    writeRobertPersonCategorySheets(workbook, headers, activeFemale, name2 || 'Female');
+    writeRobertCombinedCategorySheets(workbook, headers, activeMale, activeFemale, name1 || 'Male', name2 || 'Female');
 
     return workbook.xlsx.writeBuffer();
   }
@@ -4945,27 +4958,38 @@
           });
         }
 
-        // Just the HOM/HET/COMP/Clinsig/Candidate sections (no flat "all
-        // variants" list) - used for a couple file's per-partner sections,
-        // since the combined Secondary/Common/Compound/partner-only sections
-        // above already cover "every variant this partner carries".
-        function renderRobertPersonCategorySections(entries, label) {
+        // One HOM/HET/COMP/Clinsig/Candidate block EACH (not one per
+        // partner) - matches writeRobertCombinedCategorySheets: both
+        // partners' rows for a category sit together, split into their own
+        // titled sub-section within that one block, instead of two whole
+        // separate blocks per partner.
+        function renderRobertCombinedCategorySections(maleEntries, femaleEntries, name1, name2) {
           var entryByRow = new Map();
-          entries.forEach(function (entry) { entryByRow.set(entry.row, entry); });
-          var cats = categorizeRobertRows(entries.map(function (entry) { return entry.row; }));
+          maleEntries.concat(femaleEntries).forEach(function (entry) { entryByRow.set(entry.row, entry); });
+          var maleCats = categorizeRobertRows(maleEntries.map(function (entry) { return entry.row; }));
+          var femaleCats = categorizeRobertRows(femaleEntries.map(function (entry) { return entry.row; }));
           function toEntries(list) { return list.map(function (r) { return entryByRow.get(r); }); }
 
-          [[label + ' HOM', cats.hom], [label + ' HET', cats.het], [label + ' COMP', cats.comp], [label + ' Clinsig', cats.clinsig]].forEach(function (pair) {
-            variantTableBody.appendChild(buildGridSectionHeaderRow(pair[0], columns.length));
-            toEntries(pair[1]).forEach(function (entry, i) {
+          function renderSubSection(title, list) {
+            variantTableBody.appendChild(buildGridSectionHeaderRow(title, columns.length));
+            toEntries(list).forEach(function (entry, i) {
               variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
             });
+          }
+
+          [
+            ['HOM', maleCats.hom, femaleCats.hom],
+            ['HET', maleCats.het, femaleCats.het],
+            ['COMP', maleCats.comp, femaleCats.comp],
+            ['Clinsig', maleCats.clinsig, femaleCats.clinsig],
+          ].forEach(function (entry) {
+            renderSubSection(name1 + ' - ' + entry[0], entry[1]);
+            renderSubSection(name2 + ' - ' + entry[0], entry[2]);
           });
-          var candidateEntries = entries.filter(function (entry) { return entry.row._robertCandidate; });
-          variantTableBody.appendChild(buildGridSectionHeaderRow(label + ' Candidate (click ☆ on any row above to add it here)', columns.length));
-          candidateEntries.forEach(function (entry, i) {
-            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
-          });
+          var maleCandidates = maleEntries.filter(function (entry) { return entry.row._robertCandidate; });
+          var femaleCandidates = femaleEntries.filter(function (entry) { return entry.row._robertCandidate; });
+          renderSubSection(name1 + ' - Candidate (click ☆ on any row above to add it here)', maleCandidates);
+          renderSubSection(name2 + ' - Candidate (click ☆ on any row above to add it here)', femaleCandidates);
         }
 
         var robertPreviewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
@@ -5014,8 +5038,7 @@
           // the export's per-partner category sheets.
           var robertMaleEntries = activeRowEntries.filter(function (entry) { return entry.row._robertPartner === 'male'; });
           var robertFemaleEntries = activeRowEntries.filter(function (entry) { return entry.row._robertPartner === 'female'; });
-          renderRobertPersonCategorySections(robertMaleEntries, robertName1);
-          renderRobertPersonCategorySections(robertFemaleEntries, robertName2);
+          renderRobertCombinedCategorySections(robertMaleEntries, robertFemaleEntries, robertName1, robertName2);
         } else {
           var robertAllLabel = (robertPreviewItem && robertPreviewItem.patientName ? robertPreviewItem.patientName + '_final' : 'All Variants');
           renderRobertPersonSections(activeRowEntries, robertAllLabel);
