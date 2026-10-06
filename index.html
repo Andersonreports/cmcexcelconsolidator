@@ -801,7 +801,10 @@
     // the analyst picks it here to match how their file is laid out.
     var coupleGenderRow = document.getElementById('couple-gender-row');
     if (coupleGenderRow) {
-      coupleGenderRow.style.display = reportType === 'couple' ? 'flex' : 'none';
+      // Also shown for Dr. Robert - a couple file there needs the same
+      // male/female column-group choice, even though a single-person Dr.
+      // Robert file (the more common case) just ignores it.
+      coupleGenderRow.style.display = (reportType === 'couple' || reportType === 'robert') ? 'flex' : 'none';
     }
 
     // Reset to first tab of selected report type
@@ -3596,10 +3599,16 @@
     { key: 'Ref', derived: 'ref' },
     { key: 'Alt', derived: 'alt' },
     { key: 'Zygosity_1', derived: 'zygosity' },
-    { key: 'Read_Frequency_1', spec: { headerStartsWith: 'Variant Allele Fr', groupExcludes: ['Complex Variants'] } },
-    { key: 'Read_Count_1', spec: { header: 'Read Depths (DP)', groupExcludes: ['Complex Variants'] } },
-    { key: 'Quality_1', spec: { header: 'Genotype Qualities (GQ)', groupExcludes: ['Complex Variants'] } },
-    { key: 'Pass_filter', spec: { header: 'Filter', groupExcludes: ['Complex Variants'] } },
+    // sampleField: true marks the handful of columns that describe THIS
+    // sample's own call (not the variant/gene annotation shared by every
+    // sample) - for a couple file, each partner has their own value, so
+    // these need per-partner column resolution (see processRobertWorkbook);
+    // for a single-person file there's only one sample, so it's the same
+    // plain header lookup as before.
+    { key: 'Read_Frequency_1', sampleField: true, spec: { headerStartsWith: 'Variant Allele Fr', groupExcludes: ['Complex Variants'] } },
+    { key: 'Read_Count_1', sampleField: true, spec: { header: 'Read Depths (DP)', groupExcludes: ['Complex Variants'] } },
+    { key: 'Quality_1', sampleField: true, spec: { header: 'Genotype Qualities (GQ)', groupExcludes: ['Complex Variants'] } },
+    { key: 'Pass_filter', sampleField: true, spec: { header: 'Filter', groupExcludes: ['Complex Variants'] } },
     { key: 'Func_refGene', spec: { headerStartsWith: 'Sequence Ontology' } },
     { key: 'ExonicFunc_refGene', spec: { headerStartsWith: 'Effect' } },
     { key: 'AAChange_refGene', derived: 'aachange' },
@@ -3786,12 +3795,82 @@
     return { hom: hom, het: het, comp: comp, clinsig: clinsig };
   }
 
+  // Splits a couple Dr. Robert item's combined row list (see
+  // processRobertWorkbook/the upload handler) back into each partner's own
+  // rows via the _robertPartner tag, for both the preview grid and export.
+  function splitRobertCoupleRows(rows) {
+    return {
+      maleRows: rows.filter(function (r) { return r._robertPartner === 'male'; }),
+      femaleRows: rows.filter(function (r) { return r._robertPartner === 'female'; }),
+    };
+  }
+
+  // Same ACMG Secondary Findings gate as the rest of the app
+  // (isSecondaryFindingRow), just reading Dr. Robert's own Gene_refGene
+  // column instead of the other templates' `gene` field.
+  function isRobertSecondaryFindingRow(row) {
+    return splitList(row && row.Gene_refGene).some(function (g) {
+      var symbol = String(g || '').trim().toUpperCase();
+      return symbol && SECONDARY_FINDING_GENE_SET[symbol];
+    });
+  }
+
+  function robertVariantKey(row) {
+    return [row.Chr, row.Start, row.Ref, row.Alt].join('|');
+  }
+
+  // Dr. Robert couple categorization for the combined first sheet - the
+  // same Common/Compound/partner-only split the existing Couple template
+  // uses (splitCoupleRowsByGene), adapted to Dr. Robert's own row shape:
+  // Chr/Start/Ref/Alt instead of gene+HGVS variant (actually more precise
+  // for an exact-match "Common" check, since it's the literal genomic
+  // position/allele rather than a display string), Gene_refGene instead of
+  // gene, and _robertPartner instead of _hasMale/_hasFemale.
+  function splitRobertCoupleRowsByGene(rows) {
+    function geneKey(r) { return String(r.Gene_refGene || '').trim().toUpperCase(); }
+
+    var maleVariants = {}, femaleVariants = {}, maleGenes = {}, femaleGenes = {};
+    rows.forEach(function (r) {
+      var key = robertVariantKey(r);
+      var g = geneKey(r);
+      if (r._robertPartner === 'male') { maleVariants[key] = true; maleGenes[g] = true; }
+      if (r._robertPartner === 'female') { femaleVariants[key] = true; femaleGenes[g] = true; }
+    });
+    var sharedVariants = {};
+    Object.keys(maleVariants).forEach(function (k) { if (femaleVariants[k]) sharedVariants[k] = true; });
+    var sharedGenes = {};
+    Object.keys(maleGenes).forEach(function (g) { if (femaleGenes[g]) sharedGenes[g] = true; });
+
+    var combinedRows = [], compoundRows = [], maleRows = [], femaleRows = [];
+    rows.forEach(function (r) {
+      if (sharedVariants[robertVariantKey(r)]) combinedRows.push(r);
+      else if (sharedGenes[geneKey(r)]) compoundRows.push(r);
+      else if (r._robertPartner === 'male') maleRows.push(r);
+      else if (r._robertPartner === 'female') femaleRows.push(r);
+    });
+
+    return { combinedRows: combinedRows, compoundRows: compoundRows, maleRows: maleRows, femaleRows: femaleRows };
+  }
+
   // Reads a standard VarSeq SNV export (same 2-row group+header layout as
-  // processVarSeqWorkbook) into Dr. Robert's ~100-column per-variant row
-  // shape. Every row is kept, unfiltered - categorizeRobertRows (used only
-  // at export time, see buildRobertVariantExcel) does the HOM/HET/COMP/
-  // Clinsig split into separate sheets.
-  function processRobertWorkbook(workbook) {
+  // processVarSeqWorkbook/processCoupleVarSeqWorkbook) into Dr. Robert's
+  // ~100-column per-variant row shape. Works for both a single-person file
+  // and a couple file (two sample column-groups, same "Read Depths (DP)"
+  // count>=2 detection the other templates use) - Dr. Robert's own schema
+  // (Zygosity_1, not Zygosity_1/Zygosity_2) describes ONE person, so a
+  // couple file produces two full, independent row sets (one per partner),
+  // not one row with both partners' calls side by side. Every gene/ClinVar/
+  // population-frequency annotation is identical between the two partners'
+  // copies of the same variant (it describes the variant, not the sample) -
+  // only the sample-specific fields (sampleField: true in ROBERT_COLUMNS:
+  // Read_Frequency_1, Read_Count_1, Quality_1, Pass_filter, Zygosity_1)
+  // differ per partner, and are resolved group-boundary-aware (not by plain
+  // header text) since a couple file can repeat a field's header text twice
+  // inside the SAME partner's own column block - see the equivalent fix in
+  // processCoupleVarSeqWorkbook for why that matters.
+  // `maleGroupIndex` is only used for couple files - same meaning as
+  // processCoupleVarSeqWorkbook's.
+  function processRobertWorkbook(workbook, maleGroupIndex) {
     var sheet = workbook.worksheets[0];
     if (!sheet) throw new Error('No worksheet found in the uploaded file.');
 
@@ -3799,17 +3878,58 @@
     var headerRow = sheet.getRow(2);
     var colCount = effectiveVarSeqColCount(sheet, groupRow, headerRow);
 
+    // Shared (variant/gene-level) columns - identical for every partner.
     var cols = {};
     ROBERT_COLUMNS.forEach(function (c) {
-      if (c.spec) cols[c.key] = findVarSeqColumn(groupRow, headerRow, colCount, c.spec);
+      if (c.spec && !c.sampleField) cols[c.key] = findVarSeqColumn(groupRow, headerRow, colCount, c.spec);
     });
     var chrPosCol = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.chrPosCombined);
     var refAltCol = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.refAltCombined);
-    var zygosityCol = findVarSeqColumn(groupRow, headerRow, colCount, { header: 'Zygosity' });
     var hgvsCCol = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.hgvsC);
     var hgvsPCol = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.hgvsP);
 
-    var rows = [];
+    // Sample-specific columns - every match across the whole sheet, resolved
+    // per-partner at read time via group membership (see getSampleField).
+    var sampleFieldCols = {};
+    ROBERT_COLUMNS.forEach(function (c) {
+      if (c.sampleField) sampleFieldCols[c.key] = findVarSeqColumns(groupRow, headerRow, colCount, c.spec);
+    });
+    var zygosityCols = findVarSeqColumns(groupRow, headerRow, colCount, { header: 'Zygosity' });
+
+    var groupTextAtCol = [];
+    (function () {
+      var lastGroup = '';
+      for (var c = 1; c <= colCount; c++) {
+        var v = String(groupRow.getCell(c).value || '');
+        if (v) lastGroup = v;
+        groupTextAtCol[c] = lastGroup;
+      }
+    })();
+    function groupHeaderAt(col) { return col ? (groupTextAtCol[col] || '') : ''; }
+
+    var readDepthCols = findVarSeqColumns(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.readDepths);
+    var isCouple = readDepthCols.length >= 2;
+    var maleIdx = (maleGroupIndex === 1) ? 1 : 0;
+    var femaleIdx = maleIdx === 0 ? 1 : 0;
+    // For a single-person file both "slots" point at the same (only) sample
+    // group, so getSampleField below resolves the same way it always has.
+    var slotGroupText = isCouple
+      ? [groupHeaderAt(readDepthCols[maleIdx]), groupHeaderAt(readDepthCols[femaleIdx])]
+      : [groupHeaderAt(readDepthCols[0]), groupHeaderAt(readDepthCols[0])];
+
+    function getSampleField(row, matches, slot) {
+      var wantGroup = slotGroupText[slot];
+      if (wantGroup) {
+        for (var i = 0; i < matches.length; i++) {
+          if (groupHeaderAt(matches[i]) === wantGroup) return cellText(row.getCell(matches[i]).value);
+        }
+      }
+      return matches[slot] != null ? cellText(row.getCell(matches[slot]).value) : '';
+    }
+
+    var maleRows = [];
+    var femaleRows = isCouple ? [] : null;
+
     sheet.eachRow(function (row, r) {
       if (r <= 2) return;
 
@@ -3836,31 +3956,177 @@
 
       if (!chrPart || isNaN(startNum)) return;
 
-      var row0 = {
+      var shared = {
         Chr: 'chr' + chrPart,
         Start: startNum,
         End: endNum,
         Ref: refPart || '',
         Alt: altPart || '',
-        Zygosity_1: abbreviateRobertZygosity(zygosityCol ? cellText(row.getCell(zygosityCol).value) : ''),
         AAChange_refGene: [
           hgvsCCol ? stripHgvsPrefix(cellText(row.getCell(hgvsCCol).value)) : '',
           hgvsPCol ? stripHgvsPrefix(cellText(row.getCell(hgvsPCol).value)) : '',
         ].filter(Boolean).join(':'),
       };
       ROBERT_COLUMNS.forEach(function (c) {
-        if (c.derived) return; // already set above
-        row0[c.key] = c.spec ? get(c.key) : '';
+        if (c.derived || c.sampleField) return; // handled separately
+        shared[c.key] = c.spec ? get(c.key) : '';
       });
 
-      rows.push(row0);
+      function buildPartnerRow(slot) {
+        var zyg = abbreviateRobertZygosity(getSampleField(row, zygosityCols, slot));
+        var vaf = getSampleField(row, sampleFieldCols.Read_Frequency_1, slot);
+        var dp = getSampleField(row, sampleFieldCols.Read_Count_1, slot);
+        var gq = getSampleField(row, sampleFieldCols.Quality_1, slot);
+        var filt = getSampleField(row, sampleFieldCols.Pass_filter, slot);
+        // A couple file lists every variant either partner carries - only
+        // keep this row for a partner who actually has a call here.
+        if (isCouple && !(zyg || vaf || dp)) return null;
+        return Object.assign({}, shared, {
+          Zygosity_1: zyg, Read_Frequency_1: vaf, Read_Count_1: dp, Quality_1: gq, Pass_filter: filt,
+        });
+      }
+
+      var maleRow = buildPartnerRow(0);
+      if (maleRow) maleRows.push(maleRow);
+      if (isCouple) {
+        var femaleRow = buildPartnerRow(1);
+        if (femaleRow) femaleRows.push(femaleRow);
+      }
     });
 
     // sNo is a preview-grid-only convenience (row numbering/delete button,
     // same as every other template) - not one of Dr. Robert's own columns,
     // so buildRobertVariantExcel below never writes it to the export.
-    rows.forEach(function (row, i) { row.sNo = i + 1; });
-    return { rows: rows };
+    [maleRows, femaleRows].forEach(function (list) {
+      if (list) list.forEach(function (row, i) { row.sNo = i + 1; });
+    });
+
+    return isCouple
+      ? { isCouple: true, maleRows: maleRows, femaleRows: femaleRows }
+      : { isCouple: false, rows: maleRows };
+  }
+
+  // Writes one Dr. Robert sheet, styled like every other export (white bold
+  // header on dark blue, centered, frozen) - shared by both the single-
+  // person and couple export paths so the two can never drift apart.
+  function writeRobertSheet(workbook, headers, name, sheetRows) {
+    // Excel sheet names cap at 31 characters and can't hold \/*?:[]
+    var safeName = String(name).replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
+    var sheet = workbook.addWorksheet(safeName);
+    sheet.addRow(headers);
+    var headerRow = sheet.getRow(1);
+    headers.forEach(function (h, i) {
+      var cell = headerRow.getCell(i + 1);
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    headerRow.height = 22;
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    headers.forEach(function (h, i) { sheet.getColumn(i + 1).width = 16; });
+    sheetRows.forEach(function (r) {
+      sheet.addRow(headers.map(function (h) { return r[h] != null ? r[h] : ''; }));
+    });
+  }
+
+  // Writes one person's 6 sheets ("<name>_final", HOM, HET, COMP, Clinsig,
+  // Candidate) into workbook - the single-person export's shape
+  // (buildRobertVariantExcel). The couple export below uses the narrower
+  // writeRobertPersonCategorySheets instead, since its combined first sheet
+  // replaces the flat per-partner "_final" list.
+  function writeRobertPersonSheets(workbook, headers, rows, name) {
+    var cats = categorizeRobertRows(rows);
+    writeRobertSheet(workbook, headers, name + '_final', rows);
+    writeRobertSheet(workbook, headers, name + '_HOM', cats.hom);
+    writeRobertSheet(workbook, headers, name + '_HET', cats.het);
+    writeRobertSheet(workbook, headers, name + '_COMP', cats.comp);
+    writeRobertSheet(workbook, headers, name + '_Clinsig', cats.clinsig);
+    writeRobertSheet(workbook, headers, name + '_Candidate', rows.filter(function (r) { return r._robertCandidate; }));
+  }
+
+  // Just the HOM/HET/COMP/Clinsig/Candidate sheets (no flat "_final" list -
+  // the couple export's combined first sheet, sectioned the same way as the
+  // existing Couple template, covers that).
+  function writeRobertPersonCategorySheets(workbook, headers, rows, name) {
+    var cats = categorizeRobertRows(rows);
+    writeRobertSheet(workbook, headers, name + '_HOM', cats.hom);
+    writeRobertSheet(workbook, headers, name + '_HET', cats.het);
+    writeRobertSheet(workbook, headers, name + '_COMP', cats.comp);
+    writeRobertSheet(workbook, headers, name + '_Clinsig', cats.clinsig);
+    writeRobertSheet(workbook, headers, name + '_Candidate', rows.filter(function (r) { return r._robertCandidate; }));
+  }
+
+  // One sheet made of several titled sections, each with its own header row
+  // (Secondary Findings / Both partners / Compound Heterozygous / partner-
+  // only) - the combined first sheet's layout, matching how the existing
+  // Couple template lays out buildCoupleVariantExcel's sections, just with
+  // Dr. Robert's own ~100 columns instead of that template's ~44.
+  function writeRobertSectionedSheet(workbook, headers, name, sections) {
+    var safeName = String(name).replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
+    var sheet = workbook.addWorksheet(safeName);
+    headers.forEach(function (h, i) { sheet.getColumn(i + 1).width = 16; });
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+    var cursor = 1;
+    sections.forEach(function (section) {
+      if (!section.rows.length && !section.alwaysShow) return;
+      var titleRow = sheet.getRow(cursor);
+      titleRow.getCell(1).value = section.title;
+      sheet.mergeCells(cursor, 1, cursor, headers.length);
+      titleRow.font = { bold: true };
+      titleRow.alignment = { horizontal: 'center', vertical: 'middle' };
+      cursor++;
+
+      var headerRow = sheet.getRow(cursor);
+      headers.forEach(function (h, i) {
+        var cell = headerRow.getCell(i + 1);
+        cell.value = h;
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
+      headerRow.height = 22;
+      cursor++;
+
+      section.rows.forEach(function (r) {
+        var dataRow = sheet.getRow(cursor);
+        headers.forEach(function (h, i) { dataRow.getCell(i + 1).value = r[h] != null ? r[h] : ''; });
+        cursor++;
+      });
+      cursor++; // blank separator row
+    });
+  }
+
+  // Couple version: a combined first sheet sectioned the same way the
+  // existing Couple template is (Secondary Findings / Both partners sharing
+  // the exact same variant / Compound Heterozygous between partners /
+  // partner-only), followed by each partner's own HOM/HET/COMP/Clinsig/
+  // Candidate sheets (see processRobertWorkbook for why each partner needs
+  // their own independent categorization - that's a per-person question,
+  // not a between-partners one like the first sheet's sections).
+  function buildRobertCoupleVariantExcel(maleRows, femaleRows, name1, name2, workbook) {
+    workbook = workbook || new ExcelJS.Workbook();
+    var headers = ROBERT_COLUMNS.map(function (c) { return c.key; });
+    var activeMale = (maleRows || []).filter(function (r) { return !r._removed; });
+    var activeFemale = (femaleRows || []).filter(function (r) { return !r._removed; });
+    var allRows = activeMale.concat(activeFemale);
+
+    var secondaryRows = allRows.filter(isRobertSecondaryFindingRow);
+    var nonSecondaryRows = allRows.filter(function (r) { return !isRobertSecondaryFindingRow(r); });
+    var split = splitRobertCoupleRowsByGene(nonSecondaryRows);
+
+    writeRobertSectionedSheet(workbook, headers, (name1 || 'Male') + '_' + (name2 || 'Female') + '_final', [
+      { title: 'Secondary Findings', rows: secondaryRows },
+      { title: 'Both partners (same variant)', rows: split.combinedRows, alwaysShow: true },
+      { title: 'Compound Heterozygous (Same Gene, Different Variant)', rows: split.compoundRows },
+      { title: (name1 || 'Male') + ' only', rows: split.maleRows, alwaysShow: true },
+      { title: (name2 || 'Female') + ' only', rows: split.femaleRows, alwaysShow: true },
+    ]);
+
+    writeRobertPersonCategorySheets(workbook, headers, activeMale, name1 || 'Male');
+    writeRobertPersonCategorySheets(workbook, headers, activeFemale, name2 || 'Female');
+
+    return workbook.xlsx.writeBuffer();
   }
 
   // Builds Dr. Robert's 6-sheet workbook: "<patient>_final" (every row),
@@ -3873,28 +4139,7 @@
     workbook = workbook || new ExcelJS.Workbook();
     var headers = ROBERT_COLUMNS.map(function (c) { return c.key; });
 
-    function writeSheet(name, sheetRows) {
-      // Excel sheet names cap at 31 characters and can't hold \/*?:[]
-      var safeName = String(name).replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
-      var sheet = workbook.addWorksheet(safeName);
-      sheet.addRow(headers);
-      // Same header look as every other export (white bold on dark blue,
-      // centered, frozen) instead of a plain bold row, so Dr. Robert's sheets
-      // match the rest of the app's exports.
-      var headerRow = sheet.getRow(1);
-      headers.forEach(function (h, i) {
-        var cell = headerRow.getCell(i + 1);
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
-        cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      });
-      headerRow.height = 22;
-      sheet.views = [{ state: 'frozen', ySplit: 1 }];
-      headers.forEach(function (h, i) { sheet.getColumn(i + 1).width = 16; });
-      sheetRows.forEach(function (r) {
-        sheet.addRow(headers.map(function (h) { return r[h] != null ? r[h] : ''; }));
-      });
-    }
+    function writeSheet(name, sheetRows) { writeRobertSheet(workbook, headers, name, sheetRows); }
 
     var cats = categorizeRobertRows(rows);
     writeSheet((patientName || 'Sample') + '_final', rows);
@@ -4670,33 +4915,111 @@
           variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
         });
       } else if (currentReportType === 'robert') {
-        // Mirrors Dr. Robert's own 6-sheet workbook (see
-        // buildRobertVariantExcel) directly in the preview - categorized
-        // with the same categorizeRobertRows the export uses, so the
-        // analyst can review HOM/HET/COMP/Clinsig before downloading
-        // instead of only seeing the split after export.
-        var robertEntryByRow = new Map();
-        activeRowEntries.forEach(function (entry) { robertEntryByRow.set(entry.row, entry); });
-        var robertCats = categorizeRobertRows(activeRowEntries.map(function (entry) { return entry.row; }));
-        function toRobertEntries(list) { return list.map(function (r) { return robertEntryByRow.get(r); }); }
+        // Mirrors Dr. Robert's own 6-sheet-per-person workbook (see
+        // buildRobertVariantExcel/buildRobertCoupleVariantExcel) directly in
+        // the preview - categorized with the same categorizeRobertRows the
+        // export uses, so the analyst can review HOM/HET/COMP/Clinsig before
+        // downloading instead of only seeing the split after export. A
+        // couple file renders this same 6-section block twice, once per
+        // partner (split via _robertPartner), each its own full person.
+        function renderRobertPersonSections(entries, allLabel) {
+          var entryByRow = new Map();
+          entries.forEach(function (entry) { entryByRow.set(entry.row, entry); });
+          var cats = categorizeRobertRows(entries.map(function (entry) { return entry.row; }));
+          function toEntries(list) { return list.map(function (r) { return entryByRow.get(r); }); }
 
-        var robertPreviewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
-        var robertAllLabel = (robertPreviewItem && robertPreviewItem.patientName ? robertPreviewItem.patientName + '_final' : 'All Variants');
-        variantTableBody.appendChild(buildGridSectionHeaderRow(robertAllLabel, columns.length));
-        activeRowEntries.forEach(function (entry, i) {
-          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
-        });
-        [['HOM', robertCats.hom], ['HET', robertCats.het], ['COMP', robertCats.comp], ['Clinsig', robertCats.clinsig]].forEach(function (pair) {
-          variantTableBody.appendChild(buildGridSectionHeaderRow(pair[0], columns.length));
-          toRobertEntries(pair[1]).forEach(function (entry, i) {
+          variantTableBody.appendChild(buildGridSectionHeaderRow(allLabel, columns.length));
+          entries.forEach(function (entry, i) {
             variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
           });
-        });
-        var robertCandidateEntries = activeRowEntries.filter(function (entry) { return entry.row._robertCandidate; });
-        variantTableBody.appendChild(buildGridSectionHeaderRow('Candidate (click ☆ on any row above to add it here)', columns.length));
-        robertCandidateEntries.forEach(function (entry, i) {
-          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
-        });
+          [['HOM', cats.hom], ['HET', cats.het], ['COMP', cats.comp], ['Clinsig', cats.clinsig]].forEach(function (pair) {
+            variantTableBody.appendChild(buildGridSectionHeaderRow(pair[0], columns.length));
+            toEntries(pair[1]).forEach(function (entry, i) {
+              variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+            });
+          });
+          var candidateEntries = entries.filter(function (entry) { return entry.row._robertCandidate; });
+          variantTableBody.appendChild(buildGridSectionHeaderRow('Candidate (click ☆ on any row above to add it here)', columns.length));
+          candidateEntries.forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          });
+        }
+
+        // Just the HOM/HET/COMP/Clinsig/Candidate sections (no flat "all
+        // variants" list) - used for a couple file's per-partner sections,
+        // since the combined Secondary/Common/Compound/partner-only sections
+        // above already cover "every variant this partner carries".
+        function renderRobertPersonCategorySections(entries, label) {
+          var entryByRow = new Map();
+          entries.forEach(function (entry) { entryByRow.set(entry.row, entry); });
+          var cats = categorizeRobertRows(entries.map(function (entry) { return entry.row; }));
+          function toEntries(list) { return list.map(function (r) { return entryByRow.get(r); }); }
+
+          [[label + ' HOM', cats.hom], [label + ' HET', cats.het], [label + ' COMP', cats.comp], [label + ' Clinsig', cats.clinsig]].forEach(function (pair) {
+            variantTableBody.appendChild(buildGridSectionHeaderRow(pair[0], columns.length));
+            toEntries(pair[1]).forEach(function (entry, i) {
+              variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+            });
+          });
+          var candidateEntries = entries.filter(function (entry) { return entry.row._robertCandidate; });
+          variantTableBody.appendChild(buildGridSectionHeaderRow(label + ' Candidate (click ☆ on any row above to add it here)', columns.length));
+          candidateEntries.forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          });
+        }
+
+        var robertPreviewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+        if (robertPreviewItem && robertPreviewItem.isRobertCouple) {
+          // Combined first-sheet sections, mirroring the existing Couple
+          // template's own Secondary/Common/Compound/partner-only split
+          // (splitCoupleRowsByGene) - just adapted to Dr. Robert's row shape
+          // (see splitRobertCoupleRowsByGene).
+          var robertName1 = robertPreviewItem.patientName || 'Male';
+          var robertName2 = robertPreviewItem.patientName2 || 'Female';
+          var robertSecondaryEntries = [], robertNonSecondaryEntries = [];
+          activeRowEntries.forEach(function (entry) {
+            (isRobertSecondaryFindingRow(entry.row) ? robertSecondaryEntries : robertNonSecondaryEntries).push(entry);
+          });
+          var robertCoupleEntryByRow = new Map();
+          robertNonSecondaryEntries.forEach(function (entry) { robertCoupleEntryByRow.set(entry.row, entry); });
+          var robertCoupleSplit = splitRobertCoupleRowsByGene(robertNonSecondaryEntries.map(function (entry) { return entry.row; }));
+          function toRobertCoupleEntries(list) { return list.map(function (r) { return robertCoupleEntryByRow.get(r); }); }
+
+          if (robertSecondaryEntries.length) {
+            variantTableBody.appendChild(buildSecondaryFindingsTitleRow(columns.length));
+            robertSecondaryEntries.forEach(function (entry, i) {
+              variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1, true));
+            });
+          }
+          variantTableBody.appendChild(buildGridSectionHeaderRow('Both partners (same variant)', columns.length));
+          toRobertCoupleEntries(robertCoupleSplit.combinedRows).forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          });
+          if (robertCoupleSplit.compoundRows.length) {
+            variantTableBody.appendChild(buildGridSectionHeaderRow('Compound Heterozygous (Same Gene, Different Variant)', columns.length));
+            toRobertCoupleEntries(robertCoupleSplit.compoundRows).forEach(function (entry, i) {
+              variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+            });
+          }
+          variantTableBody.appendChild(buildGridSectionHeaderRow(robertName1 + ' only', columns.length));
+          toRobertCoupleEntries(robertCoupleSplit.maleRows).forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          });
+          variantTableBody.appendChild(buildGridSectionHeaderRow(robertName2 + ' only', columns.length));
+          toRobertCoupleEntries(robertCoupleSplit.femaleRows).forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          });
+
+          // Then each partner's own HOM/HET/COMP/Clinsig/Candidate, same as
+          // the export's per-partner category sheets.
+          var robertMaleEntries = activeRowEntries.filter(function (entry) { return entry.row._robertPartner === 'male'; });
+          var robertFemaleEntries = activeRowEntries.filter(function (entry) { return entry.row._robertPartner === 'female'; });
+          renderRobertPersonCategorySections(robertMaleEntries, robertName1);
+          renderRobertPersonCategorySections(robertFemaleEntries, robertName2);
+        } else {
+          var robertAllLabel = (robertPreviewItem && robertPreviewItem.patientName ? robertPreviewItem.patientName + '_final' : 'All Variants');
+          renderRobertPersonSections(activeRowEntries, robertAllLabel);
+        }
       } else {
         // Secondary findings are pulled out into a highlighted section at the top;
         // the rest follow in the normal list. Both are numbered from 1.
@@ -5270,6 +5593,10 @@
       if (item.reportType === 'couple') {
         return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
       }
+      if (item.reportType === 'robert' && item.isRobertCouple) {
+        var robertSplit = splitRobertCoupleRows(item.rows);
+        return buildRobertCoupleVariantExcel(robertSplit.maleRows, robertSplit.femaleRows, item.patientName, item.patientName2, workbook);
+      }
       if (item.reportType === 'robert') {
         return buildRobertVariantExcel(item.rows, item.patientName, workbook);
       }
@@ -5316,8 +5643,36 @@
             // 2-row group+header layout single/CMC/couple all read) into his
             // own ~100-column per-variant shape - handled separately since
             // its export is a 6-sheet workbook (buildRobertVariantExcel), not
-            // the usual single "Listed Variants" sheet.
-            var robertResult = processRobertWorkbook(workbook);
+            // the usual single "Listed Variants" sheet. A couple file (two
+            // sample column-groups) produces two full 6-sheet sets, one per
+            // partner - see processRobertWorkbook.
+            var robertMaleIdx = coupleMaleGroupIndex;
+            var robertResult = processRobertWorkbook(workbook, robertMaleIdx);
+            if (robertResult.isCouple) {
+              var robertFemaleIdx = robertMaleIdx === 0 ? 1 : 0;
+              var robertCoupleNames = extractCoupleNamesFromFilename(file.name);
+              var robertName1 = robertCoupleNames[robertMaleIdx] || 'Male';
+              var robertName2 = robertCoupleNames[robertFemaleIdx] || 'Female';
+              robertResult.maleRows.forEach(function (r) { r._robertPartner = 'male'; });
+              robertResult.femaleRows.forEach(function (r) { r._robertPartner = 'female'; });
+              return {
+                fileName: file.name,
+                // One combined list so the shared preview machinery (soft
+                // delete, row numbering) works the same as every other
+                // template - split back into maleRows/femaleRows by
+                // _robertPartner at render/export time (see
+                // splitRobertCoupleRows).
+                rows: robertResult.maleRows.concat(robertResult.femaleRows),
+                rawBuffer: rawBuffer,
+                runName: '',
+                isRobertCouple: true,
+                title: 'LISTED VARIANTS FOR ' + robertName1 + '_' + robertName2,
+                patientName: robertName1,
+                patientName2: robertName2,
+                loadedAt: new Date().toLocaleDateString(),
+                error: null
+              };
+            }
             var robertTitle = extractPatientTitle(file.name, '');
             return {
               fileName: file.name,
