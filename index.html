@@ -3652,7 +3652,12 @@
     { key: 'GnomAD_exome_V2_AF', spec: { header: 'Alt Allele Freq (AF)', groupIncludes: ['gnomAD Exomes', '2.0.1'] } },
     { key: 'GnomAD_genome_V2_AF', spec: { header: 'Alt Allele Freq (AF)', groupIncludes: ['gnomAD Genomes', '2.0.1'] } },
     { key: 'GnomAD_genome_V3_AF', spec: { header: 'Alt Allele Freq (AF)', groupIncludes: ['gnomAD Genomes', '3.1.2'] } },
-    { key: 'ExAC_ALL', spec: { headerStartsWith: 'Alt Allele Freq', groupIncludes: ['ExAC'] } },
+    // Dr. Robert's own note names this field "Alt Allele Counts (AC)" - a
+    // raw count, not the 0-1 frequency ANNOVAR's ExAC_ALL normally holds.
+    // Using his note as given since the track isn't in any file available
+    // to verify against yet; flag if an actual frequency field turns out to
+    // exist alongside it once this track is available to check.
+    { key: 'ExAC_ALL', spec: { headerStartsWith: 'Alt Allele Count', groupIncludes: ['ExAC'] } },
     { key: 'avsnp150', spec: { header: 'Identifier', groupIncludes: ['dbSNP'] } },
     { key: 'CLNALLELEID', spec: { header: 'Variant ID', groupIncludes: ['ClinVar'] } },
     { key: 'CLNDN', spec: { header: 'Conditions', groupIncludes: ['ClinVar'] } },
