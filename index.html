@@ -4088,7 +4088,10 @@
       titleRow.getCell(1).value = section.title;
       sheet.mergeCells(cursor, 1, cursor, headers.length);
       titleRow.font = { bold: true };
-      titleRow.alignment = { horizontal: 'center', vertical: 'middle' };
+      // Left-aligned, not centered - with ~100 columns merged, a centered
+      // title sits around column 50 and needs scrolling to even see;
+      // left-aligned it's visible immediately in column A.
+      titleRow.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
       cursor++;
 
       var headerRow = sheet.getRow(cursor);
