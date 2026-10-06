@@ -3878,7 +3878,9 @@
     writeSheet('HET', cats.het);
     writeSheet('COMP', cats.comp);
     writeSheet('Clinsig', cats.clinsig);
-    writeSheet('Candidate', []); // manual final pick - left for the analyst to fill in
+    // Manual final pick - whichever rows the analyst starred (see the ☆/★
+    // toggle in the preview grid), not rule-based like the other sheets.
+    writeSheet('Candidate', rows.filter(function (r) { return r._robertCandidate; }));
 
     return workbook.xlsx.writeBuffer();
   }
@@ -4302,8 +4304,35 @@
 
     // No separate row-number label here — the "S.NO" data column (present in
     // every template) already shows the sequential number, so this gutter
-    // only needs to hold the delete button.
+    // only needs to hold the delete button (plus, for Dr. Robert, the
+    // candidate-pick toggle below).
     rowNumTd.appendChild(delBtn);
+
+    // Dr. Robert's Candidate sheet is a manual final pick, not rule-based -
+    // this toggle is how a row gets copied into it, instead of the analyst
+    // needing to hand-copy/paste cells between sections.
+    if (currentReportType === 'robert' && !row._removed) {
+      var candBtn = document.createElement('button');
+      candBtn.style.cssText = 'font-size:11px;line-height:1;padding:0 3px;margin-right:4px;cursor:pointer;border:1px solid #bbb;background:#fff;border-radius:2px;vertical-align:middle;';
+      if (row._robertCandidate) {
+        candBtn.textContent = '★';
+        candBtn.title = 'Remove this row from the Candidate sheet';
+        candBtn.style.color = '#b8860b';
+        candBtn.style.borderColor = '#b8860b';
+      } else {
+        candBtn.textContent = '☆';
+        candBtn.title = 'Copy this row into the Candidate sheet';
+        candBtn.style.color = '#888';
+      }
+      candBtn.addEventListener('click', (function (capturedIdx) {
+        return function () {
+          var r = variantRows[capturedIdx];
+          r._robertCandidate = !r._robertCandidate;
+          renderVariantTable(variantPreviewIdx);
+        };
+      })(rowIndex));
+      rowNumTd.appendChild(candBtn);
+    }
     tr.appendChild(rowNumTd);
 
     columns.forEach(function (c) {
@@ -4639,7 +4668,11 @@
             variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
           });
         });
-        variantTableBody.appendChild(buildGridSectionHeaderRow('Candidate (fill in manually before exporting)', columns.length));
+        var robertCandidateEntries = activeRowEntries.filter(function (entry) { return entry.row._robertCandidate; });
+        variantTableBody.appendChild(buildGridSectionHeaderRow('Candidate (click ☆ on any row above to add it here)', columns.length));
+        robertCandidateEntries.forEach(function (entry, i) {
+          variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+        });
       } else {
         // Secondary findings are pulled out into a highlighted section at the top;
         // the rest follow in the normal list. Both are numbered from 1.
