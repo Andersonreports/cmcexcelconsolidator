@@ -455,6 +455,7 @@
         <option value="single">Single</option>
         <option value="couple">Couple</option>
         <option value="cnv">CNV Variants</option>
+        <option value="robert">Dr. Robert</option>
       </select>
     </div>
   </header>
@@ -469,6 +470,8 @@
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="couple" hidden>Listed Variant Excel</button>
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cnv" hidden>Listed Variant Excel</button>
+
+    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="robert" hidden>Listed Variant Excel</button>
   </nav>
 
   <main class="main-content">
@@ -1592,6 +1595,14 @@
     if (reportType === 'single') return SINGLE_VARIANT_COLUMNS;
     if (reportType === 'couple') return COUPLE_VARIANT_COLUMNS;
     if (reportType === 'cnv') return CNV_VARIANT_COLUMNS;
+    if (reportType === 'robert') {
+      // Built from ROBERT_COLUMNS (defined further down, near
+      // processRobertWorkbook) rather than a separate static array, so the
+      // preview grid's columns can never drift from the export's.
+      return [{ key: 'sNo', header: 'S.NO' }].concat(ROBERT_COLUMNS.map(function (c) {
+        return { key: c.key, header: c.key };
+      }));
+    }
     return VARIANT_COLUMNS;
   }
 
@@ -3546,6 +3557,317 @@
     return { rows: rows };
   }
 
+  // ── Dr. Robert Sir template ──────────────────────────────────────────────
+  // A per-variant ANNOVA/multianno-style report (see Sample_final.xlsx's
+  // "<patient>_final" sheet), built from a normal VarSeq SNV export - same
+  // 2-row group+header layout processVarSeqWorkbook reads, just a different
+  // (much larger) set of annotation columns. Each entry below is either:
+  //   - a findVarSeqColumn-style spec (same shape as VARSEQ_COLUMN_SPECS)
+  //   - `derived: '<name>'` for the few fields computed from other columns
+  //     (Chr/Start/End/Ref/Alt/AAChange - see processRobertWorkbook)
+  //   - `spec: null` for a column with no source anywhere in a VarSeq
+  //     export (confirmed against a real file + Dr. Robert's own notes on
+  //     which VarSeq annotation track would be needed) - always blank,
+  //     kept in the list so the exported sheet's columns match his
+  //     template exactly, including the ones it can't fill in.
+  // Columns whose source track (dbNSFP predictors, dbscSNV, ExAC) isn't in
+  // today's VarSeq project still get a real spec - if that track is ever
+  // added to the project and exported, these columns start populating
+  // automatically with no code change.
+  var ROBERT_COLUMNS = [
+    { key: 'Chr', derived: 'chr' },
+    { key: 'Start', derived: 'start' },
+    { key: 'End', derived: 'end' },
+    { key: 'Ref', derived: 'ref' },
+    { key: 'Alt', derived: 'alt' },
+    { key: 'Zygosity_1', derived: 'zygosity' },
+    { key: 'Read_Frequency_1', spec: { headerStartsWith: 'Variant Allele Fr', groupExcludes: ['Complex Variants'] } },
+    { key: 'Read_Count_1', spec: { header: 'Read Depths (DP)', groupExcludes: ['Complex Variants'] } },
+    { key: 'Quality_1', spec: { header: 'Genotype Qualities (GQ)', groupExcludes: ['Complex Variants'] } },
+    { key: 'Pass_filter', spec: { header: 'Filter', groupExcludes: ['Complex Variants'] } },
+    { key: 'Func_refGene', spec: { headerStartsWith: 'Sequence Ontology' } },
+    { key: 'ExonicFunc_refGene', spec: { headerStartsWith: 'Effect' } },
+    { key: 'AAChange_refGene', derived: 'aachange' },
+    { key: 'GeneDetail_refGene', spec: null },
+    { key: 'Inhouse_GRCh38_Allele_frequency', spec: { header: 'AlleleFrequencies', groupIncludes: ['GRCh_38'] } },
+    { key: 'Inhouse_GRCh38_HET_Count', spec: { header: 'Het', groupIncludes: ['GRCh_38'] } },
+    { key: 'Inhouse_GRCh38_HOM_Count', spec: { header: 'HomoVar', groupIncludes: ['GRCh_38'] } },
+    { key: 'Inhouse_GATK_Allele_frequency', spec: { header: 'Allele Frequencies', groupIncludes: ['Inhouse consolidated 947 VCF'] } },
+    { key: 'Inhouse_GATK_Total_Allele_Number', spec: { header: '# Alleles', groupIncludes: ['Inhouse consolidated 947 VCF'] } },
+    { key: 'EGA_freq', spec: { header: 'European (Non-Finnish) Allele Frequency', groupIncludes: ['gnomAD Joint'] } },
+    { key: 'EGA_AlleleCount', spec: { header: 'European (Non-Finnish) Allele Count', groupIncludes: ['gnomAD Joint'] } },
+    { key: 'EGA_Homozygotes', spec: { header: 'European (Non-Finnish) Homozygous Count', groupIncludes: ['gnomAD Joint'] } },
+    { key: 'GenomeAsia_Freq', spec: { header: 'Alt Allele Freq (AF)', groupIncludes: ['GenomeAsia'] } },
+    { key: 'GenomeAsia_Het', spec: null },
+    { key: 'GenomeAsia_Hom', spec: { headerStartsWith: 'South Asian Homozygous', groupIncludes: ['GenomeAsia'] } },
+    { key: 'Gnomad_v211_exome_AlleleCount', spec: { header: 'Alt Allele Count (AC)', groupIncludes: ['gnomAD Exomes', '2.0.1'] } },
+    { key: 'Gnomad_v211_exome_Homozygotes', spec: { headerStartsWith: 'Homoz', groupIncludes: ['gnomAD Exomes', '2.0.1'] } },
+    { key: 'Gnomad_v211_genome_AlleleCount', spec: { header: 'Alt Allele Count (AC)', groupIncludes: ['gnomAD Genomes', '2.0.1'] } },
+    { key: 'Gnomad_v211_genome_Homozygotes', spec: { headerStartsWith: 'Homoz', groupIncludes: ['gnomAD Genomes', '2.0.1'] } },
+    { key: 'Gnomad_v31_AlleleCount', spec: { header: 'Alt Allele Count (AC)', groupIncludes: ['gnomAD Genomes', '3.1.2'] } },
+    { key: 'Gnomad_v31_Homozygotes', spec: { headerStartsWith: 'Homoz', groupIncludes: ['gnomAD Genomes', '3.1.2'] } },
+    { key: 'Gene_refGene', spec: { header: 'Gene Names' } },
+    { key: 'OMIM_gene', spec: { header: 'Gene Name', groupIncludes: ['OMIM'] } },
+    { key: 'OMIM_phenotypes', spec: { header: 'Phenotypes', groupIncludes: ['OMIM'] } },
+    { key: 'HPO_Phenotype', spec: { header: 'HPO Terms', groupIncludes: ['OMIM'] } },
+    { key: 'CLNSIG', spec: { header: 'Clinical Significance', groupIncludes: ['ClinVar'] } },
+    { key: 'REVEL_score', spec: { header: 'REVEL', groupIncludes: ['REVEL'] } },
+    { key: 'ClinPred_pred', spec: null },
+    { key: 'CADD_phred', spec: null },
+    { key: 'GERP++_RS', spec: { headerStartsWith: 'GERP++ RS Score' } },
+    { key: 'pLi_refGene', spec: null },
+    { key: 'pRec_refGene', spec: null },
+    { key: 'pNull_refGene', spec: null },
+    { key: 'Gene_full_name_refGene', spec: null },
+    { key: 'Function_description_refGene', spec: null },
+    { key: 'Disease_description_refGene', spec: null },
+    { key: 'Tissue_specificity(Uniprot)_refGene', spec: null },
+    { key: 'Expression(egenetics)_refGene', spec: null },
+    { key: 'Expression(GNF/Atlas)_refGene', spec: null },
+    { key: 'GDI_refGene', spec: null },
+    { key: 'GDI-Phred_refGene', spec: null },
+    { key: 'GnomAD_exome_V2_AF', spec: { header: 'Allele Frequency', groupIncludes: ['gnomAD Exomes', '2.0.1'] } },
+    { key: 'GnomAD_genome_V2_AF', spec: { header: 'Allele Frequency', groupIncludes: ['gnomAD Genomes', '2.0.1'] } },
+    { key: 'GnomAD_genome_V3_AF', spec: { header: 'Alt Allele Freq (AF)', groupIncludes: ['gnomAD Genomes', '3.1.2'] } },
+    { key: 'ExAC_ALL', spec: { headerStartsWith: 'Alt Allele Freq', groupIncludes: ['ExAC'] } },
+    { key: 'avsnp150', spec: { header: 'Identifier', groupIncludes: ['dbSNP'] } },
+    { key: 'CLNALLELEID', spec: { header: 'Variant ID', groupIncludes: ['ClinVar'] } },
+    { key: 'CLNDN', spec: { header: 'Conditions', groupIncludes: ['ClinVar'] } },
+    { key: 'CLNDISDB', spec: { header: 'OMIM ID', groupIncludes: ['ClinVar'] } },
+    { key: 'CLNREVSTAT', spec: { header: 'Review Status', groupIncludes: ['ClinVar'] } },
+    { key: 'dbscSNV_ADA_SCORE', spec: { header: 'Ada Score', groupIncludes: ['dbscSNV'] } },
+    { key: 'dbscSNV_RF_SCORE', spec: { header: 'RF Score', groupIncludes: ['dbscSNV'] } },
+    { key: 'SIFT_pred', spec: { headerStartsWith: 'SIFT Prediction' } },
+    { key: 'SIFT4G_pred', spec: null },
+    { key: 'Polyphen2_HDIV_pred', spec: { headerStartsWith: 'PolyPhen2 Prediction' } },
+    { key: 'Polyphen2_HVAR_pred', spec: { headerStartsWith: 'PolyPhen2 Prediction' } },
+    { key: 'LRT_pred', spec: { header: 'LRT_pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'MutationTaster_pred', spec: { headerStartsWith: 'MutationTaster', groupIncludes: ['dbNSFP'] } },
+    { key: 'MutationAssessor_pred', spec: { headerStartsWith: 'MutationAssessor', groupIncludes: ['dbNSFP'] } },
+    { key: 'FATHMM_pred', spec: { headerStartsWith: 'FATHMM Pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'PROVEAN_pred', spec: { headerStartsWith: 'PROVEAN', groupIncludes: ['dbNSFP'] } },
+    { key: 'VEST4_score', spec: null },
+    { key: 'MetaSVM_pred', spec: { headerStartsWith: 'MetaSVM', groupIncludes: ['dbNSFP'] } },
+    { key: 'MetaLR_pred', spec: { headerStartsWith: 'MetaLR', groupIncludes: ['dbNSFP'] } },
+    { key: 'M-CAP_pred', spec: { headerStartsWith: 'M-CAP', groupIncludes: ['dbNSFP'] } },
+    { key: 'MutPred_score', spec: { headerStartsWith: 'MutPred', groupIncludes: ['dbNSFP'] } },
+    { key: 'PrimateAI_pred', spec: { headerStartsWith: 'PrimateAI', groupIncludes: ['dbNSFP'] } },
+    { key: 'DEOGEN2_pred', spec: { headerStartsWith: 'DEOGEN2', groupIncludes: ['dbNSFP'] } },
+    { key: 'BayesDel_addAF_pred', spec: { headerStartsWith: 'BayesDel', groupIncludes: ['dbNSFP'] } },
+    { key: 'LIST-S2_pred', spec: { headerStartsWith: 'LIST', groupIncludes: ['dbNSFP'] } },
+    { key: 'DANN_score', spec: { headerStartsWith: 'DANN', groupIncludes: ['dbNSFP'] } },
+    { key: 'fathmm-XF_coding_pred', spec: { headerStartsWith: 'FATHMM XF', groupIncludes: ['dbNSFP'] } },
+    { key: 'Interpro_domain', spec: null },
+    { key: 'GTEx_V8_gene', spec: null },
+    { key: 'GTEx_V8_tissue', spec: null },
+    { key: 'MCAP', spec: { headerStartsWith: 'M-CAP', groupIncludes: ['dbNSFP'] } },
+    { key: 'InterVar_automated', spec: { header: 'Auto Classification' } },
+    { key: 'mirSVR-Score', spec: null },
+    { key: 'mirSVR-E', spec: null },
+    { key: 'SpliceAI-acc-gain', spec: null },
+    { key: 'SpliceAI-acc-loss', spec: null },
+    { key: 'SpliceAI-don-gain', spec: null },
+    { key: 'SpliceAI-don-loss', spec: null },
+    { key: 'MMSp_acceptorIntron', spec: null },
+    { key: 'MMSp_acceptor', spec: null },
+    { key: 'MMSp_exon', spec: null },
+    { key: 'MMSp_donor', spec: null },
+    { key: 'MMSp_donorIntron', spec: null },
+    { key: 'EnsembleRegulatoryFeature', spec: null },
+    { key: 'PHRED', spec: null },
+  ];
+
+  // VarSeq's own Zygosity text ("Heterozygous"/"Homozygous Variant"/
+  // "Hemizygous") -> Dr. Robert's abbreviated convention ("Het"/"Hom"/
+  // "Hemi"). Substring match, not exact equality - VarSeq exports have used
+  // both "Homozygous" and "Homozygous Variant" for the same call.
+  function abbreviateRobertZygosity(value) {
+    var v = String(value || '').trim().toLowerCase();
+    if (v.indexOf('heterozygous') !== -1) return 'Het';
+    if (v.indexOf('hemizygous') !== -1) return 'Hemi';
+    if (v.indexOf('homozygous') !== -1) return 'Hom';
+    return value || '';
+  }
+
+  // A rare-disease WES/WGS shortlist needs "rare" variants - checked across
+  // every frequency column the template has a source for. A variant only
+  // fails this check if one of these is an actual number above the
+  // threshold; blank/unavailable columns don't disqualify it. 2% is a
+  // starting point inferred from Sample_final.xlsx's own kept-vs-dropped
+  // rows (its rarest excluded row sat at ~2.9%, its least-rare kept row at
+  // ~1.6%) - tell me the real cutoff and I'll swap this constant.
+  var ROBERT_RARE_FREQUENCY_THRESHOLD = 0.02;
+  var ROBERT_FREQUENCY_FIELDS = [
+    'Inhouse_GRCh38_Allele_frequency', 'Inhouse_GATK_Allele_frequency', 'EGA_freq',
+    'GenomeAsia_Freq', 'GnomAD_exome_V2_AF', 'GnomAD_genome_V2_AF', 'GnomAD_genome_V3_AF',
+  ];
+  function isRobertRareRow(row) {
+    return ROBERT_FREQUENCY_FIELDS.every(function (key) {
+      var n = parseFloat(row[key]);
+      return isNaN(n) || n <= ROBERT_RARE_FREQUENCY_THRESHOLD;
+    });
+  }
+
+  // Functionally relevant = exonic or splicing, excluding silent (synonymous)
+  // changes - matches the pattern in Sample_final.xlsx's own HOM/HET/COMP
+  // rows (their Func_refGene is always exonic/splicing, never pure
+  // intronic/intergenic/UTR-only, and ExonicFunc_refGene is never
+  // "synonymous SNV"). ExonicFunc_refGene is sourced from VarSeq's "Effect
+  // (Combined)" field, which already gives a clean category (Missense, LoF,
+  // Synonymous, …) - checked first since Func_refGene here comes from
+  // VarSeq's "Sequence Ontology (Combined)" field, whose own vocabulary
+  // (missense_variant, stop_gained, splice_donor_variant, …) never contains
+  // the literal words "exonic"/"splicing" ANNOVAR uses, so it's only a
+  // fallback for a splice call without its own Effect category.
+  function isRobertFunctionalRow(row) {
+    var exonicFunc = String(row.ExonicFunc_refGene || '').trim().toLowerCase();
+    if (exonicFunc) return exonicFunc.indexOf('synonymous') === -1;
+    var func = String(row.Func_refGene || '').toLowerCase();
+    return func.indexOf('splice') !== -1 || func.indexOf('exonic') !== -1;
+  }
+
+  // ClinVar "Pathogenic"/"Likely pathogenic"/"Pathogenic/Likely pathogenic" -
+  // anchored at the start so it doesn't false-match values like
+  // "Conflicting_interpretations_of_pathogenicity", which merely contains
+  // the substring "pathogenic" without actually being a pathogenic call.
+  function isRobertPathogenicClinSig(value) {
+    return /^(pathogenic|likely_pathogenic|likely pathogenic)/i.test(String(value || '').trim());
+  }
+
+  // Splits the full variant list into Dr. Robert's HOM/HET/COMP/Clinsig
+  // sheets. Clinsig is independent of the rarity/zygosity split (a
+  // Pathogenic ClinVar call is flagged regardless of frequency or
+  // zygosity); HOM/HET/COMP all require the same rare+functional filter,
+  // differing only by zygosity and - for heterozygous calls - whether the
+  // gene has another qualifying variant too (compound-het candidate).
+  function categorizeRobertRows(rows) {
+    var clinsig = rows.filter(function (r) { return isRobertPathogenicClinSig(r.CLNSIG); });
+
+    var qualifying = rows.filter(function (r) { return isRobertRareRow(r) && isRobertFunctionalRow(r); });
+    var hom = qualifying.filter(function (r) { return String(r.Zygosity_1).toLowerCase() === 'hom'; });
+    var hets = qualifying.filter(function (r) { return String(r.Zygosity_1).toLowerCase() === 'het'; });
+
+    var geneCounts = {};
+    hets.forEach(function (r) {
+      var g = String(r.Gene_refGene || '').toUpperCase();
+      geneCounts[g] = (geneCounts[g] || 0) + 1;
+    });
+    var het = hets.filter(function (r) { return geneCounts[String(r.Gene_refGene || '').toUpperCase()] < 2; });
+    var comp = hets.filter(function (r) { return geneCounts[String(r.Gene_refGene || '').toUpperCase()] >= 2; });
+
+    return { hom: hom, het: het, comp: comp, clinsig: clinsig };
+  }
+
+  // Reads a standard VarSeq SNV export (same 2-row group+header layout as
+  // processVarSeqWorkbook) into Dr. Robert's ~100-column per-variant row
+  // shape. Every row is kept, unfiltered - categorizeRobertRows (used only
+  // at export time, see buildRobertVariantExcel) does the HOM/HET/COMP/
+  // Clinsig split into separate sheets.
+  function processRobertWorkbook(workbook) {
+    var sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found in the uploaded file.');
+
+    var groupRow = sheet.getRow(1);
+    var headerRow = sheet.getRow(2);
+    var colCount = effectiveVarSeqColCount(sheet, groupRow, headerRow);
+
+    var cols = {};
+    ROBERT_COLUMNS.forEach(function (c) {
+      if (c.spec) cols[c.key] = findVarSeqColumn(groupRow, headerRow, colCount, c.spec);
+    });
+    var chrPosCol = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.chrPosCombined);
+    var refAltCol = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.refAltCombined);
+    var zygosityCol = findVarSeqColumn(groupRow, headerRow, colCount, { header: 'Zygosity' });
+    var hgvsCCol = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.hgvsC);
+    var hgvsPCol = findVarSeqColumn(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.hgvsP);
+
+    var rows = [];
+    sheet.eachRow(function (row, r) {
+      if (r <= 2) return;
+
+      function get(key) {
+        var c = cols[key];
+        return c ? cellText(row.getCell(c).value) : '';
+      }
+
+      var chrPosRaw = chrPosCol ? cellText(row.getCell(chrPosCol).value) : '';
+      var refAltRaw = refAltCol ? cellText(row.getCell(refAltCol).value) : '';
+      var colonIdx = String(chrPosRaw).indexOf(':');
+      var chrPart = colonIdx === -1 ? '' : String(chrPosRaw).slice(0, colonIdx);
+      var startPart = colonIdx === -1 ? '' : String(chrPosRaw).slice(colonIdx + 1);
+      var slashIdx = String(refAltRaw).indexOf('/');
+      var refPart = slashIdx === -1 ? '' : String(refAltRaw).slice(0, slashIdx);
+      var altPart = slashIdx === -1 ? '' : String(refAltRaw).slice(slashIdx + 1);
+      var startNum = parseInt(startPart, 10);
+      // Standard ANNOVAR convention (End = Start + length(Ref) - 1). VarSeq's
+      // own Ref/Alt aren't left-trimmed to ANNOVAR's reduced indel notation,
+      // so an indel's End can differ slightly from an ANNOVAR-sourced file's
+      // - exact for every SNV (the vast majority of rows), approximate for
+      // indels.
+      var endNum = isNaN(startNum) ? '' : startNum + Math.max(refPart.replace(/-/g, '').length, 1) - 1;
+
+      if (!chrPart || isNaN(startNum)) return;
+
+      var row0 = {
+        Chr: 'chr' + chrPart,
+        Start: startNum,
+        End: endNum,
+        Ref: refPart || '',
+        Alt: altPart || '',
+        Zygosity_1: abbreviateRobertZygosity(zygosityCol ? cellText(row.getCell(zygosityCol).value) : ''),
+        AAChange_refGene: [
+          hgvsCCol ? stripHgvsPrefix(cellText(row.getCell(hgvsCCol).value)) : '',
+          hgvsPCol ? stripHgvsPrefix(cellText(row.getCell(hgvsPCol).value)) : '',
+        ].filter(Boolean).join(':'),
+      };
+      ROBERT_COLUMNS.forEach(function (c) {
+        if (c.derived) return; // already set above
+        row0[c.key] = c.spec ? get(c.key) : '';
+      });
+
+      rows.push(row0);
+    });
+
+    // sNo is a preview-grid-only convenience (row numbering/delete button,
+    // same as every other template) - not one of Dr. Robert's own columns,
+    // so buildRobertVariantExcel below never writes it to the export.
+    rows.forEach(function (row, i) { row.sNo = i + 1; });
+    return { rows: rows };
+  }
+
+  // Builds Dr. Robert's 6-sheet workbook: "<patient>_final" (every row),
+  // then HOM/HET/COMP/Clinsig (see categorizeRobertRows), then an empty
+  // Candidate sheet (headers only) for manual final-pick entry - matches
+  // Sample_final.xlsx exactly. All six sheets share the same column header
+  // row, in ROBERT_COLUMNS order.
+  function buildRobertVariantExcel(rows, patientName, workbook) {
+    rows = rows.filter(function (r) { return !r._removed; });
+    workbook = workbook || new ExcelJS.Workbook();
+    var headers = ROBERT_COLUMNS.map(function (c) { return c.key; });
+
+    function writeSheet(name, sheetRows) {
+      // Excel sheet names cap at 31 characters and can't hold \/*?:[]
+      var safeName = String(name).replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
+      var sheet = workbook.addWorksheet(safeName);
+      sheet.addRow(headers);
+      sheet.getRow(1).font = { bold: true };
+      headers.forEach(function (h, i) { sheet.getColumn(i + 1).width = 16; });
+      sheetRows.forEach(function (r) {
+        sheet.addRow(headers.map(function (h) { return r[h] != null ? r[h] : ''; }));
+      });
+    }
+
+    var cats = categorizeRobertRows(rows);
+    writeSheet((patientName || 'Sample') + '_final', rows);
+    writeSheet('HOM', cats.hom);
+    writeSheet('HET', cats.het);
+    writeSheet('COMP', cats.comp);
+    writeSheet('Clinsig', cats.clinsig);
+    writeSheet('Candidate', []); // manual final pick - left for the analyst to fill in
+
+    return workbook.xlsx.writeBuffer();
+  }
+
   // Splits couple rows into four sections the target report template uses:
   // - combined: both partners carry the exact same variant (same gene AND
   //   same HGVS c. notation) - a truly shared finding.
@@ -4852,6 +5174,9 @@
       if (item.reportType === 'couple') {
         return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
       }
+      if (item.reportType === 'robert') {
+        return buildRobertVariantExcel(item.rows, item.patientName, workbook);
+      }
       return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook, item.reportType, inhouseHematologyHeaderOverrides(item));
     });
   }
@@ -4885,6 +5210,26 @@
               rawBuffer: rawBuffer,
               runName: '',
               title: cnvTitle,
+              loadedAt: new Date().toLocaleDateString(),
+              error: null
+            };
+          }
+
+          if (currentReportType === 'robert') {
+            // Dr. Robert's template reads a standard VarSeq SNV export (same
+            // 2-row group+header layout single/CMC/couple all read) into his
+            // own ~100-column per-variant shape - handled separately since
+            // its export is a 6-sheet workbook (buildRobertVariantExcel), not
+            // the usual single "Listed Variants" sheet.
+            var robertResult = processRobertWorkbook(workbook);
+            var robertTitle = extractPatientTitle(file.name, '');
+            return {
+              fileName: file.name,
+              rows: robertResult.rows,
+              rawBuffer: rawBuffer,
+              runName: '',
+              title: robertTitle,
+              patientName: robertTitle.replace(/^LISTED VARIANTS FOR /, ''),
               loadedAt: new Date().toLocaleDateString(),
               error: null
             };
