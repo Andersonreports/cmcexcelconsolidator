@@ -3613,11 +3613,31 @@
     { key: 'ExonicFunc_refGene', spec: { headerStartsWith: 'Effect' } },
     { key: 'AAChange_refGene', derived: 'aachange' },
     { key: 'GeneDetail_refGene', spec: null },
-    { key: 'Inhouse_GRCh38_Allele_frequency', spec: { header: 'AlleleFrequencies', groupIncludes: ['GRCh_38'] } },
-    { key: 'Inhouse_GRCh38_HET_Count', spec: { header: 'Het', groupIncludes: ['GRCh_38'] } },
-    { key: 'Inhouse_GRCh38_HOM_Count', spec: { header: 'HomoVar', groupIncludes: ['GRCh_38'] } },
-    { key: 'Inhouse_GATK_Allele_frequency', spec: { header: 'Allele Frequencies', groupIncludes: ['Inhouse consolidated 947 VCF'] } },
-    { key: 'Inhouse_GATK_Total_Allele_Number', spec: { header: '# Alleles', groupIncludes: ['Inhouse consolidated 947 VCF'] } },
+    // The lab's in-house reference has moved from the old separate
+    // 947-sample GRCh38/GATK VCF tracks to one consolidated "Cohort Variant
+    // Frequencies" track (6060 samples as of GEN_T_2.0.spik_6193.xlsx) - try
+    // the legacy tracks first for older exports that still carry them, then
+    // fall back to the new one so these don't go blank on current exports.
+    { key: 'Inhouse_GRCh38_Allele_frequency', spec: [
+      { header: 'AlleleFrequencies', groupIncludes: ['GRCh_38'] },
+      { header: 'Allele Frequencies', groupIncludes: ['Cohort Variant Frequencies'] },
+    ] },
+    { key: 'Inhouse_GRCh38_HET_Count', spec: [
+      { header: 'Het', groupIncludes: ['GRCh_38'] },
+      { header: 'Heterozygous Count', groupIncludes: ['Cohort Variant Frequencies'] },
+    ] },
+    { key: 'Inhouse_GRCh38_HOM_Count', spec: [
+      { header: 'HomoVar', groupIncludes: ['GRCh_38'] },
+      { header: 'Homozygous Count', groupIncludes: ['Cohort Variant Frequencies'] },
+    ] },
+    { key: 'Inhouse_GATK_Allele_frequency', spec: [
+      { header: 'Allele Frequencies', groupIncludes: ['Inhouse consolidated 947 VCF'] },
+      { header: 'Allele Frequencies', groupIncludes: ['Cohort Variant Frequencies'] },
+    ] },
+    { key: 'Inhouse_GATK_Total_Allele_Number', spec: [
+      { header: '# Alleles', groupIncludes: ['Inhouse consolidated 947 VCF'] },
+      { header: 'Allele Number', groupIncludes: ['Cohort Variant Frequencies'] },
+    ] },
     // The gnomAD v4.1 "Joint" track sometimes ships as a reduced
     // Filter+AlleleFrequency-only block with no population breakdown at all
     // (seen in GEN_T_2.0.spik_6193.xlsx) - when that happens, the same
