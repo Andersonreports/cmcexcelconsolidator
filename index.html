@@ -3618,9 +3618,26 @@
     { key: 'Inhouse_GRCh38_HOM_Count', spec: { header: 'HomoVar', groupIncludes: ['GRCh_38'] } },
     { key: 'Inhouse_GATK_Allele_frequency', spec: { header: 'Allele Frequencies', groupIncludes: ['Inhouse consolidated 947 VCF'] } },
     { key: 'Inhouse_GATK_Total_Allele_Number', spec: { header: '# Alleles', groupIncludes: ['Inhouse consolidated 947 VCF'] } },
-    { key: 'EGA_freq', spec: { header: 'European (Non-Finnish) Allele Frequency', groupIncludes: ['gnomAD Joint'] } },
-    { key: 'EGA_AlleleCount', spec: { header: 'European (Non-Finnish) Allele Count', groupIncludes: ['gnomAD Joint'] } },
-    { key: 'EGA_Homozygotes', spec: { header: 'European (Non-Finnish) Homozygous Count', groupIncludes: ['gnomAD Joint'] } },
+    // The gnomAD v4.1 "Joint" track sometimes ships as a reduced
+    // Filter+AlleleFrequency-only block with no population breakdown at all
+    // (seen in GEN_T_2.0.spik_6193.xlsx) - when that happens, the same
+    // "European (Non-Finnish)" fields are still available on the v4.1
+    // Genomes/Exomes tracks, so fall back to those rather than going blank.
+    { key: 'EGA_freq', spec: [
+      { header: 'European (Non-Finnish) Allele Frequency', groupIncludes: ['gnomAD Joint'] },
+      { header: 'European (Non-Finnish) Allele Frequency', groupIncludes: ['gnomAD Genomes', '4.1'] },
+      { header: 'European (Non-Finnish) Allele Frequency', groupIncludes: ['gnomAD Exomes', '4.1'] },
+    ] },
+    { key: 'EGA_AlleleCount', spec: [
+      { header: 'European (Non-Finnish) Allele Count', groupIncludes: ['gnomAD Joint'] },
+      { header: 'European (Non-Finnish) Allele Count', groupIncludes: ['gnomAD Genomes', '4.1'] },
+      { header: 'European (Non-Finnish) Allele Count', groupIncludes: ['gnomAD Exomes', '4.1'] },
+    ] },
+    { key: 'EGA_Homozygotes', spec: [
+      { header: 'European (Non-Finnish) Homozygous Count', groupIncludes: ['gnomAD Joint'] },
+      { header: 'European (Non-Finnish) Homozygous Count', groupIncludes: ['gnomAD Genomes', '4.1'] },
+      { header: 'European (Non-Finnish) Homozygous Count', groupIncludes: ['gnomAD Exomes', '4.1'] },
+    ] },
     // South Asian subset, not the overall AF - matches both GenomeAsia_Hom
     // below (only population-specific Hom counts exist in this track, no
     // overall one) and the existing single/CMC template's own GenomeAsia
