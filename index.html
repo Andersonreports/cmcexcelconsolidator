@@ -3642,7 +3642,14 @@
     { key: 'OMIM_gene', spec: { header: 'Gene Name', groupIncludes: ['OMIM'] } },
     { key: 'OMIM_phenotypes', spec: { header: 'Phenotypes', groupIncludes: ['OMIM'] } },
     { key: 'HPO_Phenotype', spec: { header: 'HPO Terms', groupIncludes: ['OMIM'] } },
-    { key: 'CLNSIG', spec: { header: 'Clinical Significance', groupIncludes: ['ClinVar'] } },
+    // ClinVar's own field name has changed across export dates - older
+    // exports call it "Clinical Significance", newer ones "Classification".
+    // Try both so this doesn't silently go blank when VarSeq's bundled
+    // ClinVar track gets refreshed to a newer schema.
+    { key: 'CLNSIG', spec: [
+      { header: 'Clinical Significance', groupIncludes: ['ClinVar'] },
+      { header: 'Classification', groupIncludes: ['ClinVar'] },
+    ] },
     { key: 'REVEL_score', spec: { header: 'REVEL', groupIncludes: ['REVEL'] } },
     { key: 'ClinPred_pred', spec: null },
     { key: 'CADD_phred', spec: null },
@@ -3678,22 +3685,28 @@
     { key: 'SIFT4G_pred', spec: null },
     { key: 'Polyphen2_HDIV_pred', spec: { headerStartsWith: 'PolyPhen2 Prediction' } },
     { key: 'Polyphen2_HVAR_pred', spec: { headerStartsWith: 'PolyPhen2 Prediction' } },
-    { key: 'LRT_pred', spec: { header: 'LRT_pred', groupIncludes: ['dbNSFP'] } },
-    { key: 'MutationTaster_pred', spec: { headerStartsWith: 'MutationTaster', groupIncludes: ['dbNSFP'] } },
-    { key: 'MutationAssessor_pred', spec: { headerStartsWith: 'MutationAssessor', groupIncludes: ['dbNSFP'] } },
+    // Each dbNSFP predictor exposes several sibling columns - "X Score", "X
+    // Rankscore" and "X Pred" - and a loose prefix like "MutationTaster"
+    // matches "MutationTaster Score" first since it comes before "...Pred" in
+    // the file, silently handing the numeric score to a column named
+    // "..._pred". The prefix must include "Pred" itself to land on the right
+    // one.
+    { key: 'LRT_pred', spec: { headerStartsWith: 'LRT Pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'MutationTaster_pred', spec: { headerStartsWith: 'MutationTaster Pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'MutationAssessor_pred', spec: { headerStartsWith: 'MutationAssessor Pred', groupIncludes: ['dbNSFP'] } },
     { key: 'FATHMM_pred', spec: { headerStartsWith: 'FATHMM Pred', groupIncludes: ['dbNSFP'] } },
-    { key: 'PROVEAN_pred', spec: { headerStartsWith: 'PROVEAN', groupIncludes: ['dbNSFP'] } },
+    { key: 'PROVEAN_pred', spec: { headerStartsWith: 'PROVEAN Pred', groupIncludes: ['dbNSFP'] } },
     { key: 'VEST4_score', spec: null },
-    { key: 'MetaSVM_pred', spec: { headerStartsWith: 'MetaSVM', groupIncludes: ['dbNSFP'] } },
-    { key: 'MetaLR_pred', spec: { headerStartsWith: 'MetaLR', groupIncludes: ['dbNSFP'] } },
-    { key: 'M-CAP_pred', spec: { headerStartsWith: 'M-CAP', groupIncludes: ['dbNSFP'] } },
+    { key: 'MetaSVM_pred', spec: { headerStartsWith: 'MetaSVM Pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'MetaLR_pred', spec: { headerStartsWith: 'MetaLR Pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'M-CAP_pred', spec: { headerStartsWith: 'M-CAP Pred', groupIncludes: ['dbNSFP'] } },
     { key: 'MutPred_score', spec: { headerStartsWith: 'MutPred', groupIncludes: ['dbNSFP'] } },
-    { key: 'PrimateAI_pred', spec: { headerStartsWith: 'PrimateAI', groupIncludes: ['dbNSFP'] } },
-    { key: 'DEOGEN2_pred', spec: { headerStartsWith: 'DEOGEN2', groupIncludes: ['dbNSFP'] } },
-    { key: 'BayesDel_addAF_pred', spec: { headerStartsWith: 'BayesDel', groupIncludes: ['dbNSFP'] } },
-    { key: 'LIST-S2_pred', spec: { headerStartsWith: 'LIST', groupIncludes: ['dbNSFP'] } },
+    { key: 'PrimateAI_pred', spec: { headerStartsWith: 'PrimateAI Pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'DEOGEN2_pred', spec: { headerStartsWith: 'DEOGEN2 Pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'BayesDel_addAF_pred', spec: { headerStartsWith: 'BayesDel addAF Pred', groupIncludes: ['dbNSFP'] } },
+    { key: 'LIST-S2_pred', spec: { headerStartsWith: 'LIST S2 Pred', groupIncludes: ['dbNSFP'] } },
     { key: 'DANN_score', spec: { headerStartsWith: 'DANN', groupIncludes: ['dbNSFP'] } },
-    { key: 'fathmm-XF_coding_pred', spec: { headerStartsWith: 'FATHMM XF', groupIncludes: ['dbNSFP'] } },
+    { key: 'fathmm-XF_coding_pred', spec: { headerStartsWith: 'FATHMM XF Coding Pred', groupIncludes: ['dbNSFP'] } },
     { key: 'Interpro_domain', spec: null },
     { key: 'GTEx_V8_gene', spec: null },
     { key: 'GTEx_V8_tissue', spec: null },
