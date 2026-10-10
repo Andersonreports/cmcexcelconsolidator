@@ -3807,6 +3807,14 @@
   // the literal words "exonic"/"splicing" ANNOVAR uses, so it's only a
   // fallback for a splice call without its own Effect category.
   function isRobertFunctionalRow(row) {
+    // processRobertSignificantVariantsWorkbook's rows have no Func_refGene/
+    // ExonicFunc_refGene source at all (that format never provides one) - a
+    // row from it is already a human-curated significant-variant shortlist,
+    // so functional relevance is assumed rather than re-derived from fields
+    // that don't exist for it. Without this, every one of its rows would
+    // read as non-functional (the checks below default to false when both
+    // fields are blank) and HOM/HET/COMP would always come out empty.
+    if (row._robertFunctionalOverride) return true;
     var exonicFunc = String(row.ExonicFunc_refGene || '').trim().toLowerCase();
     if (exonicFunc) return exonicFunc.indexOf('synonymous') === -1;
     var func = String(row.Func_refGene || '').toLowerCase();
@@ -3900,6 +3908,102 @@
     });
 
     return { combinedRows: combinedRows, compoundRows: compoundRows, maleRows: maleRows, femaleRows: femaleRows };
+  }
+
+  // Detects this app's OWN already-exported "Listed Variants" sheet (the
+  // single/CMC report type's output - SINGLE_VARIANT_COLUMNS' header row)
+  // being re-uploaded under the Dr. Robert template, instead of a raw VarSeq
+  // SNV export. Signature: a "Listed Variants" sheet whose first column pair
+  // reads "S.NO"/"GENE" somewhere in its first few rows (a raw VarSeq export
+  // never has that sheet name or header text).
+  function looksLikeSignificantVariantsListWorkbook(workbook) {
+    var sheet = workbook.getWorksheet('Listed Variants');
+    if (!sheet) return false;
+    for (var r = 1; r <= Math.min(5, sheet.rowCount); r++) {
+      var row = sheet.getRow(r);
+      if (String(cellText(row.getCell(1).value) || '').trim().toUpperCase() === 'S.NO' &&
+          String(cellText(row.getCell(2).value) || '').trim().toUpperCase() === 'GENE') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Reads this app's own already-exported "Listed Variants" sheet (see
+  // looksLikeSignificantVariantsListWorkbook) into Dr. Robert's row shape.
+  // That sheet stacks one or more titled sections (e.g. "Secondary
+  // Findings", then "LISTED VARIANTS FOR <patient>"), each with its own
+  // repeated header row - every section's rows are pooled into one flat
+  // list; isRobertSecondaryFindingRow already re-derives which ones are
+  // secondary findings from Gene_refGene, so the section a row came from
+  // doesn't need to be tracked separately.
+  //
+  // This format is a curated, already-summarized report, not a raw
+  // annotation export: it has no genomic coordinates at all (no Chr/Pos/
+  // Ref/Alt - Chr/Start/End/Ref/Alt are left blank) and only ~34 flat
+  // columns total, vs the ~1100 raw VarSeq provides. Only the columns with
+  // a verified matching source are filled in (checked against this app's
+  // own VARSEQ_COLUMN_SPECS/ROBERT_COLUMNS raw-field definitions, not
+  // guessed from header text) - most of Dr. Robert's 100 columns
+  // (dbNSFP/ExAC/dbscSNV, CLNALLELEID/CLNDN/CLNDISDB/CLNREVSTAT, OMIM_gene,
+  // HPO_Phenotype, Inhouse_*, EGA_*, every per-population gnomAD field
+  // except the plain v3.1.2 allele count, etc.) have no corresponding field
+  // in this reduced format and stay blank.
+  function processRobertSignificantVariantsWorkbook(workbook) {
+    var sheet = workbook.getWorksheet('Listed Variants');
+    var headerToKey = {};
+    SINGLE_VARIANT_COLUMNS.forEach(function (c) { headerToKey[c.header.trim().toUpperCase()] = c.key; });
+
+    var rows = [];
+    var colKeys = null; // column index (1-based) -> SINGLE_VARIANT_COLUMNS key, for the current section
+    for (var r = 1; r <= sheet.rowCount; r++) {
+      var row = sheet.getRow(r);
+      var a = String(cellText(row.getCell(1).value) || '').trim();
+      var b = String(cellText(row.getCell(2).value) || '').trim();
+
+      if (a.toUpperCase() === 'S.NO' && b.toUpperCase() === 'GENE') {
+        // A new section's header row - rebuild the column map from it rather
+        // than assuming every section uses the same column order.
+        colKeys = {};
+        for (var c = 1; c <= sheet.columnCount; c++) {
+          var h = String(cellText(row.getCell(c).value) || '').trim().toUpperCase();
+          if (headerToKey[h]) colKeys[c] = headerToKey[h];
+        }
+        continue;
+      }
+      if (!colKeys) continue; // haven't hit a header row yet (a section title row)
+      if (!a && !b) { colKeys = null; continue; } // blank row ends the section
+
+      var raw = {};
+      Object.keys(colKeys).forEach(function (c) { raw[colKeys[c]] = cellText(row.getCell(Number(c)).value); });
+      if (!raw.gene) continue; // section title rows repeat across every cell - never a real data row
+
+      var variant = String(raw.variant || '').trim();
+      var proteinPos = String(raw.proteinPos || '').trim();
+      var zyg = String(raw.zygosity || '').trim();
+      var zygMap = { HET: 'Het', HOM: 'Hom', HEMI: 'Hemi' };
+
+      rows.push({
+        Gene_refGene: raw.gene || '',
+        AAChange_refGene: [variant, proteinPos].filter(Boolean).join(':'),
+        Zygosity_1: zygMap[zyg.toUpperCase()] || zyg,
+        Read_Frequency_1: raw.vafRaw != null ? raw.vafRaw : '',
+        Read_Count_1: raw.readDepths != null ? raw.readDepths : '',
+        CLNSIG: raw.clinvar || '',
+        // The file's "ACMG" column is VarSeq's reviewed/final ACMG
+        // Classification, not strictly the same as the raw export's
+        // separate "Auto Classification" field InterVar_automated normally
+        // reads - closest available source, not a guaranteed exact match.
+        InterVar_automated: raw.varseq || '',
+        REVEL_score: raw.revel != null ? raw.revel : '',
+        OMIM_phenotypes: raw.omimPhenotypes != null ? raw.omimPhenotypes : '',
+        Gnomad_v31_AlleleCount: raw.gnomadGenome3AC != null ? raw.gnomadGenome3AC : '',
+        _robertFunctionalOverride: true,
+      });
+    }
+
+    rows.forEach(function (row, i) { row.sNo = i + 1; });
+    return { rows: rows };
   }
 
   // Reads a standard VarSeq SNV export (same 2-row group+header layout as
@@ -5722,6 +5826,27 @@
             // the usual single "Listed Variants" sheet. A couple file (two
             // sample column-groups) produces two full 6-sheet sets, one per
             // partner - see processRobertWorkbook.
+            //
+            // A file that's already this app's OWN exported "Listed
+            // Variants" sheet (single/CMC output, re-uploaded here instead of
+            // the raw VarSeq export) is handled by a separate, much narrower
+            // parser - see processRobertSignificantVariantsWorkbook. Single-
+            // person only; that format has no per-partner column groups to
+            // detect a couple file from.
+            if (looksLikeSignificantVariantsListWorkbook(workbook)) {
+              var sigVarResult = processRobertSignificantVariantsWorkbook(workbook);
+              var sigVarTitle = extractPatientTitle(file.name, '');
+              return {
+                fileName: file.name,
+                rows: sigVarResult.rows,
+                rawBuffer: rawBuffer,
+                runName: '',
+                title: sigVarTitle,
+                patientName: sigVarTitle.replace(/^LISTED VARIANTS FOR /, ''),
+                loadedAt: new Date().toLocaleDateString(),
+                error: null
+              };
+            }
             var robertMaleIdx = coupleMaleGroupIndex;
             var robertResult = processRobertWorkbook(workbook, robertMaleIdx);
             if (robertResult.isCouple) {
