@@ -1794,8 +1794,14 @@
     variantRef: { header: 'Ref' },
     variantAlt: { header: 'Alt' },
     // Couple-mode: some VarSeq exports pre-combine coordinates into one column each.
-    chrPosCombined: { header: 'Chr:Pos' },
-    refAltCombined: { header: 'Ref/Alt' },
+    // Same "Complex Variants" duplicate-block problem documented above for
+    // filter/genotype/vaf/alleleDepths/readDepths - VarSeq also writes a
+    // Chr:Pos/Ref/Alt pair inside that always-present, usually-blank block,
+    // and when it sorts before the real "Variant Info" one, every row's
+    // coordinates came back blank (seen in a Dr. Robert upload where this
+    // caused every row to be dropped as coordinate-less).
+    chrPosCombined: { header: 'Chr:Pos', groupExcludes: ['Complex Variants'] },
+    refAltCombined: { header: 'Ref/Alt', groupExcludes: ['Complex Variants'] },
     // Matched by prefix, not the exact phrase - VarSeq exports have shown
     // both "(Combined)" and "(Clinically Relevant)" suffixes for Sequence
     // Ontology, Transcript Name, and Exon Number, with or without a suffix,
