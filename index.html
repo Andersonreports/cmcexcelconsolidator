@@ -453,6 +453,7 @@
       <select id="report-type-select" class="report-type-select">
         <option value="cmc">CMC</option>
         <option value="single">Single</option>
+        <option value="single-cmc">Single - CMC</option>
         <option value="couple">Couple</option>
         <option value="cnv">CNV Variants</option>
         <option value="robert">Dr. Robert</option>
@@ -466,6 +467,8 @@
     <button class="nav-item tab-button" data-tab="final-consolidate" data-report-type="cmc">Sample Final Consolidate</button>
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="single" hidden>Listed Variant Excel</button>
+
+    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="single-cmc" hidden>Listed Variant Excel</button>
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="couple" hidden>Listed Variant Excel</button>
 
@@ -1505,6 +1508,14 @@
     { key: 'clingenClass', header: 'Classification' },
   ];
 
+  // "Single - CMC": the Single layout plus the VarSeq genomic-detail columns.
+  var SINGLE_CMC_VARIANT_COLUMNS = SINGLE_VARIANT_COLUMNS.concat([
+    { key: 'chrPos', header: 'Chromosomal Position' },
+    { key: 'refAlt', header: 'Ref/Alt' },
+    { key: 'seqOntology', header: 'Sequence Ontology' },
+    { key: 'exonNumber', header: 'Exon' },
+  ]);
+
   // Flat column list matching the couple reference template exactly — same
   // order and header text as the target export, used for BOTH the two-section
   // Excel export (buildCoupleVariantExcel) and the preview grid (below, with
@@ -1596,6 +1607,7 @@
 
   function getVariantColumns(reportType) {
     if (reportType === 'single') return SINGLE_VARIANT_COLUMNS;
+    if (reportType === 'single-cmc') return SINGLE_CMC_VARIANT_COLUMNS;
     if (reportType === 'couple') return COUPLE_VARIANT_COLUMNS;
     if (reportType === 'cnv') return CNV_VARIANT_COLUMNS;
     if (reportType === 'robert') {
@@ -3082,8 +3094,17 @@
       var rawAlleleDepthsCell = get('alleleDepths');
       var rawReadDepthsCell = get('readDepths');
 
+      var chrPos = get('chrPosCombined');
+      if (!chrPos && get('variantChr')) chrPos = get('variantChr') + ':' + get('variantPos');
+      var refAlt = get('refAltCombined');
+      if (!refAlt && (get('variantRef') || get('variantAlt'))) refAlt = (get('variantRef') || '') + '/' + (get('variantAlt') || '');
+
       var sharedFields = {
         sNo: '',
+        chrPos: chrPos || '',
+        refAlt: refAlt || '',
+        seqOntology: get('seqOntology'),
+        exonNumber: get('exonNumber'),
         clinvar: clinvarValue,
         inheritance: currentReportType === 'cmc' ? inheritanceCodes.join('/') : abbreviateInheritanceGrouped(rawInheritance),
         inhouseCount: get('inhouseCount'),
@@ -3146,6 +3167,8 @@
           readDepths: pickPerGeneValue(rawReadDepthsCell, indices, n),
           _multiGeneGroupId: multiGeneGroupId,
           _hyperlinks: Object.assign({}, hyperlinks, {
+            chrPos: hyperlinks.chrPosCombined,
+            refAlt: hyperlinks.refAltCombined,
             gene: hyperlinks.geneNames,
             variant: hyperlinks.hgvsC,
             proteinPos: hyperlinks.hgvsP,
