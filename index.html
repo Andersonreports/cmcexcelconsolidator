@@ -1512,6 +1512,7 @@
   var SINGLE_CMC_VARIANT_COLUMNS = SINGLE_VARIANT_COLUMNS.concat([
     { key: 'chrPos', header: 'Chromosomal Position' },
     { key: 'refAlt', header: 'Ref/Alt' },
+    { key: 'transcriptName', header: 'NM ID' },
     { key: 'seqOntology', header: 'Sequence Ontology' },
     { key: 'exonNumber', header: 'Exon' },
   ]);
@@ -3103,6 +3104,7 @@
         sNo: '',
         chrPos: chrPos || '',
         refAlt: refAlt || '',
+        transcriptName: get('transcriptName'),
         seqOntology: get('seqOntology'),
         exonNumber: get('exonNumber'),
         clinvar: clinvarValue,
