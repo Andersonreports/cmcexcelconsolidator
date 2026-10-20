@@ -2680,7 +2680,14 @@
       '?gene=' + encodeURIComponent(row.gene || '') +
       '&variant=' + encodeURIComponent(row.variant || '');
 
-    return fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 20000)
+    // Franklin's own API (franklin.genoox.com, called server-side by the
+    // proxy) periodically goes into a bad state where it still eventually
+    // answers, just with an HTTP 500 that takes 30-45s to arrive - far past
+    // any reasonable per-row wait. A short client-side timeout means a
+    // degraded Franklin fails fast here and falls through to the ClinVar
+    // fallback below instead of tying up one of FRANKLIN_CONCURRENCY's slots
+    // for the better part of a minute per row.
+    return fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 8000)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var linkEl = document.getElementById(linkId);
