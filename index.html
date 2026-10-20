@@ -3948,51 +3948,46 @@
     return { combinedRows: combinedRows, compoundRows: compoundRows, maleRows: maleRows, femaleRows: femaleRows };
   }
 
-  // Detects this app's OWN already-exported "Listed Variants" sheet (the
-  // single/CMC report type's output - SINGLE_VARIANT_COLUMNS' header row)
-  // being re-uploaded under the Dr. Robert template, instead of a raw VarSeq
-  // SNV export. Signature: a "Listed Variants" sheet whose first column pair
-  // reads "S.NO"/"GENE" somewhere in its first few rows (a raw VarSeq export
-  // never has that sheet name or header text).
-  function looksLikeSignificantVariantsListWorkbook(workbook) {
-    var sheet = workbook.getWorksheet('Listed Variants');
-    if (!sheet) return false;
-    for (var r = 1; r <= Math.min(5, sheet.rowCount); r++) {
-      var row = sheet.getRow(r);
-      if (String(cellText(row.getCell(1).value) || '').trim().toUpperCase() === 'S.NO' &&
-          String(cellText(row.getCell(2).value) || '').trim().toUpperCase() === 'GENE') {
-        return true;
+  // Finds this app's OWN already-exported "Listed Variants" sheet (any
+  // report type built from SINGLE_VARIANT_COLUMNS' header row) when it's
+  // re-uploaded instead of a raw VarSeq SNV export - e.g. under the Dr.
+  // Robert template, or under Single/Single - CMC to re-view/re-edit a
+  // previous export. Checked by content, not sheet name or position (seen
+  // named "Listed Variants", but also plain "Sheet1" when re-saved) -
+  // signature is any worksheet whose first column pair reads "S.NO"/"GENE"
+  // somewhere in its first few rows (a raw VarSeq export never has that
+  // header text in those columns). Returns the matching sheet, or null.
+  function findListedVariantsSheet(workbook) {
+    for (var s = 0; s < workbook.worksheets.length; s++) {
+      var sheet = workbook.worksheets[s];
+      for (var r = 1; r <= Math.min(5, sheet.rowCount); r++) {
+        var row = sheet.getRow(r);
+        if (String(cellText(row.getCell(1).value) || '').trim().toUpperCase() === 'S.NO' &&
+            String(cellText(row.getCell(2).value) || '').trim().toUpperCase() === 'GENE') {
+          return sheet;
+        }
       }
     }
-    return false;
+    return null;
   }
 
-  // Reads this app's own already-exported "Listed Variants" sheet (see
-  // looksLikeSignificantVariantsListWorkbook) into Dr. Robert's row shape.
-  // That sheet stacks one or more titled sections (e.g. "Secondary
-  // Findings", then "LISTED VARIANTS FOR <patient>"), each with its own
-  // repeated header row - every section's rows are pooled into one flat
-  // list; isRobertSecondaryFindingRow already re-derives which ones are
-  // secondary findings from Gene_refGene, so the section a row came from
-  // doesn't need to be tracked separately.
-  //
-  // This format is a curated, already-summarized report, not a raw
-  // annotation export: it has no genomic coordinates at all (no Chr/Pos/
-  // Ref/Alt - Chr/Start/End/Ref/Alt are left blank) and only ~34 flat
-  // columns total, vs the ~1100 raw VarSeq provides. Only the columns with
-  // a verified matching source are filled in (checked against this app's
-  // own VARSEQ_COLUMN_SPECS/ROBERT_COLUMNS raw-field definitions, not
-  // guessed from header text) - most of Dr. Robert's 100 columns
-  // (dbNSFP/ExAC/dbscSNV, CLNALLELEID/CLNDN/CLNDISDB/CLNREVSTAT, OMIM_gene,
-  // HPO_Phenotype, Inhouse_*, EGA_*, every per-population gnomAD field
-  // except the plain v3.1.2 allele count, etc.) have no corresponding field
-  // in this reduced format and stay blank.
-  function processRobertSignificantVariantsWorkbook(workbook) {
-    var sheet = workbook.getWorksheet('Listed Variants');
+  function looksLikeSignificantVariantsListWorkbook(workbook) {
+    return !!findListedVariantsSheet(workbook);
+  }
+
+  // Reads a "Listed Variants"-shaped sheet (see findListedVariantsSheet)
+  // into a flat array of raw field objects, keyed by SINGLE_VARIANT_COLUMNS'
+  // own keys (gene/variant/proteinPos/zygosity/vafRaw/...). The sheet stacks
+  // one or more titled sections (e.g. "Secondary Findings", then "LISTED
+  // VARIANTS FOR <patient>"), each with its own repeated header row - every
+  // section's rows are pooled into one flat list; callers that care about
+  // secondary findings re-derive that from the gene column rather than
+  // needing the section tracked separately.
+  function extractListedVariantsSections(sheet) {
     var headerToKey = {};
     SINGLE_VARIANT_COLUMNS.forEach(function (c) { headerToKey[c.header.trim().toUpperCase()] = c.key; });
 
-    var rows = [];
+    var rawRows = [];
     var colKeys = null; // column index (1-based) -> SINGLE_VARIANT_COLUMNS key, for the current section
     for (var r = 1; r <= sheet.rowCount; r++) {
       var row = sheet.getRow(r);
@@ -4012,16 +4007,41 @@
       if (!colKeys) continue; // haven't hit a header row yet (a section title row)
       if (!a && !b) { colKeys = null; continue; } // blank row ends the section
 
-      var raw = {};
-      Object.keys(colKeys).forEach(function (c) { raw[colKeys[c]] = cellText(row.getCell(Number(c)).value); });
+      var raw = { _cells: {} };
+      Object.keys(colKeys).forEach(function (c) {
+        var cell = row.getCell(Number(c));
+        raw[colKeys[c]] = cellText(cell.value);
+        raw._cells[colKeys[c]] = cell.value;
+      });
       if (!raw.gene) continue; // section title rows repeat across every cell - never a real data row
+      rawRows.push(raw);
+    }
+    return rawRows;
+  }
 
+  // Maps extractListedVariantsSections' rows into Dr. Robert's ~100-column
+  // row shape. This format is a curated, already-summarized report, not a
+  // raw annotation export: it has no genomic coordinates at all (no Chr/Pos/
+  // Ref/Alt - Chr/Start/End/Ref/Alt are left blank) and only ~34 flat
+  // columns total, vs the ~1100 raw VarSeq provides. Only the columns with
+  // a verified matching source are filled in (checked against this app's
+  // own VARSEQ_COLUMN_SPECS/ROBERT_COLUMNS raw-field definitions, not
+  // guessed from header text) - most of Dr. Robert's 100 columns
+  // (dbNSFP/ExAC/dbscSNV, CLNALLELEID/CLNDN/CLNDISDB/CLNREVSTAT, OMIM_gene,
+  // HPO_Phenotype, Inhouse_*, EGA_*, every per-population gnomAD field
+  // except the plain v3.1.2 allele count, etc.) have no corresponding field
+  // in this reduced format and stay blank.
+  function processRobertSignificantVariantsWorkbook(workbook) {
+    var sheet = findListedVariantsSheet(workbook);
+    var rawRows = extractListedVariantsSections(sheet);
+
+    var rows = rawRows.map(function (raw) {
       var variant = String(raw.variant || '').trim();
       var proteinPos = String(raw.proteinPos || '').trim();
       var zyg = String(raw.zygosity || '').trim();
       var zygMap = { HET: 'Het', HOM: 'Hom', HEMI: 'Hemi' };
 
-      rows.push({
+      return {
         Gene_refGene: raw.gene || '',
         AAChange_refGene: [variant, proteinPos].filter(Boolean).join(':'),
         Zygosity_1: zygMap[zyg.toUpperCase()] || zyg,
@@ -4037,8 +4057,43 @@
         OMIM_phenotypes: raw.omimPhenotypes != null ? raw.omimPhenotypes : '',
         Gnomad_v31_AlleleCount: raw.gnomadGenome3AC != null ? raw.gnomadGenome3AC : '',
         _robertFunctionalOverride: true,
-      });
-    }
+      };
+    });
+
+    rows.forEach(function (row, i) { row.sNo = i + 1; });
+    return { rows: rows };
+  }
+
+  // Maps extractListedVariantsSections' rows back into the Single/Single -
+  // CMC row shape (SINGLE_VARIANT_COLUMNS' own keys) for re-uploading a
+  // previously-exported "Listed Variants" sheet under either of those report
+  // types - every field the file provides already matches that shape
+  // exactly (same key<->header pairing this app itself exported it with), so
+  // no semantic remapping is needed, unlike the Dr. Robert version above.
+  // Single - CMC's 5 extra raw-VarSeq columns (chrPos/refAlt/transcriptName/
+  // seqOntology/exonNumber) have no source in this curated format and stay
+  // blank, same reasoning as Dr. Robert's missing coordinate columns.
+  function processSingleListedVariantsWorkbook(workbook) {
+    var sheet = findListedVariantsSheet(workbook);
+    var rawRows = extractListedVariantsSections(sheet);
+
+    var rows = rawRows.map(function (raw) {
+      var row = {};
+      Object.keys(raw).forEach(function (k) { if (k !== '_cells') row[k] = raw[k]; });
+      // franklin/clinvar are normally filled in by live Franklin/ClinVar
+      // lookups at render time - seed them from this file's own already-
+      // resolved values (stripping the trailing "↗" link glyph Franklin's
+      // cell carries) so a row that's already classified isn't silently
+      // blanked out, and isn't needlessly re-queried either (resolveFranklinForRows
+      // already skips any row with a non-generic row.franklin set).
+      if (raw.franklin) {
+        row.franklin = String(raw.franklin).replace(/[\s↗]+$/, '').trim();
+        var franklinHyperlink = cellHyperlink(raw._cells.franklin);
+        if (franklinHyperlink) row._franklinUrl = franklinHyperlink;
+      }
+      if (raw.clinvar) row.clinvar = String(raw.clinvar).replace(/[\s↗]+$/, '').trim();
+      return row;
+    });
 
     rows.forEach(function (row, i) { row.sNo = i + 1; });
     return { rows: rows };
@@ -5920,6 +5975,27 @@
               runName: '',
               title: robertTitle,
               patientName: robertTitle.replace(/^LISTED VARIANTS FOR /, ''),
+              loadedAt: new Date().toLocaleDateString(),
+              error: null
+            };
+          }
+
+          // A file that's already this app's OWN exported "Listed Variants"
+          // sheet (Single/Single - CMC output, re-uploaded here to re-view or
+          // re-edit it) instead of the raw VarSeq export - see
+          // processSingleListedVariantsWorkbook. Scoped to single/single-cmc
+          // only: their SINGLE_VARIANT_COLUMNS-based row shape matches this
+          // format's fields key-for-key, where CMC's own column set doesn't.
+          if ((currentReportType === 'single' || currentReportType === 'single-cmc') &&
+              looksLikeSignificantVariantsListWorkbook(workbook)) {
+            var listedResult = processSingleListedVariantsWorkbook(workbook);
+            var listedTitle = extractPatientTitle(file.name, '');
+            return {
+              fileName: file.name,
+              rows: listedResult.rows,
+              rawBuffer: rawBuffer,
+              runName: '',
+              title: listedTitle,
               loadedAt: new Date().toLocaleDateString(),
               error: null
             };
