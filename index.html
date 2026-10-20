@@ -3954,16 +3954,19 @@
   // Robert template, or under Single/Single - CMC to re-view/re-edit a
   // previous export. Checked by content, not sheet name or position (seen
   // named "Listed Variants", but also plain "Sheet1" when re-saved) -
-  // signature is any worksheet whose first column pair reads "S.NO"/"GENE"
+  // signature is any worksheet whose 2nd/3rd columns read "GENE"/"VARIANT"
   // somewhere in its first few rows (a raw VarSeq export never has that
-  // header text in those columns). Returns the matching sheet, or null.
+  // header text there). Column 1's label isn't part of the anchor - the
+  // main "LISTED VARIANTS FOR <patient>" section header uses "REMARKS"
+  // there instead of "S.NO", the same as the Secondary Findings section.
+  // Returns the matching sheet, or null.
   function findListedVariantsSheet(workbook) {
     for (var s = 0; s < workbook.worksheets.length; s++) {
       var sheet = workbook.worksheets[s];
-      for (var r = 1; r <= Math.min(5, sheet.rowCount); r++) {
+      for (var r = 1; r <= Math.min(10, sheet.rowCount); r++) {
         var row = sheet.getRow(r);
-        if (String(cellText(row.getCell(1).value) || '').trim().toUpperCase() === 'S.NO' &&
-            String(cellText(row.getCell(2).value) || '').trim().toUpperCase() === 'GENE') {
+        if (String(cellText(row.getCell(2).value) || '').trim().toUpperCase() === 'GENE' &&
+            String(cellText(row.getCell(3).value) || '').trim().toUpperCase() === 'VARIANT') {
           return sheet;
         }
       }
@@ -3991,12 +3994,15 @@
     var colKeys = null; // column index (1-based) -> SINGLE_VARIANT_COLUMNS key, for the current section
     for (var r = 1; r <= sheet.rowCount; r++) {
       var row = sheet.getRow(r);
-      var a = String(cellText(row.getCell(1).value) || '').trim();
       var b = String(cellText(row.getCell(2).value) || '').trim();
-
-      if (a.toUpperCase() === 'S.NO' && b.toUpperCase() === 'GENE') {
+      var c3 = String(cellText(row.getCell(3).value) || '').trim();
+      if (b.toUpperCase() === 'GENE' && c3.toUpperCase() === 'VARIANT') {
         // A new section's header row - rebuild the column map from it rather
-        // than assuming every section uses the same column order.
+        // than assuming every section uses the same column order. Column 1's
+        // label varies by section ("S.NO" for Secondary Findings, "REMARKS"
+        // for the main "LISTED VARIANTS FOR <patient>" section) so it's not
+        // part of the anchor, just mapped through headerToKey like any other
+        // column when it matches a known header.
         colKeys = {};
         for (var c = 1; c <= sheet.columnCount; c++) {
           var h = String(cellText(row.getCell(c).value) || '').trim().toUpperCase();
@@ -4005,7 +4011,11 @@
         continue;
       }
       if (!colKeys) continue; // haven't hit a header row yet (a section title row)
-      if (!a && !b) { colKeys = null; continue; } // blank row ends the section
+      // Column 1 isn't a reliable blank-row signal (it's free-text remarks in
+      // the main section, often blank on a real data row - see
+      // GEN_T_2.0.spik_6297's WWOX row) - gene is the one field every real
+      // data row has, so an empty gene ends the section instead.
+      if (!b) { colKeys = null; continue; }
 
       var raw = { _cells: {} };
       Object.keys(colKeys).forEach(function (c) {
