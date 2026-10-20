@@ -453,7 +453,6 @@
       <select id="report-type-select" class="report-type-select">
         <option value="cmc">CMC</option>
         <option value="single">Single</option>
-        <option value="single-cmc">Single - CMC</option>
         <option value="couple">Couple</option>
         <option value="cnv">CNV Variants</option>
         <option value="robert">Dr. Robert</option>
@@ -468,7 +467,6 @@
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="single" hidden>Listed Variant Excel</button>
 
-    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="single-cmc" hidden>Listed Variant Excel</button>
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="couple" hidden>Listed Variant Excel</button>
 
@@ -1506,16 +1504,12 @@
     { key: 'revel', header: 'REVEL' },
     { key: 'diseaseLabel', header: 'Disease Label' },
     { key: 'clingenClass', header: 'Classification' },
-  ];
-
-  // "Single - CMC": the Single layout plus the VarSeq genomic-detail columns.
-  var SINGLE_CMC_VARIANT_COLUMNS = SINGLE_VARIANT_COLUMNS.concat([
     { key: 'chrPos', header: 'Chromosomal Position' },
     { key: 'refAlt', header: 'Ref/Alt' },
     { key: 'transcriptName', header: 'NM ID' },
     { key: 'seqOntology', header: 'Sequence Ontology' },
     { key: 'exonNumber', header: 'Exon' },
-  ]);
+  ];
 
   // Flat column list matching the couple reference template exactly — same
   // order and header text as the target export, used for BOTH the two-section
@@ -1608,7 +1602,6 @@
 
   function getVariantColumns(reportType) {
     if (reportType === 'single') return SINGLE_VARIANT_COLUMNS;
-    if (reportType === 'single-cmc') return SINGLE_CMC_VARIANT_COLUMNS;
     if (reportType === 'couple') return COUPLE_VARIANT_COLUMNS;
     if (reportType === 'cnv') return CNV_VARIANT_COLUMNS;
     if (reportType === 'robert') {
@@ -3951,7 +3944,7 @@
   // Finds this app's OWN already-exported "Listed Variants" sheet (any
   // report type built from SINGLE_VARIANT_COLUMNS' header row) when it's
   // re-uploaded instead of a raw VarSeq SNV export - e.g. under the Dr.
-  // Robert template, or under Single/Single - CMC to re-view/re-edit a
+  // Robert template, or under Single to re-view/re-edit a
   // previous export. Checked by content, not sheet name or position (seen
   // named "Listed Variants", but also plain "Sheet1" when re-saved) -
   // signature is any worksheet whose 2nd/3rd columns read "GENE"/"VARIANT"
@@ -4074,15 +4067,14 @@
     return { rows: rows };
   }
 
-  // Maps extractListedVariantsSections' rows back into the Single/Single -
-  // CMC row shape (SINGLE_VARIANT_COLUMNS' own keys) for re-uploading a
-  // previously-exported "Listed Variants" sheet under either of those report
-  // types - every field the file provides already matches that shape
-  // exactly (same key<->header pairing this app itself exported it with), so
-  // no semantic remapping is needed, unlike the Dr. Robert version above.
-  // Single - CMC's 5 extra raw-VarSeq columns (chrPos/refAlt/transcriptName/
-  // seqOntology/exonNumber) have no source in this curated format and stay
-  // blank, same reasoning as Dr. Robert's missing coordinate columns.
+  // Maps extractListedVariantsSections' rows back into the Single row shape
+  // (SINGLE_VARIANT_COLUMNS' own keys) for re-uploading a previously-exported
+  // "Listed Variants" sheet under the Single report type - every field the
+  // file provides already matches that shape exactly (same key<->header
+  // pairing this app itself exported it with), so no semantic remapping is
+  // needed, unlike the Dr. Robert version above. Sheets exported before the
+  // 5 genomic-detail columns (chrPos/refAlt/transcriptName/seqOntology/
+  // exonNumber) were added simply leave them blank.
   function processSingleListedVariantsWorkbook(workbook) {
     var sheet = findListedVariantsSheet(workbook);
     var rawRows = extractListedVariantsSections(sheet);
@@ -5991,12 +5983,12 @@
           }
 
           // A file that's already this app's OWN exported "Listed Variants"
-          // sheet (Single/Single - CMC output, re-uploaded here to re-view or
+          // sheet (Single output, re-uploaded here to re-view or
           // re-edit it) instead of the raw VarSeq export - see
-          // processSingleListedVariantsWorkbook. Scoped to single/single-cmc
-          // only: their SINGLE_VARIANT_COLUMNS-based row shape matches this
+          // processSingleListedVariantsWorkbook. Scoped to single
+          // only: its SINGLE_VARIANT_COLUMNS-based row shape matches this
           // format's fields key-for-key, where CMC's own column set doesn't.
-          if ((currentReportType === 'single' || currentReportType === 'single-cmc') &&
+          if (currentReportType === 'single' &&
               looksLikeSignificantVariantsListWorkbook(workbook)) {
             var listedResult = processSingleListedVariantsWorkbook(workbook);
             var listedTitle = extractPatientTitle(file.name, '');
