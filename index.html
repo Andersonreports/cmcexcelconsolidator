@@ -1722,10 +1722,26 @@
   // a "Variants" flag column), so columns are located by matching the
   // dataset-group text (row 1) and column header text (row 2) together,
   // never by a fixed position.
+  // RefSeq Genes' own "Gene Names"/"HGVS c./p." fields aren't the only
+  // columns with that header text - ClinVar carries its own "Gene Names"/
+  // "HGVS c. Name"/"HGVS p. Name" fields (populated only for variants
+  // already cataloged in ClinVar, blank for everything else), and several
+  // other RefSeq-derived groups (Overlapping Genes/Transcripts, Transcript
+  // Interactions, Aux Fields) have fields with the same header text for a
+  // different purpose (nearby/overlapping annotations, not the primary
+  // call). An unscoped match picks whichever happens to sort first in the
+  // file, which silently drops any row ClinVar hasn't catalogued when
+  // ClinVar's own (sparser) column sorts earlier - seen in a real file
+  // where this excluded 12 of 30 rows that all had real coding HGVS data
+  // sitting in the correct RefSeq Genes column.
+  var REFSEQ_GENES_PRIMARY_GROUP = {
+    groupIncludes: ['RefSeq Genes'],
+    groupExcludes: ['Overlapping', 'Transcript Interactions', 'Aux Fields'],
+  };
   var VARSEQ_COLUMN_SPECS = {
-    geneNames: { header: 'Gene Names' },
-    hgvsC: { headerStartsWith: 'HGVS c.' },
-    hgvsP: { headerStartsWith: 'HGVS p.' },
+    geneNames: { header: 'Gene Names', groupIncludes: REFSEQ_GENES_PRIMARY_GROUP.groupIncludes, groupExcludes: REFSEQ_GENES_PRIMARY_GROUP.groupExcludes },
+    hgvsC: { headerStartsWith: 'HGVS c.', groupIncludes: REFSEQ_GENES_PRIMARY_GROUP.groupIncludes, groupExcludes: REFSEQ_GENES_PRIMARY_GROUP.groupExcludes },
+    hgvsP: { headerStartsWith: 'HGVS p.', groupIncludes: REFSEQ_GENES_PRIMARY_GROUP.groupIncludes, groupExcludes: REFSEQ_GENES_PRIMARY_GROUP.groupExcludes },
     zygosity: { header: 'Zygosity' },
     // VarSeq repeats the per-sample FORMAT columns (Filter, VAF, AD, DP, GT, …)
     // in a "Complex Variants <vcf> for <run>" block that VarSeq always writes
@@ -3706,7 +3722,9 @@
     { key: 'Gnomad_v211_genome_Homozygotes', spec: { headerStartsWith: 'Homoz', groupIncludes: ['gnomAD Genomes', '2.0.1'] } },
     { key: 'Gnomad_v31_AlleleCount', spec: { header: 'Alt Allele Count (AC)', groupIncludes: ['gnomAD Genomes', '3.1.2'] } },
     { key: 'Gnomad_v31_Homozygotes', spec: { headerStartsWith: 'Homoz', groupIncludes: ['gnomAD Genomes', '3.1.2'] } },
-    { key: 'Gene_refGene', spec: { header: 'Gene Names' } },
+    // See REFSEQ_GENES_PRIMARY_GROUP - unscoped, this can match ClinVar's own
+    // sparser "Gene Names" field instead of RefSeq's.
+    { key: 'Gene_refGene', spec: { header: 'Gene Names', groupIncludes: REFSEQ_GENES_PRIMARY_GROUP.groupIncludes, groupExcludes: REFSEQ_GENES_PRIMARY_GROUP.groupExcludes } },
     { key: 'OMIM_gene', spec: { header: 'Gene Name', groupIncludes: ['OMIM'] } },
     { key: 'OMIM_phenotypes', spec: { header: 'Phenotypes', groupIncludes: ['OMIM'] } },
     { key: 'HPO_Phenotype', spec: { header: 'HPO Terms', groupIncludes: ['OMIM'] } },
