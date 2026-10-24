@@ -454,6 +454,7 @@
         <option value="cmc">CMC</option>
         <option value="single">Single</option>
         <option value="couple">Couple</option>
+        <option value="trio">Trio</option>
         <option value="cnv">CNV Variants</option>
         <option value="robert">Dr. Robert</option>
       </select>
@@ -469,6 +470,8 @@
 
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="couple" hidden>Listed Variant Excel</button>
+
+    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="trio" hidden>Listed Variant Excel</button>
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cnv" hidden>Listed Variant Excel</button>
 
@@ -1562,6 +1565,42 @@
     { key: 'exonNumber', header: 'Exon' },
   ];
 
+  // Trio (father/mother/fetus) layout - the couple layout with a third
+  // sample: FATHER/MOTHER/FETUS genotype columns up front and one READ
+  // DEPTH/VAF/ALLELIC DEPTH block per sample, in the same father/mother/
+  // fetus order (fields 1/2/3, see processTrioVarSeqWorkbook). Header text
+  // and order match the trio reference report exactly.
+  var TRIO_EXPORT_COLUMNS = [
+    { key: 'zygosity1', header: 'FATHER' },
+    { key: 'zygosity2', header: 'MOTHER' },
+    { key: 'zygosity3', header: 'FETUS' },
+    { key: 'inheritance', header: 'Inheritance' },
+    { key: 'gene', header: 'GENE' },
+    { key: 'variant', header: 'VARIANT' },
+    { key: 'proteinPos', header: 'PROTEIN POS' },
+    { key: 'acmg', header: 'ACMG' },
+    { key: 'franklin', header: 'FRANKLIN' },
+    { key: 'clinvar', header: 'CLINVAR' },
+    { key: 'cohort6060Count', header: 'Cohort 6060 Sample Count' },
+    { key: 'cohort6060SampleNames', header: 'Cohort 6060 Sample Names' },
+    { key: 'readDepths1', header: 'READ DEPTH' },
+    { key: 'vaf1', header: 'VAF(%)' },
+    { key: 'alleleDepths1', header: 'ALLELIC DEPTH' },
+    { key: 'readDepths2', header: 'READ DEPTH' },
+    { key: 'vaf2', header: 'VAF(%)' },
+    { key: 'alleleDepths2', header: 'ALLELIC DEPTH' },
+    { key: 'readDepths3', header: 'READ DEPTH' },
+    { key: 'vaf3', header: 'VAF(%)' },
+    { key: 'alleleDepths3', header: 'ALLELIC DEPTH' },
+  ].concat(COUPLE_EXPORT_COLUMNS.slice(COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'omimIdField'; })).map(function (c) {
+    return { key: c.key, header: c.header };
+  }));
+
+  // Header fill per sample in the trio export, keyed by the field suffix
+  // (1 = father, 2 = mother, 3 = fetus) - the reference report colors each
+  // sample's genotype column and depth block to match.
+  var TRIO_SAMPLE_HEADER_FILLS = { '1': 'FF00B0F0', '2': 'FFFF00FF', '3': 'FFE46C0A' };
+
   // CNV report layout - a curated subset of the raw CNV caller export's ~30
   // columns (see processCnvWorkbook). Several raw columns (Common CNV freq,
   // IDs and % overlap, the per-copy-state CN0_freq..CN8_freq counts) are
@@ -1588,6 +1627,7 @@
   ];
 
   var COUPLE_VARIANT_COLUMNS = [{ key: 'sNo', header: 'S.NO' }].concat(COUPLE_EXPORT_COLUMNS);
+  var TRIO_VARIANT_COLUMNS = [{ key: 'sNo', header: 'S.NO' }].concat(TRIO_EXPORT_COLUMNS);
 
   // COUPLE_VARIANT_COLUMNS is a separate array from COUPLE_EXPORT_COLUMNS (concat
   // copies references into a new array), so reordering the preview grid's columns
@@ -1600,9 +1640,17 @@
     COUPLE_EXPORT_COLUMNS.push.apply(COUPLE_EXPORT_COLUMNS, reordered);
   }
 
+  // Same as syncCoupleExportColumns, for the trio layout.
+  function syncTrioExportColumns() {
+    var reordered = TRIO_VARIANT_COLUMNS.filter(function (c) { return c.key !== 'sNo'; });
+    TRIO_EXPORT_COLUMNS.length = 0;
+    TRIO_EXPORT_COLUMNS.push.apply(TRIO_EXPORT_COLUMNS, reordered);
+  }
+
   function getVariantColumns(reportType) {
     if (reportType === 'single') return SINGLE_VARIANT_COLUMNS;
     if (reportType === 'couple') return COUPLE_VARIANT_COLUMNS;
+    if (reportType === 'trio') return TRIO_VARIANT_COLUMNS;
     if (reportType === 'cnv') return CNV_VARIANT_COLUMNS;
     if (reportType === 'robert') {
       // Built from ROBERT_COLUMNS (defined further down, near
@@ -3227,10 +3275,14 @@
     return { rows: rows, runName: runName, inhouseHematologyCount: inhouseHematologyCount };
   }
 
-  function processCoupleVarSeqWorkbook(workbook, maleGroupIndex) {
-    var sheet = workbook.worksheets[0];
-    if (!sheet) throw new Error('No worksheet found in the uploaded file.');
+  function extractSampleName(runName) {
+    if (!runName) return 'Sample';
+    var match = runName.match(/GEN_T[^_]*_spik_(\d+)[^_]*_(.+?)(?:_\d+)?$/);
+    if (match) return 'GEN_T_2.0.spik_' + match[1] + '_' + match[2].toUpperCase();
+    return runName;
+  }
 
+  function processCoupleVarSeqWorkbook(workbook, maleGroupIndex) {
     // Which raw column-group (0 = first sample block in the file, 1 =
     // second) is the male partner - user-selected (see the couple upload
     // panel's gender dropdowns), since nothing in the raw VarSeq columns
@@ -3238,6 +3290,123 @@
     // the first group, matching the tool's previous (assumed) behavior.
     var maleIdx = (maleGroupIndex === 1) ? 1 : 0;
     var femaleIdx = maleIdx === 0 ? 1 : 0;
+
+    var result = processMultiSampleVarSeqWorkbook(workbook, function () {
+      return [{ groupIdx: maleIdx, isFemale: false }, { groupIdx: femaleIdx, isFemale: true }];
+    });
+    // Field "1" is always MALE and "2" is always FEMALE (see the export's
+    // fixed "MALE"/"FEMALE" column headers).
+    result.rows.forEach(function (r) {
+      r._hasMale = r._hasSample[0];
+      r._hasFemale = r._hasSample[1];
+    });
+
+    return {
+      rows: result.rows,
+      sample1Name: extractSampleName(result.sampleGroupTexts[0]),
+      sample2Name: extractSampleName(result.sampleGroupTexts[1]),
+    };
+  }
+
+  // Trio (father/mother/fetus) VarSeq export: one file, three sample
+  // column-groups. VarSeq labels each group by its pedigree role - e.g.
+  // "Proband (GEN_T_2.0.spik_6521AF_outfastp_R)", "Mother (...)", "Father
+  // (...)" - so roles are read from those labels; a file without them falls
+  // back to VarSeq's own trio order (proband, mother, father).
+  // Fields "1"/"2"/"3" are father/mother/fetus, matching TRIO_EXPORT_COLUMNS.
+  function processTrioVarSeqWorkbook(workbook) {
+    var roleGroupIdx = { proband: -1, mother: -1, father: -1 };
+    var result = processMultiSampleVarSeqWorkbook(workbook, function (groupTexts) {
+      if (groupTexts.length < 3) {
+        throw new Error('Expected 3 sample column-groups (father, mother, fetus) but found ' + groupTexts.length + '.');
+      }
+      groupTexts.forEach(function (text, i) {
+        var m = String(text || '').match(/^\s*(proband|mother|father)\b/i);
+        if (m && roleGroupIdx[m[1].toLowerCase()] === -1) roleGroupIdx[m[1].toLowerCase()] = i;
+      });
+      if (roleGroupIdx.proband === -1 || roleGroupIdx.mother === -1 || roleGroupIdx.father === -1) {
+        roleGroupIdx = { proband: 0, mother: 1, father: 2 };
+      }
+      // The fetus's sex isn't known from the file - isFemale false keeps the
+      // existing unknown-sex X-linked HOM->HEMI behavior.
+      return [
+        { groupIdx: roleGroupIdx.father, isFemale: false },
+        { groupIdx: roleGroupIdx.mother, isFemale: true },
+        { groupIdx: roleGroupIdx.proband, isFemale: false },
+      ];
+    }, { acmgPriority: [2, 1, 0] });
+
+    result.rows.forEach(function (r) {
+      r._hasFather = r._hasSample[0];
+      r._hasMother = r._hasSample[1];
+      r._hasFetus = r._hasSample[2];
+      // Fetus carries it but neither parent does - flagged the same way the
+      // trio report marks it by hand.
+      if (r._hasFetus && !r._hasFather && !r._hasMother) {
+        r.inheritance = r.inheritance ? r.inheritance + ' (DENOVO)' : 'DENOVO';
+      }
+    });
+    var rows = orderTrioRows(result.rows);
+    rows.forEach(function (row, i) { row.sNo = i + 1; });
+
+    // Short sample code (e.g. "6521AF" from "...spik_6521AF_outfastp_R") for
+    // the report title, in fetus/father/mother order.
+    function sampleCode(groupText) {
+      var inner = String(groupText || '').replace(/^[^(]*\(|\)\s*$/g, '');
+      var m = inner.match(/spik_([^_]+)/i);
+      return m ? m[1] : inner;
+    }
+    return {
+      rows: rows,
+      fatherCode: sampleCode(result.sampleGroupTexts[0]),
+      motherCode: sampleCode(result.sampleGroupTexts[1]),
+      fetusCode: sampleCode(result.sampleGroupTexts[2]),
+    };
+  }
+
+  // Trio report order: variants the fetus inherited from the mother, then de
+  // novo (fetus only), then inherited from the father, then parent-only
+  // carriers (both parents, mother only, father only). Within each group the
+  // source order is kept, except that every row for a gene is pulled up next
+  // to that gene's first row, so e.g. a compound-het pair (one maternal, one
+  // paternal allele) reads together.
+  function orderTrioRows(rows) {
+    function category(r) {
+      if (r._hasFetus && r._hasMother) return 0;
+      if (r._hasFetus && !r._hasFather) return 1;
+      if (r._hasFetus) return 2;
+      if (r._hasMother && r._hasFather) return 3;
+      if (r._hasMother) return 4;
+      return 5;
+    }
+    var byCategory = rows.map(function (r, i) { return { r: r, i: i, c: category(r) }; });
+    byCategory.sort(function (a, b) { return (a.c - b.c) || (a.i - b.i); });
+    var sorted = byCategory.map(function (e) { return e.r; });
+
+    function geneKey(r) { return String(r.gene || '').trim().toUpperCase(); }
+    var ordered = [];
+    var seenGenes = {};
+    sorted.forEach(function (r) {
+      var g = geneKey(r);
+      if (seenGenes[g]) return;
+      seenGenes[g] = true;
+      sorted.forEach(function (other) { if (geneKey(other) === g) ordered.push(other); });
+    });
+    return ordered;
+  }
+
+  // Shared parser for VarSeq exports carrying several samples' column-groups
+  // in one file (couple, trio): one row per variant, each sample's genotype
+  // fields side by side as zygosity1/readDepths1/vaf1/alleleDepths1,
+  // zygosity2/..., in the order resolveSamples returns them.
+  // resolveSamples(groupTexts) gets every sample group's label (in raw file
+  // order) and returns [{ groupIdx, isFemale }] - one entry per output sample.
+  // opts.acmgPriority: which output samples' own ACMG blocks to prefer, in
+  // order, when the file carries per-sample ACMG blocks (default: output order).
+  function processMultiSampleVarSeqWorkbook(workbook, resolveSamples, opts) {
+    opts = opts || {};
+    var sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found in the uploaded file.');
 
     var groupRow = sheet.getRow(1);
     var headerRow = sheet.getRow(2);
@@ -3274,7 +3443,9 @@
     // column belonging to one partner shares that partner's own group-header
     // text (the sample ID merged across their whole block), resolve each
     // partner's column by group membership instead of raw position.
-    var sampleGroupTexts = [groupHeaderAt(readDepthCols[0]), groupHeaderAt(readDepthCols[1])];
+    var sampleGroupTexts = readDepthCols.map(groupHeaderAt);
+    var samples = resolveSamples(sampleGroupTexts);
+    var acmgPriority = opts.acmgPriority || samples.map(function (s, i) { return i; });
 
     var rows = [];
     sheet.eachRow(function (row, r) {
@@ -3324,44 +3495,41 @@
       var gene = geneList[0];
       if (!gene) return;
 
-      // "1"/"male" fields always come from whichever raw column-group the
-      // user designated as male (maleIdx), "2"/"female" from the other -
-      // not from raw file order, since the file itself doesn't say which
-      // sample is which sex.
-      var rawZygosity1 = getNth('zygosity', maleIdx);
-      var rawZygosity2 = getNth('zygosity', femaleIdx);
-      var readDepths1 = getNth('readDepths', maleIdx);
-      var readDepths2 = getNth('readDepths', femaleIdx);
-      var vaf1 = getNth('vaf', maleIdx);
-      var vaf2 = getNth('vaf', femaleIdx);
-      var alleleDepths1 = getNth('alleleDepths', maleIdx);
-      var alleleDepths2 = getNth('alleleDepths', femaleIdx);
-      // Some exports skip the "Zygosity" column entirely - fall back to
-      // whether that partner has any read depth/allele depth/VAF at all,
-      // since that's what actually indicates a call was made for them.
-      var hasCall1 = !!(rawZygosity1 || readDepths1 || alleleDepths1 || vaf1);
-      var hasCall2 = !!(rawZygosity2 || readDepths2 || alleleDepths2 || vaf2);
-      if (!hasCall1 && !hasCall2) return;
+      // Output sample "1"/"2"/... fields always come from whichever raw
+      // column-group resolveSamples mapped them to (e.g. the user-designated
+      // male group for a couple) - not from raw file order, since the file
+      // itself doesn't say which sample is which sex.
+      var calls = samples.map(function (s) {
+        var c = {
+          zygosity: getNth('zygosity', s.groupIdx),
+          readDepths: getNth('readDepths', s.groupIdx),
+          vaf: getNth('vaf', s.groupIdx),
+          alleleDepths: getNth('alleleDepths', s.groupIdx),
+        };
+        // Some exports skip the "Zygosity" column entirely - fall back to
+        // whether that sample has any read depth/allele depth/VAF at all,
+        // since that's what actually indicates a call was made for them.
+        c.hasCall = !!(c.zygosity || c.readDepths || c.alleleDepths || c.vaf);
+        return c;
+      });
+      if (!calls.some(function (c) { return c.hasCall; })) return;
 
       // ACMG classification is usually one "Variant Site ACMG Classifier"
-      // block shared by both partners (acmgClass's preferred spec matches
-      // just that), but some exports only carry a per-partner "ACMG Sample
+      // block shared by every sample (acmgClass's preferred spec matches
+      // just that), but some exports only carry a per-sample "ACMG Sample
       // Classifier for <run>" block for each of them instead - those match
-      // positionally the same way zygosity/read depths above do (index 0 =
-      // partner 1, index 1 = partner 2). When two such blocks were found,
-      // read each partner's own block rather than defaulting to whichever
-      // came first in the sheet, so a female-only (or male-only) variant
-      // still gets its classification instead of reading a blank cell from
-      // the other partner's block.
+      // by group the same way zygosity/read depths above do. When several
+      // such blocks were found, read the block of a sample that actually
+      // carries the variant (first in acmgPriority with a value) rather than
+      // defaulting to whichever came first in the sheet, so a female-only
+      // (or male-only) variant still gets its classification instead of
+      // reading a blank cell from another sample's block.
       var acmgList;
       if ((colsAll.acmgClass || []).length >= 2) {
-        var acmgList1 = splitList(getNth('acmgClass', maleIdx));
-        var acmgList2 = splitList(getNth('acmgClass', femaleIdx));
-        if (hasCall1 && hasCall2) {
-          acmgList = acmgList1[0] ? acmgList1 : acmgList2;
-        } else {
-          acmgList = hasCall1 ? acmgList1 : acmgList2;
-        }
+        acmgPriority.forEach(function (i) {
+          if (!calls[i].hasCall || (acmgList && acmgList[0])) return;
+          acmgList = splitList(getNth('acmgClass', samples[i].groupIdx));
+        });
       } else {
         acmgList = splitList(get('acmgClass'));
       }
@@ -3393,8 +3561,7 @@
         sNo: '',
         chrPos: chrPos || '',
         refAlt: refAlt || '',
-        _hasMale: hasCall1,
-        _hasFemale: hasCall2,
+        _hasSample: calls.map(function (c) { return c.hasCall; }),
         clinvar: clinvarValue,
         inheritance: abbreviateInheritanceGrouped(get('omimInheritance')),
         phenoRank: get('phenoRank'),
@@ -3442,9 +3609,31 @@
 
       indices.forEach(function (idx, n) {
         var g = geneList[n], v = variantList[n], p = proteinPosList[n];
-        var ownVaf1 = pickPerGeneValue(vaf1, indices, n);
-        var ownVaf2 = pickPerGeneValue(vaf2, indices, n);
-        rows.push(Object.assign({}, sharedFields, {
+        // Per-sample fields, suffixed by output position (1, 2, ...). Only
+        // samples not flagged isFemale are eligible for the HOM->HEMI
+        // X-linked override, since a homozygous call at an X-linked locus is
+        // only a hemizygous artifact for a single-X (male) sample. A sample
+        // with no call shows "-", as in the target report templates.
+        var perSampleFields = {};
+        calls.forEach(function (c, i) {
+          var s = i + 1;
+          var isFemale = samples[i].isFemale;
+          if (!c.hasCall) {
+            perSampleFields['zygosity' + s] = '-';
+            perSampleFields['readDepths' + s] = '-';
+            perSampleFields['vaf' + s] = '-';
+            perSampleFields['alleleDepths' + s] = '-';
+            return;
+          }
+          var ownVaf = pickPerGeneValue(c.vaf, indices, n);
+          perSampleFields['zygosity' + s] = c.zygosity
+            ? abbreviateZygosity(pickPerGeneValue(c.zygosity, indices, n), inheritanceCodes, isFemale)
+            : (deriveZygosityFromDepths(pickPerGeneDepthPair(c.alleleDepths, indices, n), ownVaf, isXLinked, isFemale) || 'HET');
+          perSampleFields['readDepths' + s] = pickPerGeneValue(c.readDepths, indices, n);
+          perSampleFields['vaf' + s] = formatVafPercent(ownVaf);
+          perSampleFields['alleleDepths' + s] = pickPerGeneDepthPair(c.alleleDepths, indices, n);
+        });
+        rows.push(Object.assign({}, sharedFields, perSampleFields, {
           gene: g,
           variant: v,
           proteinPos: p,
@@ -3452,19 +3641,6 @@
           franklin: lookupFranklin(g, v),
           _franklinUrl: null,
           _multiGeneGroupId: multiGeneGroupId,
-          // Field "1" is always MALE and "2" is always FEMALE (see the export's
-          // fixed "MALE"/"FEMALE" column headers) - only the male side is
-          // eligible for the HOM->HEMI X-linked override, since a homozygous
-          // call at an X-linked locus is only a hemizygous artifact for a
-          // single-X (male) sample.
-          zygosity1: hasCall1 ? (rawZygosity1 ? abbreviateZygosity(pickPerGeneValue(rawZygosity1, indices, n), inheritanceCodes, false) : (deriveZygosityFromDepths(pickPerGeneDepthPair(alleleDepths1, indices, n), ownVaf1, isXLinked, false) || 'HET')) : '-',
-          readDepths1: hasCall1 ? pickPerGeneValue(readDepths1, indices, n) : '-',
-          vaf1: hasCall1 ? formatVafPercent(ownVaf1) : '-',
-          alleleDepths1: hasCall1 ? pickPerGeneDepthPair(alleleDepths1, indices, n) : '-',
-          zygosity2: hasCall2 ? (rawZygosity2 ? abbreviateZygosity(pickPerGeneValue(rawZygosity2, indices, n), inheritanceCodes, true) : (deriveZygosityFromDepths(pickPerGeneDepthPair(alleleDepths2, indices, n), ownVaf2, isXLinked, true) || 'HET')) : '-',
-          readDepths2: hasCall2 ? pickPerGeneValue(readDepths2, indices, n) : '-',
-          vaf2: hasCall2 ? formatVafPercent(ownVaf2) : '-',
-          alleleDepths2: hasCall2 ? pickPerGeneDepthPair(alleleDepths2, indices, n) : '-',
           // Preserve any hyperlinks the source VarSeq cells carried so
           // preview/export can render them as real links. Most keys already
           // match the row field name; the renamed ones are re-mapped here.
@@ -3500,17 +3676,9 @@
 
     rows.forEach(function (row, i) { row.sNo = i + 1; });
 
-    function extractSampleName(runName) {
-      if (!runName) return 'Sample';
-      var match = runName.match(/GEN_T[^_]*_spik_(\d+)[^_]*_(.+?)(?:_\d+)?$/);
-      if (match) return 'GEN_T_2.0.spik_' + match[1] + '_' + match[2].toUpperCase();
-      return runName;
-    }
-
     return {
       rows: rows,
-      sample1Name: extractSampleName(groupHeaderAt(readDepthCols[maleIdx])),
-      sample2Name: extractSampleName(groupHeaderAt(readDepthCols[femaleIdx])),
+      sampleGroupTexts: samples.map(function (s) { return sampleGroupTexts[s.groupIdx] || ''; }),
     };
   }
 
@@ -4474,6 +4642,117 @@
     return { combinedRows: combinedRows, compoundRows: compoundRows, sample1Rows: sample1Rows, sample2Rows: sample2Rows };
   }
 
+  // Writes one titled section (title row, header row, data rows) of a
+  // couple/trio "Listed Variants" sheet, returning the next free row - shared
+  // so both layouts get identical per-cell formatting. style.titleAlign,
+  // style.titleFill (non-highlighted titles) and style.headerFill(column)
+  // override the couple defaults (centered unfilled title, navy header fill).
+  function writeMultiSampleSection(sheet, columns, startRow, title, sectionRows, highlightTitle, style) {
+    style = style || {};
+    var franklinColIdx = columns.findIndex(function (c) { return c.key === 'franklin'; });
+    var clinvarColIdx = columns.findIndex(function (c) { return c.key === 'clinvar'; });
+    var homoColIdxs = columns.reduce(function (acc, c, i) {
+      if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
+      return acc;
+    }, []);
+    var vafColIdxs = columns.reduce(function (acc, c, i) {
+      if (/^vaf\d+$/.test(c.key)) acc.push(i);
+      return acc;
+    }, []);
+    var alleleDepthColIdxs = columns.reduce(function (acc, c, i) {
+      if (/^alleleDepths\d+$/.test(c.key)) acc.push(i);
+      return acc;
+    }, []);
+    var zygosityColIdxs = columns.reduce(function (acc, c, i) {
+      if (/^zygosity\d+$/.test(c.key)) acc.push(i);
+      return acc;
+    }, []);
+
+    sheet.getRow(startRow).getCell(1).value = title;
+    sheet.mergeCells(startRow, 1, startRow, columns.length);
+    if (highlightTitle) {
+      sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12, color: { argb: 'FF9C0006' } };
+      sheet.getRow(startRow).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
+    } else {
+      sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12 };
+      if (style.titleFill) sheet.getRow(startRow).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: style.titleFill } };
+    }
+    sheet.getRow(startRow).getCell(1).alignment = { horizontal: style.titleAlign || 'center', vertical: 'middle' };
+    var headerRowIdx = startRow + 1;
+    var headerRow = sheet.getRow(headerRowIdx);
+    columns.forEach(function (c, i) {
+      var cell = headerRow.getCell(i + 1);
+      cell.value = c.header;
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: (style.headerFill && style.headerFill(c)) || 'FF1F4E79' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    sectionRows.forEach(function (row, i) {
+      var dataRow = sheet.getRow(headerRowIdx + 1 + i);
+      columns.forEach(function (c, colIdx) {
+        var cell = dataRow.getCell(colIdx + 1);
+        var link = row._hyperlinks && row._hyperlinks[c.key];
+        var val = row[c.key];
+        if (link && val != null && val !== '') {
+          cell.value = { text: val, hyperlink: link };
+          cell.font = { color: { argb: 'FF0563C1' }, underline: true };
+        } else {
+          cell.value = val;
+        }
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        // The Secondary Findings section reuses highlightTitle to also tint
+        // its data rows, matching the CMC/single export and preview grid.
+        if (highlightTitle) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SECONDARY_FINDING_ROW_FILL } };
+      });
+      if (franklinColIdx >= 0) {
+        var fCell = dataRow.getCell(franklinColIdx + 1);
+        var fColor = franklinColor(row.franklin);
+        // Not bold - Excel applies one font to the whole cell, so a bold
+        // colored classification plus arrow reads as one heavy block of
+        // color. Keeping the color (still conveys the lean) but dropping
+        // the bold weight gives a lighter, more link-like result.
+        var fFont = fColor ? { color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
+        // Same link the preview's "↗" icon opens - the resolved variant URL
+        // once Franklin lookup finishes, or the generic Franklin home page
+        // as a fallback so the cell is still clickable either way.
+        fCell.value = { text: franklinDisplayText(row.franklin) + ' ↗', hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
+        fCell.font = fFont;
+      }
+      // Pathogenic/Likely Pathogenic CLINVAR text is flagged red - the
+      // cell's hyperlink (set above) is left exactly as it was; only the
+      // font color changes, keeping the underline if it was already a link.
+      if (clinvarColIdx >= 0 && isClinVarPathogenicText(row.clinvar)) {
+        var cvCell = dataRow.getCell(clinvarColIdx + 1);
+        var cvHadLink = !!(row._hyperlinks && row._hyperlinks.clinvar && row.clinvar != null && row.clinvar !== '');
+        cvCell.font = { color: { argb: 'FFC2293A' }, underline: cvHadLink };
+      }
+      homoColIdxs.forEach(function (colIdx) {
+        var val = row[columns[colIdx].key];
+        if (val != null && val !== '' && Number(val) > 0) {
+          dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
+        }
+      });
+      vafColIdxs.forEach(function (colIdx) {
+        var val = row[columns[colIdx].key];
+        if (val != null && val !== '' && vafAsFraction(val) < 0.2) {
+          dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
+        }
+      });
+      alleleDepthColIdxs.forEach(function (colIdx) {
+        var cell = dataRow.getCell(colIdx + 1);
+        var richValue = alleleDepthRichText(row[columns[colIdx].key]);
+        if (richValue && richValue.richText) cell.value = richValue;
+      });
+      zygosityColIdxs.forEach(function (colIdx) {
+        var val = String(row[columns[colIdx].key] || '').trim().toUpperCase();
+        if (val === 'HOM' || val === 'HEMI') {
+          dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
+        }
+      });
+    });
+    return headerRowIdx + 1 + sectionRows.length;
+  }
+
   // Builds the three-section couple Excel: section 1 lists rows for genes
   // where both partners carry a variant (see splitCoupleRowsByGene), section
   // 2 lists variants only partner 1 carries, section 3 only those partner 2
@@ -4486,108 +4765,8 @@
     var sheet = workbook.addWorksheet('Listed Variants');
     COUPLE_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
 
-    var franklinColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'franklin'; });
-    var clinvarColIdx = COUPLE_EXPORT_COLUMNS.findIndex(function (c) { return c.key === 'clinvar'; });
-    var homoColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
-      if (c.key === 'gnomadGenome4SAHomo' || c.key === 'gnomadExome4SAHomo') acc.push(i);
-      return acc;
-    }, []);
-    var vafColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
-      if (c.key === 'vaf1' || c.key === 'vaf2') acc.push(i);
-      return acc;
-    }, []);
-    var alleleDepthColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
-      if (c.key === 'alleleDepths1' || c.key === 'alleleDepths2') acc.push(i);
-      return acc;
-    }, []);
-    var zygosityColIdxs = COUPLE_EXPORT_COLUMNS.reduce(function (acc, c, i) {
-      if (c.key === 'zygosity1' || c.key === 'zygosity2') acc.push(i);
-      return acc;
-    }, []);
-
     function writeSection(startRow, title, sectionRows, highlightTitle) {
-      sheet.getRow(startRow).getCell(1).value = title;
-      sheet.mergeCells(startRow, 1, startRow, COUPLE_EXPORT_COLUMNS.length);
-      if (highlightTitle) {
-        sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12, color: { argb: 'FF9C0006' } };
-        sheet.getRow(startRow).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
-      } else {
-        sheet.getRow(startRow).getCell(1).font = { bold: true, size: 12 };
-      }
-      sheet.getRow(startRow).getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-      var headerRowIdx = startRow + 1;
-      var headerRow = sheet.getRow(headerRowIdx);
-      COUPLE_EXPORT_COLUMNS.forEach(function (c, i) {
-        var cell = headerRow.getCell(i + 1);
-        cell.value = c.header;
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      });
-      sectionRows.forEach(function (row, i) {
-        var dataRow = sheet.getRow(headerRowIdx + 1 + i);
-        COUPLE_EXPORT_COLUMNS.forEach(function (c, colIdx) {
-          var cell = dataRow.getCell(colIdx + 1);
-          var link = row._hyperlinks && row._hyperlinks[c.key];
-          var val = row[c.key];
-          if (link && val != null && val !== '') {
-            cell.value = { text: val, hyperlink: link };
-            cell.font = { color: { argb: 'FF0563C1' }, underline: true };
-          } else {
-            cell.value = val;
-          }
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-          // The Secondary Findings section reuses highlightTitle to also tint
-          // its data rows, matching the CMC/single export and preview grid.
-          if (highlightTitle) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SECONDARY_FINDING_ROW_FILL } };
-        });
-        if (franklinColIdx >= 0) {
-          var fCell = dataRow.getCell(franklinColIdx + 1);
-          var fColor = franklinColor(row.franklin);
-          // Not bold - Excel applies one font to the whole cell, so a bold
-          // colored classification plus arrow reads as one heavy block of
-          // color. Keeping the color (still conveys the lean) but dropping
-          // the bold weight gives a lighter, more link-like result.
-          var fFont = fColor ? { color: { argb: 'FF' + fColor.replace('#','').toUpperCase() } } : {};
-          // Same link the preview's "↗" icon opens - the resolved variant URL
-          // once Franklin lookup finishes, or the generic Franklin home page
-          // as a fallback so the cell is still clickable either way.
-          fCell.value = { text: franklinDisplayText(row.franklin) + ' ↗', hyperlink: row._franklinUrl || 'https://franklin.genoox.com/clinical-db/home' };
-          fCell.font = fFont;
-        }
-        // Pathogenic/Likely Pathogenic CLINVAR text is flagged red - the
-        // cell's hyperlink (set above) is left exactly as it was; only the
-        // font color changes, keeping the underline if it was already a link.
-        if (clinvarColIdx >= 0 && isClinVarPathogenicText(row.clinvar)) {
-          var cvCell = dataRow.getCell(clinvarColIdx + 1);
-          var cvHadLink = !!(row._hyperlinks && row._hyperlinks.clinvar && row.clinvar != null && row.clinvar !== '');
-          cvCell.font = { color: { argb: 'FFC2293A' }, underline: cvHadLink };
-        }
-        homoColIdxs.forEach(function (colIdx) {
-          var val = row[COUPLE_EXPORT_COLUMNS[colIdx].key];
-          if (val != null && val !== '' && Number(val) > 0) {
-            dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
-          }
-        });
-        vafColIdxs.forEach(function (colIdx) {
-          var val = row[COUPLE_EXPORT_COLUMNS[colIdx].key];
-          if (val != null && val !== '' && vafAsFraction(val) < 0.2) {
-            dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
-          }
-        });
-        alleleDepthColIdxs.forEach(function (colIdx) {
-          var cell = dataRow.getCell(colIdx + 1);
-          var richValue = alleleDepthRichText(row[COUPLE_EXPORT_COLUMNS[colIdx].key]);
-          if (richValue && richValue.richText) cell.value = richValue;
-        });
-        zygosityColIdxs.forEach(function (colIdx) {
-          var val = String(row[COUPLE_EXPORT_COLUMNS[colIdx].key] || '').trim().toUpperCase();
-          if (val === 'HOM' || val === 'HEMI') {
-            dataRow.getCell(colIdx + 1).font = { color: { argb: 'FFFF0000' } };
-          }
-        });
-      });
-      return headerRowIdx + 1 + sectionRows.length;
+      return writeMultiSampleSection(sheet, COUPLE_EXPORT_COLUMNS, startRow, title, sectionRows, highlightTitle);
     }
 
     // Pull ACMG Secondary Findings rows out first so they lead the report in
@@ -4614,6 +4793,39 @@
     nextRow = writeSection(nextRow, title1, sample1Rows);
     nextRow++; // blank separator row
     writeSection(nextRow, title2, sample2Rows);
+
+    return workbook.xlsx.writeBuffer();
+  }
+
+  // Builds the trio Excel, laid out like the trio reference report: an
+  // optional highlighted Secondary Findings section, then one section with
+  // every other variant (already in trio report order - see orderTrioRows).
+  // Each sample's genotype column and depth block gets that sample's own
+  // header color (TRIO_SAMPLE_HEADER_FILLS).
+  function buildTrioVariantExcel(rows, title, workbook) {
+    rows = rows.filter(function (r) { return !r._removed; });
+    workbook = workbook || new ExcelJS.Workbook();
+    var sheet = workbook.addWorksheet('Listed Variants');
+    TRIO_EXPORT_COLUMNS.forEach(function (c, i) { sheet.getColumn(i + 1).width = 18; });
+
+    var style = {
+      titleAlign: 'left',
+      titleFill: 'FF76923C',
+      headerFill: function (c) {
+        var m = c.key.match(/^(?:zygosity|readDepths|vaf|alleleDepths)(\d)$/);
+        return m ? TRIO_SAMPLE_HEADER_FILLS[m[1]] : null;
+      },
+    };
+
+    var secondaryRows = rows.filter(isSecondaryFindingRow);
+    var mainRows = rows.filter(function (r) { return !isSecondaryFindingRow(r); });
+
+    var startRow = 1;
+    if (secondaryRows.length) {
+      startRow = writeMultiSampleSection(sheet, TRIO_EXPORT_COLUMNS, startRow, 'Secondary Findings', secondaryRows, true, style);
+      startRow++; // blank separator row
+    }
+    writeMultiSampleSection(sheet, TRIO_EXPORT_COLUMNS, startRow, title, mainRows, false, style);
 
     return workbook.xlsx.writeBuffer();
   }
@@ -4907,17 +5119,17 @@
         if (isCellTruncated(e.target)) showCellPopover(e.target, e.target.value);
       });
       input.addEventListener('blur', hideCellPopover);
-      if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2') {
+      if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2' || c.key === 'vaf3') {
         input.style.color = (input.value !== '' && vafAsFraction(input.value) < vafLowThreshold(c.key)) ? '#c2293a' : '';
       }
       // A plain <input> can't color just the low number within a "ref,alt"
       // pair like the exported cell does - flag the whole box red instead as
       // an on-screen approximation of the export's per-number highlight.
-      if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') {
+      if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2' || c.key === 'alleleDepths3') {
         var adRich = alleleDepthRichText(input.value);
         input.style.color = (adRich && adRich.richText) ? '#c2293a' : '';
       }
-      if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') {
+      if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2' || c.key === 'zygosity3') {
         var zygUp = String(input.value || '').trim().toUpperCase();
         input.style.color = (zygUp === 'HOM' || zygUp === 'HEMI') ? '#c2293a' : '';
       }
@@ -4929,14 +5141,14 @@
         e.target.title = e.target.value;
         if (cellPopoverAnchor === e.target) showCellPopover(e.target, e.target.value);
         updateInheritanceColor();
-        if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2') {
+        if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2' || c.key === 'vaf3') {
           e.target.style.color = (e.target.value !== '' && vafAsFraction(e.target.value) < vafLowThreshold(c.key)) ? '#c2293a' : '';
         }
-        if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') {
+        if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2' || c.key === 'alleleDepths3') {
           var newAdRich = alleleDepthRichText(e.target.value);
           e.target.style.color = (newAdRich && newAdRich.richText) ? '#c2293a' : '';
         }
-        if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') {
+        if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2' || c.key === 'zygosity3') {
           var newZygUp = String(e.target.value || '').trim().toUpperCase();
           e.target.style.color = (newZygUp === 'HOM' || newZygUp === 'HEMI') ? '#c2293a' : '';
         }
@@ -5133,6 +5345,7 @@
     var previewItemForHeader = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
     buildGridHeaderRows(variantTableHead, columns, variantFrozenCols, function () { renderVariantTable(batchIdx); }, function () {
       if (currentReportType === 'couple') syncCoupleExportColumns();
+      if (currentReportType === 'trio') syncTrioExportColumns();
     }, inhouseHematologyHeaderOverrides(previewItemForHeader));
 
     variantTableBody.innerHTML = '';
@@ -5325,7 +5538,9 @@
           secondaryEntries.forEach(function (entry, i) {
             variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1, true));
           });
-          variantTableBody.appendChild(buildGridSectionHeaderRow('Listed Variants', columns.length));
+          var mainPreviewItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+          var mainSectionTitle = (currentReportType === 'trio' && mainPreviewItem && mainPreviewItem.title) || 'Listed Variants';
+          variantTableBody.appendChild(buildGridSectionHeaderRow(mainSectionTitle, columns.length));
         }
         mainEntries.forEach(function (entry, i) {
           variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
@@ -5416,15 +5631,15 @@
         return acc;
       }, []),
       vafColIdxs: columns.reduce(function (acc, c, i) {
-        if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2') acc.push(i);
+        if (c.key === 'vaf' || c.key === 'vafRaw' || c.key === 'vaf1' || c.key === 'vaf2' || c.key === 'vaf3') acc.push(i);
         return acc;
       }, []),
       alleleDepthColIdxs: columns.reduce(function (acc, c, i) {
-        if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2') acc.push(i);
+        if (c.key === 'alleleDepths' || c.key === 'alleleDepths1' || c.key === 'alleleDepths2' || c.key === 'alleleDepths3') acc.push(i);
         return acc;
       }, []),
       zygosityColIdxs: columns.reduce(function (acc, c, i) {
-        if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2') acc.push(i);
+        if (c.key === 'zygosity' || c.key === 'zygosity1' || c.key === 'zygosity2' || c.key === 'zygosity3') acc.push(i);
         return acc;
       }, []),
     };
@@ -5643,6 +5858,19 @@
         makeCoupleTitleInput('title1', 'Partner 1 section title');
         makeCoupleTitleInput('title2', 'Partner 2 section title');
         div.appendChild(coupleTitleGroup);
+      } else if (item.reportType === 'trio') {
+        // Same reason as couple: the auto title (fetus/father/mother codes)
+        // can be edited to add details not present in the VarSeq file.
+        var trioTitleInput = document.createElement('input');
+        trioTitleInput.type = 'text';
+        trioTitleInput.className = 'batch-item-title';
+        trioTitleInput.value = item.title || '';
+        trioTitleInput.placeholder = 'Report section title';
+        trioTitleInput.addEventListener('input', function (e) {
+          variantBatch[idx].title = e.target.value;
+          if (idx === variantPreviewIdx) renderVariantTable(idx);
+        });
+        div.appendChild(trioTitleInput);
       }
       // Per-item report-title editing (non-couple) and the per-item "Excel"
       // download button were removed: downloading and file naming now happen
@@ -5833,6 +6061,10 @@
   function buildExportWorkbook(item) {
     if (item.rawBuffer) {
       return loadWorkbookFromBuffer(item.rawBuffer).then(function (workbook) {
+        // Only the raw data sheet is kept - an upload that's itself an
+        // earlier export of this app already carries a "Listed Variants"
+        // sheet, which would clash with the one the caller adds.
+        workbook.worksheets.slice(1).forEach(function (extra) { workbook.removeWorksheet(extra.id); });
         var sheet = workbook.worksheets[0];
         if (sheet) {
           sheet.name = 'Complete Data';
@@ -5885,6 +6117,9 @@
     }).then(function (workbook) {
       if (item.reportType === 'couple') {
         return buildCoupleVariantExcel(item.rows, item.title, item.title1, item.title2, workbook);
+      }
+      if (item.reportType === 'trio') {
+        return buildTrioVariantExcel(item.rows, item.title, workbook);
       }
       if (item.reportType === 'robert' && item.isRobertCouple) {
         var robertSplit = splitRobertCoupleRows(item.rows);
@@ -6016,6 +6251,22 @@
               rawBuffer: rawBuffer,
               runName: '',
               title: listedTitle,
+              loadedAt: new Date().toLocaleDateString(),
+              error: null
+            };
+          }
+
+          if (currentReportType === 'trio') {
+            // Trio file: father/mother/fetus column-groups in one VarSeq
+            // export, roles read from VarSeq's own group labels (see
+            // processTrioVarSeqWorkbook).
+            var trioResult = processTrioVarSeqWorkbook(workbook);
+            return {
+              fileName: file.name,
+              rows: trioResult.rows,
+              rawBuffer: rawBuffer,
+              runName: '',
+              title: 'LISTED VARIANTS FOR ' + [trioResult.fetusCode, trioResult.fatherCode, trioResult.motherCode].join('_'),
               loadedAt: new Date().toLocaleDateString(),
               error: null
             };
