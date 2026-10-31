@@ -770,11 +770,13 @@
   if (coupleGenderSelect1) {
     coupleGenderSelect1.addEventListener('change', function () {
       setCoupleMaleGroupIndex(coupleGenderSelect1.value === 'male' ? 0 : 1);
+      reprocessGenderSensitiveBatchItems();
     });
   }
   if (coupleGenderSelect2) {
     coupleGenderSelect2.addEventListener('change', function () {
       setCoupleMaleGroupIndex(coupleGenderSelect2.value === 'male' ? 1 : 0);
+      reprocessGenderSensitiveBatchItems();
     });
   }
   paintGenderSelects();
@@ -6140,6 +6142,141 @@
     });
   }
 
+  // Dr. Robert's template reads a standard VarSeq SNV export (same 2-row
+  // group+header layout single/CMC/couple all read) into his own
+  // ~100-column per-variant shape - handled separately since its export is a
+  // 6-sheet workbook (buildRobertVariantExcel), not the usual single "Listed
+  // Variants" sheet. A couple file (two sample column-groups) produces two
+  // full 6-sheet sets, one per partner - see processRobertWorkbook.
+  //
+  // A file that's already this app's OWN exported "Listed Variants" sheet
+  // (single/CMC output, re-uploaded here instead of the raw VarSeq export) is
+  // handled by a separate, much narrower parser - see
+  // processRobertSignificantVariantsWorkbook. Single-person only; that format
+  // has no per-partner column groups to detect a couple file from.
+  //
+  // Extracted out of the upload handler so reprocessGenderSensitiveBatchItems
+  // can re-run this same logic (with the current coupleMaleGroupIndex) when
+  // the male/female dropdowns change, without duplicating it.
+  function buildRobertUploadResult(workbook, file, rawBuffer) {
+    if (looksLikeSignificantVariantsListWorkbook(workbook)) {
+      var sigVarResult = processRobertSignificantVariantsWorkbook(workbook);
+      var sigVarTitle = extractPatientTitle(file.name, '');
+      return {
+        fileName: file.name,
+        rows: sigVarResult.rows,
+        rawBuffer: rawBuffer,
+        runName: '',
+        title: sigVarTitle,
+        patientName: sigVarTitle.replace(/^LISTED VARIANTS FOR /, ''),
+        loadedAt: new Date().toLocaleDateString(),
+        error: null
+      };
+    }
+    var robertMaleIdx = coupleMaleGroupIndex;
+    var robertResult = processRobertWorkbook(workbook, robertMaleIdx);
+    if (robertResult.isCouple) {
+      var robertFemaleIdx = robertMaleIdx === 0 ? 1 : 0;
+      var robertCoupleNames = extractCoupleNamesFromFilename(file.name);
+      var robertName1 = robertCoupleNames[robertMaleIdx] || 'Male';
+      var robertName2 = robertCoupleNames[robertFemaleIdx] || 'Female';
+      robertResult.maleRows.forEach(function (r) { r._robertPartner = 'male'; });
+      robertResult.femaleRows.forEach(function (r) { r._robertPartner = 'female'; });
+      return {
+        fileName: file.name,
+        // One combined list so the shared preview machinery (soft delete, row
+        // numbering) works the same as every other template - split back
+        // into maleRows/femaleRows by _robertPartner at render/export time
+        // (see splitRobertCoupleRows).
+        rows: robertResult.maleRows.concat(robertResult.femaleRows),
+        rawBuffer: rawBuffer,
+        runName: '',
+        isRobertCouple: true,
+        title: 'LISTED VARIANTS FOR ' + robertName1 + '_' + robertName2,
+        patientName: robertName1,
+        patientName2: robertName2,
+        loadedAt: new Date().toLocaleDateString(),
+        error: null
+      };
+    }
+    var robertTitle = extractPatientTitle(file.name, '');
+    return {
+      fileName: file.name,
+      rows: robertResult.rows,
+      rawBuffer: rawBuffer,
+      runName: '',
+      title: robertTitle,
+      patientName: robertTitle.replace(/^LISTED VARIANTS FOR /, ''),
+      loadedAt: new Date().toLocaleDateString(),
+      error: null
+    };
+  }
+
+  // Couple mode: one row per variant, both partners' genotype fields side by
+  // side. Export splits this into two per-sample sections. Extracted out of
+  // the upload handler for the same reason as buildRobertUploadResult above.
+  function buildCoupleUploadResult(workbook, file, rawBuffer) {
+    var maleIdx = coupleMaleGroupIndex;
+    var femaleIdx = maleIdx === 0 ? 1 : 0;
+    var result = processCoupleVarSeqWorkbook(workbook, maleIdx);
+    // Filename-parsed names follow the same raw column order as the sheet
+    // (first name = first column-group) - map them through the same
+    // male/female selection the user made for the columns.
+    var coupleNames = extractCoupleNamesFromFilename(file.name);
+    var name1 = coupleNames[maleIdx] || result.sample1Name;
+    var name2 = coupleNames[femaleIdx] || result.sample2Name;
+    return {
+      fileName: file.name,
+      rows: result.rows,
+      rawBuffer: rawBuffer,
+      runName: '',
+      title: 'LISTED VARIANTS FOR ' + name1 + '_' + name2,
+      title1: 'LISTED VARIANTS FOR ' + name1,
+      title2: 'LISTED VARIANTS FOR ' + name2,
+      loadedAt: new Date().toLocaleDateString(),
+      error: null
+    };
+  }
+
+  // The gender dropdowns only mean anything for a raw VarSeq couple file (two
+  // sample column-groups) - re-deriving which one is male/female changes
+  // every row and section title, not just a display label. Previously,
+  // flipping the dropdown after upload only updated coupleMaleGroupIndex for
+  // the *next* upload - an already-loaded couple/Dr. Robert item kept
+  // whatever assignment it was first processed with, so the preview looked
+  // like it had male/female backwards relative to the dropdown's current
+  // state, when really the dropdown change just hadn't been applied yet.
+  // Re-runs the same upload logic against each already-loaded couple/Dr.
+  // Robert item's own retained rawBuffer, with the current
+  // coupleMaleGroupIndex, and replaces its rows/titles in place. A
+  // single-person item (couple-shaped detection failed, or Dr. Robert's own
+  // significant-variants-list format) is unaffected either way, since
+  // coupleMaleGroupIndex plays no part in how it was built.
+  function reprocessGenderSensitiveBatchItems() {
+    var affected = variantBatch.filter(function (item) {
+      return (item.reportType === 'couple' || item.reportType === 'robert') && item.rawBuffer;
+    });
+    if (!affected.length) return;
+    Promise.all(affected.map(function (item) {
+      return loadWorkbookFromBuffer(item.rawBuffer).then(function (workbook) {
+        var fakeFile = { name: item.fileName };
+        if (item.reportType === 'robert') {
+          Object.assign(item, buildRobertUploadResult(workbook, fakeFile, item.rawBuffer));
+          return;
+        }
+        var sheet = workbook.worksheets[0];
+        var groupRow = sheet.getRow(1);
+        var headerRow = sheet.getRow(2);
+        var readDepthCols = findVarSeqColumns(groupRow, headerRow, effectiveVarSeqColCount(sheet, groupRow, headerRow), VARSEQ_COLUMN_SPECS.readDepths);
+        if (readDepthCols.length >= 2) {
+          Object.assign(item, buildCoupleUploadResult(workbook, fakeFile, item.rawBuffer));
+        }
+      });
+    })).then(function () {
+      renderVariantTable();
+    });
+  }
+
   variantFileInput.addEventListener('change', function (e) {
     var files = e.target.files;
     if (!files || !files.length) return;
@@ -6175,72 +6312,7 @@
           }
 
           if (currentReportType === 'robert') {
-            // Dr. Robert's template reads a standard VarSeq SNV export (same
-            // 2-row group+header layout single/CMC/couple all read) into his
-            // own ~100-column per-variant shape - handled separately since
-            // its export is a 6-sheet workbook (buildRobertVariantExcel), not
-            // the usual single "Listed Variants" sheet. A couple file (two
-            // sample column-groups) produces two full 6-sheet sets, one per
-            // partner - see processRobertWorkbook.
-            //
-            // A file that's already this app's OWN exported "Listed
-            // Variants" sheet (single/CMC output, re-uploaded here instead of
-            // the raw VarSeq export) is handled by a separate, much narrower
-            // parser - see processRobertSignificantVariantsWorkbook. Single-
-            // person only; that format has no per-partner column groups to
-            // detect a couple file from.
-            if (looksLikeSignificantVariantsListWorkbook(workbook)) {
-              var sigVarResult = processRobertSignificantVariantsWorkbook(workbook);
-              var sigVarTitle = extractPatientTitle(file.name, '');
-              return {
-                fileName: file.name,
-                rows: sigVarResult.rows,
-                rawBuffer: rawBuffer,
-                runName: '',
-                title: sigVarTitle,
-                patientName: sigVarTitle.replace(/^LISTED VARIANTS FOR /, ''),
-                loadedAt: new Date().toLocaleDateString(),
-                error: null
-              };
-            }
-            var robertMaleIdx = coupleMaleGroupIndex;
-            var robertResult = processRobertWorkbook(workbook, robertMaleIdx);
-            if (robertResult.isCouple) {
-              var robertFemaleIdx = robertMaleIdx === 0 ? 1 : 0;
-              var robertCoupleNames = extractCoupleNamesFromFilename(file.name);
-              var robertName1 = robertCoupleNames[robertMaleIdx] || 'Male';
-              var robertName2 = robertCoupleNames[robertFemaleIdx] || 'Female';
-              robertResult.maleRows.forEach(function (r) { r._robertPartner = 'male'; });
-              robertResult.femaleRows.forEach(function (r) { r._robertPartner = 'female'; });
-              return {
-                fileName: file.name,
-                // One combined list so the shared preview machinery (soft
-                // delete, row numbering) works the same as every other
-                // template - split back into maleRows/femaleRows by
-                // _robertPartner at render/export time (see
-                // splitRobertCoupleRows).
-                rows: robertResult.maleRows.concat(robertResult.femaleRows),
-                rawBuffer: rawBuffer,
-                runName: '',
-                isRobertCouple: true,
-                title: 'LISTED VARIANTS FOR ' + robertName1 + '_' + robertName2,
-                patientName: robertName1,
-                patientName2: robertName2,
-                loadedAt: new Date().toLocaleDateString(),
-                error: null
-              };
-            }
-            var robertTitle = extractPatientTitle(file.name, '');
-            return {
-              fileName: file.name,
-              rows: robertResult.rows,
-              rawBuffer: rawBuffer,
-              runName: '',
-              title: robertTitle,
-              patientName: robertTitle.replace(/^LISTED VARIANTS FOR /, ''),
-              loadedAt: new Date().toLocaleDateString(),
-              error: null
-            };
+            return buildRobertUploadResult(workbook, file, rawBuffer);
           }
 
           // A file that's already this app's OWN exported "Listed Variants"
@@ -6292,28 +6364,7 @@
           var isCoupleFile = currentReportType === 'couple' && readDepthCols.length >= 2;
 
           if (isCoupleFile) {
-            // Couple mode: one row per variant, both partners' genotype fields
-            // side by side. Export splits this into two per-sample sections.
-            var maleIdx = coupleMaleGroupIndex;
-            var femaleIdx = maleIdx === 0 ? 1 : 0;
-            var result = processCoupleVarSeqWorkbook(workbook, maleIdx);
-            // Filename-parsed names follow the same raw column order as the
-            // sheet (first name = first column-group) - map them through the
-            // same male/female selection the user made for the columns.
-            var coupleNames = extractCoupleNamesFromFilename(file.name);
-            var name1 = coupleNames[maleIdx] || result.sample1Name;
-            var name2 = coupleNames[femaleIdx] || result.sample2Name;
-            return {
-              fileName: file.name,
-              rows: result.rows,
-              rawBuffer: rawBuffer,
-              runName: '',
-              title: 'LISTED VARIANTS FOR ' + name1 + '_' + name2,
-              title1: 'LISTED VARIANTS FOR ' + name1,
-              title2: 'LISTED VARIANTS FOR ' + name2,
-              loadedAt: new Date().toLocaleDateString(),
-              error: null
-            };
+            return buildCoupleUploadResult(workbook, file, rawBuffer);
           } else {
             // Use standard VarSeq processing
             var result = processVarSeqWorkbook(workbook, file.name);
