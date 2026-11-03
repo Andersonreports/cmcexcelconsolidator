@@ -1571,14 +1571,14 @@
   ];
 
   // Trio (father/mother/fetus) layout - the couple layout with a third
-  // sample: FATHER/MOTHER/FETUS genotype columns up front and one READ
+  // sample: FATHER/MOTHER/PROBAND genotype columns up front and one READ
   // DEPTH/VAF/ALLELIC DEPTH block per sample, in the same father/mother/
   // fetus order (fields 1/2/3, see processTrioVarSeqWorkbook). Header text
   // and order match the trio reference report exactly.
   var TRIO_EXPORT_COLUMNS = [
     { key: 'zygosity1', header: 'FATHER' },
     { key: 'zygosity2', header: 'MOTHER' },
-    { key: 'zygosity3', header: 'FETUS' },
+    { key: 'zygosity3', header: 'PROBAND' },
     { key: 'inheritance', header: 'Inheritance' },
     { key: 'gene', header: 'GENE' },
     { key: 'variant', header: 'VARIANT' },
