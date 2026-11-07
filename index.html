@@ -1518,6 +1518,7 @@
     { key: 'exonNumber', header: 'Exon' },
     { key: 'clinvarVariantId', header: 'ClinVar Variant ID' },
     { key: 'transcriptStrandAcmg', header: 'Transcript Strand' },
+    { key: 'acmgClassificationCriteria', header: 'ACMG Classification Criteria' },
     { key: 'dbnsfpLrt', header: 'LRT Pred' },
     { key: 'dbnsfpMutTaster', header: 'MutationTaster Pred' },
     { key: 'siftVertebrates', header: 'SIFT Prediction (Vertebrates)' },
@@ -1927,6 +1928,10 @@
     transcriptStrandAcmg: [
       { header: 'Transcript Strand', groupIncludes: ['Variant Site', 'ACMG'] },
       { header: 'Transcript Strand', groupIncludes: ['ACMG', 'Classifier'] },
+    ],
+    acmgClassificationCriteria: [
+      { header: 'ACMG Classification Criteria', groupIncludes: ['Variant Site', 'ACMG'] },
+      { header: 'ACMG Classification Criteria', groupIncludes: ['ACMG', 'Classifier'] },
     ],
   };
 
@@ -3237,6 +3242,7 @@
         revel: get('revel'),
         clinvarVariantId: get('clinvarVariantId'),
         transcriptStrandAcmg: get('transcriptStrandAcmg'),
+        acmgClassificationCriteria: get('acmgClassificationCriteria'),
         dbnsfpLrt: get('dbnsfpLrt'),
         dbnsfpMutTaster: get('dbnsfpMutTaster'),
         siftVertebrates: get('siftVertebrates'),
