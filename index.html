@@ -1516,6 +1516,14 @@
     { key: 'transcriptName', header: 'NM ID' },
     { key: 'seqOntology', header: 'Sequence Ontology' },
     { key: 'exonNumber', header: 'Exon' },
+    { key: 'clinvarVariantId', header: 'ClinVar Variant ID' },
+    { key: 'transcriptStrandAcmg', header: 'Transcript Strand' },
+    { key: 'dbnsfpLrt', header: 'LRT Pred' },
+    { key: 'dbnsfpMutTaster', header: 'MutationTaster Pred' },
+    { key: 'siftVertebrates', header: 'SIFT Prediction (Vertebrates)' },
+    { key: 'polyphenVertebrates', header: 'PolyPhen2 Prediction (Vertebrates)' },
+    { key: 'conservationGerpVertebrates', header: 'GERP++ Prediction (Vertebrates)' },
+    { key: 'conservationPhyloPVertebrates', header: 'PhyloP Prediction (Vertebrates)' },
   ];
 
   // Flat column list matching the couple reference template exactly — same
@@ -1887,7 +1895,10 @@
     seqOntology: { headerStartsWith: 'Sequence Ontology' },
     transcriptName: { headerStartsWith: 'Transcript Name' },
     exonNumber: { headerStartsWith: 'Exon Number' },
-    clinvarVariantId: { header: 'Variant ID', groupIncludes: ['ClinVar'] },
+    // "Variant ID" also appears under "Overlapping CNVs ClinVar CNVs and
+    // Large Variants" (a nearby CNV's ClinVar ID, not this SNV's own) -
+    // excluded so a file with that track can't collide with it.
+    clinvarVariantId: { header: 'Variant ID', groupIncludes: ['ClinVar'], groupExcludes: ['Overlapping', 'CNVs'] },
     omimGeneId: { header: 'Gene OMIM ID', groupIncludes: ['OMIM'] },
     omimIdField: { header: 'OMIM ID', groupIncludes: ['OMIM'] },
     spliceGeneSplicer: { header: 'GeneSplicer Prediction' },
@@ -1901,6 +1912,22 @@
     dbnsfpSift: { header: 'SIFT Pred', groupIncludes: ['dbNSFP'] },
     dbnsfpLrt: { header: 'LRT Pred', groupIncludes: ['dbNSFP'] },
     dbnsfpMutTaster: { header: 'MutationTaster Pred', groupIncludes: ['dbNSFP'] },
+    // Single's own requested additions - same Conservation Scores/SIFT-
+    // PolyPhen2 tracks as conservationGerp/siftMammals above, but the
+    // Vertebrates-scored column instead of the Mammals one.
+    conservationGerpVertebrates: { header: 'GERP++ Prediction (Vertebrates)' },
+    conservationPhyloPVertebrates: { header: 'PhyloP Prediction (Vertebrates)' },
+    siftVertebrates: { header: 'SIFT Prediction (Vertebrates)' },
+    polyphenVertebrates: { header: 'PolyPhen2 Prediction (Vertebrates)' },
+    // "Transcript Strand" also appears under "Overlapping Transcripts RefSeq
+    // Genes" (a different transcript's strand, not this call's own) - same
+    // dual-block ACMG group naming acmgClass already guards against
+    // ("Variant Site ACMG Classifier" vs a per-partner "ACMG Sample
+    // Classifier for <run>"), so the same two-tier fallback applies here.
+    transcriptStrandAcmg: [
+      { header: 'Transcript Strand', groupIncludes: ['Variant Site', 'ACMG'] },
+      { header: 'Transcript Strand', groupIncludes: ['ACMG', 'Classifier'] },
+    ],
   };
 
   var INHERITANCE_PRIORITY = ['MF', 'AD', 'AR', 'XLR', 'XLD', 'XL'];
@@ -3208,6 +3235,14 @@
         phenoRank: get('phenoRank'),
         alphaMissense: get('alphaMissense'),
         revel: get('revel'),
+        clinvarVariantId: get('clinvarVariantId'),
+        transcriptStrandAcmg: get('transcriptStrandAcmg'),
+        dbnsfpLrt: get('dbnsfpLrt'),
+        dbnsfpMutTaster: get('dbnsfpMutTaster'),
+        siftVertebrates: get('siftVertebrates'),
+        polyphenVertebrates: get('polyphenVertebrates'),
+        conservationGerpVertebrates: get('conservationGerpVertebrates'),
+        conservationPhyloPVertebrates: get('conservationPhyloPVertebrates'),
       };
 
       var multiGeneGroupId = indices.length > 1 ? ('mg' + (++multiGeneGroupCounter)) : null;
