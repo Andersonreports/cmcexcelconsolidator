@@ -1519,6 +1519,15 @@
     { key: 'transcriptName', header: 'NM ID' },
     { key: 'seqOntology', header: 'Sequence Ontology' },
     { key: 'exonNumber', header: 'Exon' },
+    { key: 'clinvarVariantId', header: 'ClinVar Variant ID' },
+    { key: 'transcriptStrandAcmg', header: 'Transcript Strand' },
+    { key: 'acmgClassificationCriteria', header: 'ACMG Classification Criteria' },
+    { key: 'dbnsfpLrt', header: 'LRT Pred' },
+    { key: 'dbnsfpMutTaster', header: 'MutationTaster Pred' },
+    { key: 'siftVertebrates', header: 'SIFT Prediction (Vertebrates)' },
+    { key: 'polyphenVertebrates', header: 'PolyPhen2 Prediction (Vertebrates)' },
+    { key: 'conservationGerpVertebrates', header: 'GERP++ Prediction (Vertebrates)' },
+    { key: 'conservationPhyloPVertebrates', header: 'PhyloP Prediction (Vertebrates)' },
   ];
 
   // Flat column list matching the couple reference template exactly — same
@@ -1892,7 +1901,10 @@
     seqOntology: { headerStartsWith: 'Sequence Ontology' },
     transcriptName: { headerStartsWith: 'Transcript Name' },
     exonNumber: { headerStartsWith: 'Exon Number' },
-    clinvarVariantId: { header: 'Variant ID', groupIncludes: ['ClinVar'] },
+    // "Variant ID" also appears under "Overlapping CNVs ClinVar CNVs and
+    // Large Variants" (a nearby CNV's ClinVar ID, not this SNV's own) -
+    // excluded so a file with that track can't collide with it.
+    clinvarVariantId: { header: 'Variant ID', groupIncludes: ['ClinVar'], groupExcludes: ['Overlapping', 'CNVs'] },
     omimGeneId: { header: 'Gene OMIM ID', groupIncludes: ['OMIM'] },
     omimIdField: { header: 'OMIM ID', groupIncludes: ['OMIM'] },
     spliceGeneSplicer: { header: 'GeneSplicer Prediction' },
@@ -1906,6 +1918,26 @@
     dbnsfpSift: { header: 'SIFT Pred', groupIncludes: ['dbNSFP'] },
     dbnsfpLrt: { header: 'LRT Pred', groupIncludes: ['dbNSFP'] },
     dbnsfpMutTaster: { header: 'MutationTaster Pred', groupIncludes: ['dbNSFP'] },
+    // Single's own requested additions - same Conservation Scores/SIFT-
+    // PolyPhen2 tracks as conservationGerp/siftMammals above, but the
+    // Vertebrates-scored column instead of the Mammals one.
+    conservationGerpVertebrates: { header: 'GERP++ Prediction (Vertebrates)' },
+    conservationPhyloPVertebrates: { header: 'PhyloP Prediction (Vertebrates)' },
+    siftVertebrates: { header: 'SIFT Prediction (Vertebrates)' },
+    polyphenVertebrates: { header: 'PolyPhen2 Prediction (Vertebrates)' },
+    // "Transcript Strand" also appears under "Overlapping Transcripts RefSeq
+    // Genes" (a different transcript's strand, not this call's own) - same
+    // dual-block ACMG group naming acmgClass already guards against
+    // ("Variant Site ACMG Classifier" vs a per-partner "ACMG Sample
+    // Classifier for <run>"), so the same two-tier fallback applies here.
+    transcriptStrandAcmg: [
+      { header: 'Transcript Strand', groupIncludes: ['Variant Site', 'ACMG'] },
+      { header: 'Transcript Strand', groupIncludes: ['ACMG', 'Classifier'] },
+    ],
+    acmgClassificationCriteria: [
+      { header: 'ACMG Classification Criteria', groupIncludes: ['Variant Site', 'ACMG'] },
+      { header: 'ACMG Classification Criteria', groupIncludes: ['ACMG', 'Classifier'] },
+    ],
   };
 
   var INHERITANCE_PRIORITY = ['MF', 'AD', 'AR', 'XLR', 'XLD', 'XL'];
@@ -2013,6 +2045,32 @@
       if (matches.length) return matches;
     }
     return [];
+  }
+
+  // Some newer VarSeq exports swap which row carries what, for every
+  // per-sample FORMAT-derived column (Filter/Zygosity/Allelic Depths/Variant
+  // Allele Freq/Read Depths/Genotype Qualities/0/1 Genotypes/...): the field
+  // name (e.g. "Read Depths (DP)") sits in the GROUP row (row 1) and each
+  // sample's pedigree-role label (e.g. "Proband (run_id)") sits in the
+  // HEADER row (row 2) instead - exactly backwards from the group=dataset-
+  // name/header=field-name layout every other spec in this file assumes, and
+  // backwards from older trio/couple exports where the group row carried the
+  // sample label. Finds columns by an EXACT (not substring) match on the
+  // forward-filled group text, since this is only ever used once a file's
+  // been confirmed to use this reversed layout (see
+  // processMultiSampleVarSeqWorkbook) - a loose substring match risks
+  // picking up an unrelated group that happens to contain the same words.
+  function findExactGroupColumns(groupRow, colCount, groupTexts) {
+    var wanted = Array.isArray(groupTexts) ? groupTexts : [groupTexts];
+    var matches = [];
+    var lastGroup = '';
+    for (var c = 1; c <= colCount; c++) {
+      var g = String(groupRow.getCell(c).value || '');
+      if (g) lastGroup = g;
+      var groupText = g || lastGroup;
+      if (wanted.indexOf(groupText) !== -1) matches.push(c);
+    }
+    return matches;
   }
 
   // Finds the in-house hematology cohort's "# Samples" / "Sample Names"
@@ -3213,6 +3271,15 @@
         phenoRank: get('phenoRank'),
         alphaMissense: get('alphaMissense'),
         revel: get('revel'),
+        clinvarVariantId: get('clinvarVariantId'),
+        transcriptStrandAcmg: get('transcriptStrandAcmg'),
+        acmgClassificationCriteria: get('acmgClassificationCriteria'),
+        dbnsfpLrt: get('dbnsfpLrt'),
+        dbnsfpMutTaster: get('dbnsfpMutTaster'),
+        siftVertebrates: get('siftVertebrates'),
+        polyphenVertebrates: get('polyphenVertebrates'),
+        conservationGerpVertebrates: get('conservationGerpVertebrates'),
+        conservationPhyloPVertebrates: get('conservationPhyloPVertebrates'),
       };
 
       var multiGeneGroupId = indices.length > 1 ? ('mg' + (++multiGeneGroupCounter)) : null;
@@ -3458,6 +3525,50 @@
     // text (the sample ID merged across their whole block), resolve each
     // partner's column by group membership instead of raw position.
     var sampleGroupTexts = readDepthCols.map(groupHeaderAt);
+
+    // Detect the reversed-layout export version (see findExactGroupColumns):
+    // if the ordinary header-based match above can't tell apart at least 2
+    // samples - either because it found nothing, or because it latched onto
+    // a single unrelated column that happens to share the field's header
+    // text (e.g. a per-CNV-merge "Read Depths (DP)" column elsewhere in the
+    // file) - re-resolve every per-sample FORMAT field by exact group text
+    // instead, reading each sample's label back out of the header row.
+    var reversedLayout = false;
+    var distinctSampleGroups = {};
+    sampleGroupTexts.forEach(function (g) { if (g) distinctSampleGroups[g] = true; });
+    if (Object.keys(distinctSampleGroups).length < 2) {
+      var reversedReadDepthCols = findExactGroupColumns(groupRow, colCount, ['Read Depths (DP)']);
+      if (reversedReadDepthCols.length >= 2) {
+        reversedLayout = true;
+        readDepthCols = reversedReadDepthCols;
+        colsAll.readDepths = readDepthCols;
+        cols.readDepths = readDepthCols[0] || null;
+        sampleGroupTexts = readDepthCols.map(function (c) { return String(headerRow.getCell(c).value || '').trim(); });
+
+        var REVERSED_SAMPLE_FIELD_GROUPS = {
+          zygosity: ['Zygosity'],
+          alleleDepths: ['Allelic Depths (AD)'],
+          vaf: ['Variant Allele Freq', 'Variant Allele Fraction'],
+          filter: ['Filter'],
+          genotype: ['0/1 Genotypes (GT)'],
+        };
+        Object.keys(REVERSED_SAMPLE_FIELD_GROUPS).forEach(function (key) {
+          var matches = findExactGroupColumns(groupRow, colCount, REVERSED_SAMPLE_FIELD_GROUPS[key]);
+          if (matches.length) {
+            colsAll[key] = matches;
+            cols[key] = matches[0];
+          }
+        });
+      }
+    }
+    // Sample identity for a matched column: the group row (forward-filled)
+    // normally, but the header row instead once reversedLayout is detected,
+    // since that's where the per-sample label actually lives in that case.
+    function sampleIdentityAt(col) {
+      if (!col) return '';
+      return reversedLayout ? String(headerRow.getCell(col).value || '').trim() : groupHeaderAt(col);
+    }
+
     var samples = resolveSamples(sampleGroupTexts);
     var acmgPriority = opts.acmgPriority || samples.map(function (s, i) { return i; });
 
@@ -3478,7 +3589,7 @@
         var wantGroup = sampleGroupTexts[index];
         if (wantGroup) {
           for (var i = 0; i < matches.length; i++) {
-            if (groupHeaderAt(matches[i]) === wantGroup) return cellText(row.getCell(matches[i]).value);
+            if (sampleIdentityAt(matches[i]) === wantGroup) return cellText(row.getCell(matches[i]).value);
           }
         }
         // Fallback (e.g. a shared/non-sample-scoped block like ACMG, whose
@@ -4363,20 +4474,52 @@
     function groupHeaderAt(col) { return col ? (groupTextAtCol[col] || '') : ''; }
 
     var readDepthCols = findVarSeqColumns(groupRow, headerRow, colCount, VARSEQ_COLUMN_SPECS.readDepths);
+    // Some newer VarSeq exports put the field name ("Read Depths (DP)") in
+    // the group row and each sample's pedigree label in the header row
+    // instead (see findExactGroupColumns/processMultiSampleVarSeqWorkbook) -
+    // the header-based match above then finds at most one unrelated column
+    // instead of the real per-sample ones, so fall back to an exact
+    // group-text match and read sample identity from the header row instead.
+    var reversedLayout = false;
+    if (readDepthCols.length < 2) {
+      var reversedReadDepthCols = findExactGroupColumns(groupRow, colCount, ['Read Depths (DP)']);
+      if (reversedReadDepthCols.length >= 2) {
+        reversedLayout = true;
+        readDepthCols = reversedReadDepthCols;
+        var REVERSED_SAMPLE_FIELD_GROUPS = {
+          Read_Frequency_1: ['Variant Allele Freq', 'Variant Allele Fraction'],
+          Read_Count_1: ['Read Depths (DP)'],
+          Quality_1: ['Genotype Qualities (GQ)'],
+          Pass_filter: ['Filter'],
+        };
+        Object.keys(REVERSED_SAMPLE_FIELD_GROUPS).forEach(function (key) {
+          if (sampleFieldCols[key]) {
+            var matches = findExactGroupColumns(groupRow, colCount, REVERSED_SAMPLE_FIELD_GROUPS[key]);
+            if (matches.length) sampleFieldCols[key] = matches;
+          }
+        });
+        var reversedZygosityCols = findExactGroupColumns(groupRow, colCount, ['Zygosity']);
+        if (reversedZygosityCols.length) zygosityCols = reversedZygosityCols;
+      }
+    }
+    function sampleIdentityAt(col) {
+      if (!col) return '';
+      return reversedLayout ? String(headerRow.getCell(col).value || '').trim() : groupHeaderAt(col);
+    }
     var isCouple = readDepthCols.length >= 2;
     var maleIdx = (maleGroupIndex === 1) ? 1 : 0;
     var femaleIdx = maleIdx === 0 ? 1 : 0;
     // For a single-person file both "slots" point at the same (only) sample
     // group, so getSampleField below resolves the same way it always has.
     var slotGroupText = isCouple
-      ? [groupHeaderAt(readDepthCols[maleIdx]), groupHeaderAt(readDepthCols[femaleIdx])]
-      : [groupHeaderAt(readDepthCols[0]), groupHeaderAt(readDepthCols[0])];
+      ? [sampleIdentityAt(readDepthCols[maleIdx]), sampleIdentityAt(readDepthCols[femaleIdx])]
+      : [sampleIdentityAt(readDepthCols[0]), sampleIdentityAt(readDepthCols[0])];
 
     function getSampleField(row, matches, slot) {
       var wantGroup = slotGroupText[slot];
       if (wantGroup) {
         for (var i = 0; i < matches.length; i++) {
-          if (groupHeaderAt(matches[i]) === wantGroup) return cellText(row.getCell(matches[i]).value);
+          if (sampleIdentityAt(matches[i]) === wantGroup) return cellText(row.getCell(matches[i]).value);
         }
       }
       return matches[slot] != null ? cellText(row.getCell(matches[slot]).value) : '';
@@ -6518,7 +6661,19 @@
           var sheet = workbook.worksheets[0];
           var groupRow = sheet.getRow(1);
           var headerRow = sheet.getRow(2);
-          var readDepthCols = findVarSeqColumns(groupRow, headerRow, effectiveVarSeqColCount(sheet, groupRow, headerRow), VARSEQ_COLUMN_SPECS.readDepths);
+          var colCountForDetection = effectiveVarSeqColCount(sheet, groupRow, headerRow);
+          var readDepthCols = findVarSeqColumns(groupRow, headerRow, colCountForDetection, VARSEQ_COLUMN_SPECS.readDepths);
+          // Some newer VarSeq exports put the field name ("Read Depths (DP)")
+          // in the group row and each sample's label in the header row
+          // instead (see findExactGroupColumns/processMultiSampleVarSeqWorkbook)
+          // - the match above then finds at most one unrelated column (e.g. a
+          // per-CNV-merge column sharing the same header text) instead of
+          // the real per-sample columns, so fall back to an exact group-text
+          // match before concluding this isn't a multi-sample file.
+          if (readDepthCols.length < 2) {
+            var reversedReadDepthColsForDetection = findExactGroupColumns(groupRow, colCountForDetection, ['Read Depths (DP)']);
+            if (reversedReadDepthColsForDetection.length >= 2) readDepthCols = reversedReadDepthColsForDetection;
+          }
           var isCoupleFile = currentReportType === 'couple' && readDepthCols.length >= 2;
 
           if (isCoupleFile) {
