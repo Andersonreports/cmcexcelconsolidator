@@ -457,6 +457,7 @@
         <option value="trio">Trio</option>
         <option value="cnv">CNV Variants</option>
         <option value="robert">Dr. Robert</option>
+        <option value="unfiltered">Unfiltered</option>
       </select>
     </div>
   </header>
@@ -476,6 +477,8 @@
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="cnv" hidden>Listed Variant Excel</button>
 
     <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="robert" hidden>Listed Variant Excel</button>
+
+    <button class="nav-item tab-button" data-tab="listed-variant" data-report-type="unfiltered" hidden>Unfiltered Excel</button>
   </nav>
 
   <main class="main-content">
@@ -810,7 +813,7 @@
       // Also shown for Dr. Robert - a couple file there needs the same
       // male/female column-group choice, even though a single-person Dr.
       // Robert file (the more common case) just ignores it.
-      coupleGenderRow.style.display = (reportType === 'couple' || reportType === 'robert') ? 'flex' : 'none';
+      coupleGenderRow.style.display = (reportType === 'couple' || reportType === 'robert' || reportType === 'unfiltered') ? 'flex' : 'none';
     }
 
     // Reset to first tab of selected report type
@@ -1658,7 +1661,9 @@
     if (reportType === 'couple') return COUPLE_VARIANT_COLUMNS;
     if (reportType === 'trio') return TRIO_VARIANT_COLUMNS;
     if (reportType === 'cnv') return CNV_VARIANT_COLUMNS;
-    if (reportType === 'robert') {
+    // Unfiltered shares Dr. Robert's ~100-column row shape - it's his
+    // "<patient>_final" sheet on its own, without the HOM/HET/COMP/... split.
+    if (reportType === 'robert' || reportType === 'unfiltered') {
       // Built from ROBERT_COLUMNS (defined further down, near
       // processRobertWorkbook) rather than a separate static array, so the
       // preview grid's columns can never drift from the export's.
@@ -4340,6 +4345,11 @@
       if (c.sampleField) sampleFieldCols[c.key] = findVarSeqColumns(groupRow, headerRow, colCount, c.spec);
     });
     var zygosityCols = findVarSeqColumns(groupRow, headerRow, colCount, { header: 'Zygosity' });
+    // Raw "ref,alt" read counts - not one of Dr. Robert's columns (so it's
+    // stored under an underscore key, which neither his preview grid nor his
+    // export ever reads), only used by the Unfiltered template's
+    // Read_Frequency_1 (see toUnfilteredRow).
+    var alleleDepthCols = findVarSeqColumns(groupRow, headerRow, colCount, { header: 'Allelic Depths (AD)', groupExcludes: ['Complex Variants'] });
 
     var groupTextAtCol = [];
     (function () {
@@ -4428,6 +4438,7 @@
         if (isCouple && !(zyg || vaf || dp)) return null;
         return Object.assign({}, shared, {
           Zygosity_1: zyg, Read_Frequency_1: vaf, Read_Count_1: dp, Quality_1: gq, Pass_filter: filt,
+          _alleleDepths: getSampleField(row, alleleDepthCols, slot),
         });
       }
 
@@ -4612,6 +4623,127 @@
     // toggle in the preview grid), not rule-based like the other sheets.
     writeSheet('Candidate', rows.filter(function (r) { return r._robertCandidate; }));
 
+    return workbook.xlsx.writeBuffer();
+  }
+
+  // ── Unfiltered template ─────────────────────────────────────────────────
+  // Just the "<patient>_final" sheet - every variant in the VarSeq export, no
+  // HOM/HET/COMP/Clinsig/Candidate split (the analyst builds those by hand).
+  // Output format copies the first sheet of Mariyamath_Afna_final.xlsx
+  // exactly:
+  //   - 101 columns: an unlabeled row-number column A, then ROBERT_COLUMNS'
+  //     order, with the zygosity (G) and total-allele-number (T) headers left
+  //     blank like the reference.
+  //   - One row per gene a variant falls in (Gene_refGene split on ";",
+  //     microRNA "MIR..." genes skipped), with OMIM_gene = that gene.
+  //   - Column A numbers those rows in input (genomic) order; the sheet is
+  //     then sorted by OMIM_gene the way Excel sorts text (case-insensitive,
+  //     hyphens/apostrophes ignored), keeping input order within a gene.
+  //   - Empty cells are "." - except the population count/frequency columns
+  //     (Inhouse_GRCh38_Allele_frequency .. Gnomad_v31_Homozygotes), which
+  //     are numbers with 0 for none.
+  //   - Plain header (no fill/bold), header row frozen, filter on.
+  // Dr. Robert's own template and export are untouched by any of this.
+  var UNFILTERED_BLANK_HEADER_KEYS = { Zygosity_1: true, Inhouse_GATK_Total_Allele_Number: true };
+  var UNFILTERED_NUMERIC_KEYS = (function () {
+    var keys = ROBERT_COLUMNS.map(function (c) { return c.key; });
+    var from = keys.indexOf('Inhouse_GRCh38_Allele_frequency');
+    var to = keys.indexOf('Gnomad_v31_Homozygotes');
+    var set = {};
+    keys.slice(from, to + 1).forEach(function (k) { set[k] = true; });
+    return set;
+  })();
+
+  // Per-variant formatting, applied at upload time so the preview grid shows
+  // the same values the export writes.
+  function toUnfilteredRow(row) {
+    var out = Object.assign({}, row);
+    if (row._alleleDepths) out.Read_Frequency_1 = String(row._alleleDepths).replace(/\s+/g, '');
+    out.Gene_refGene = String(row.Gene_refGene || '').split(/[,;]/).map(function (g) { return g.trim(); }).filter(Boolean).join(';');
+    ROBERT_COLUMNS.forEach(function (c) {
+      var k = c.key;
+      var v = out[k];
+      var empty = v == null || String(v).trim() === '';
+      if (UNFILTERED_NUMERIC_KEYS[k]) {
+        var n = empty ? 0 : Number(v);
+        out[k] = isNaN(n) ? v : n;
+      } else if (k === 'Start' || k === 'End') {
+        // already numeric (see processRobertWorkbook)
+      } else {
+        out[k] = empty ? '.' : String(v);
+      }
+    });
+    return out;
+  }
+
+  function unfilteredUploadResult(result) {
+    result.rows = result.rows.map(toUnfilteredRow);
+    return result;
+  }
+
+  // Excel's default text sort ignores hyphens and apostrophes and is
+  // case-insensitive - verified against every row of the reference sheet.
+  function unfilteredSortKey(s) {
+    return String(s || '').replace(/['-]/g, '').toLowerCase();
+  }
+
+  function expandUnfilteredRowsByGene(rows) {
+    var out = [];
+    rows.forEach(function (r) {
+      var genes = [];
+      String(r.Gene_refGene || '').split(';').forEach(function (g) {
+        g = g.trim();
+        if (g && g !== '.' && genes.indexOf(g) === -1) genes.push(g);
+      });
+      var kept = genes.filter(function (g) { return !/^MIR/i.test(g); });
+      // A variant hitting only microRNA genes keeps one row rather than
+      // being dropped from an "unfiltered" sheet.
+      if (!kept.length) kept = genes.length ? [genes[0]] : [r.OMIM_gene && r.OMIM_gene !== '.' ? r.OMIM_gene : '.'];
+      kept.forEach(function (g) { out.push(Object.assign({}, r, { OMIM_gene: g })); });
+    });
+    return out;
+  }
+
+  function writeUnfilteredSheet(workbook, name, rows) {
+    var safeName = String(name).replace(/[\\/*?:[\]]/g, '_').slice(0, 31);
+    var sheet = workbook.addWorksheet(safeName);
+    var keys = ROBERT_COLUMNS.map(function (c) { return c.key; });
+    var headers = [''].concat(keys.map(function (k) { return UNFILTERED_BLANK_HEADER_KEYS[k] ? '' : k; }));
+
+    var expanded = expandUnfilteredRowsByGene(rows).map(function (r, i) {
+      return { n: i + 1, row: r, sortKey: unfilteredSortKey(r.OMIM_gene) };
+    });
+    expanded.sort(function (a, b) {
+      if (a.sortKey < b.sortKey) return -1;
+      if (a.sortKey > b.sortKey) return 1;
+      return a.n - b.n;
+    });
+
+    sheet.addRow(headers);
+    expanded.forEach(function (e) {
+      sheet.addRow([String(e.n)].concat(keys.map(function (k) {
+        var v = e.row[k];
+        return v == null || v === '' ? '.' : v;
+      })));
+    });
+
+    var font = { name: 'Aptos Narrow', size: 11 };
+    sheet.eachRow(function (r) { r.eachCell({ includeEmpty: true }, function (cell) { cell.font = font; }); });
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: expanded.length + 1, column: headers.length } };
+  }
+
+  // A couple file gets one such sheet per partner.
+  function buildUnfilteredVariantExcel(item, workbook) {
+    workbook = workbook || new ExcelJS.Workbook();
+    var active = item.rows.filter(function (r) { return !r._removed; });
+    var people = item.isRobertCouple
+      ? [
+          [(item.patientName || 'Male') + '_final', active.filter(function (r) { return r._robertPartner === 'male'; })],
+          [(item.patientName2 || 'Female') + '_final', active.filter(function (r) { return r._robertPartner === 'female'; })],
+        ]
+      : [[(item.patientName || 'Sample') + '_final', active]];
+    people.forEach(function (p) { writeUnfilteredSheet(workbook, p[0], p[1]); });
     return workbook.xlsx.writeBuffer();
   }
 
@@ -5420,6 +5552,22 @@
         sample2Entries.forEach(function (entry, i) {
           variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
         });
+      } else if (currentReportType === 'unfiltered') {
+        // Every variant, no categorization - one flat block per person,
+        // matching buildUnfilteredVariantExcel's one sheet per person.
+        var unfilteredItem = variantBatch[batchIdx != null ? batchIdx : variantPreviewIdx];
+        var unfilteredBlocks = (unfilteredItem && unfilteredItem.isRobertCouple)
+          ? [
+              [(unfilteredItem.patientName || 'Male') + '_final', activeRowEntries.filter(function (entry) { return entry.row._robertPartner === 'male'; })],
+              [(unfilteredItem.patientName2 || 'Female') + '_final', activeRowEntries.filter(function (entry) { return entry.row._robertPartner === 'female'; })],
+            ]
+          : [[(unfilteredItem && unfilteredItem.patientName ? unfilteredItem.patientName : 'Sample') + '_final', activeRowEntries]];
+        unfilteredBlocks.forEach(function (block) {
+          variantTableBody.appendChild(buildGridSectionHeaderRow(block[0], columns.length));
+          block[1].forEach(function (entry, i) {
+            variantTableBody.appendChild(buildVariantDataRow(entry.row, entry.idx, columns, batchIdx, i + 1));
+          });
+        });
       } else if (currentReportType === 'robert') {
         // Mirrors Dr. Robert's own 6-sheet-per-person workbook (see
         // buildRobertVariantExcel/buildRobertCoupleVariantExcel) directly in
@@ -6138,6 +6286,9 @@
       if (item.reportType === 'robert') {
         return buildRobertVariantExcel(item.rows, item.patientName, workbook);
       }
+      if (item.reportType === 'unfiltered') {
+        return buildUnfilteredVariantExcel(item, workbook);
+      }
       return buildVariantExcel(item.rows, item.title, getVariantColumns(item.reportType), workbook, item.reportType, inhouseHematologyHeaderOverrides(item));
     });
   }
@@ -6254,7 +6405,7 @@
   // coupleMaleGroupIndex plays no part in how it was built.
   function reprocessGenderSensitiveBatchItems() {
     var affected = variantBatch.filter(function (item) {
-      return (item.reportType === 'couple' || item.reportType === 'robert') && item.rawBuffer;
+      return (item.reportType === 'couple' || item.reportType === 'robert' || item.reportType === 'unfiltered') && item.rawBuffer;
     });
     if (!affected.length) return;
     Promise.all(affected.map(function (item) {
@@ -6262,6 +6413,10 @@
         var fakeFile = { name: item.fileName };
         if (item.reportType === 'robert') {
           Object.assign(item, buildRobertUploadResult(workbook, fakeFile, item.rawBuffer));
+          return;
+        }
+        if (item.reportType === 'unfiltered') {
+          Object.assign(item, unfilteredUploadResult(buildRobertUploadResult(workbook, fakeFile, item.rawBuffer)));
           return;
         }
         var sheet = workbook.worksheets[0];
@@ -6313,6 +6468,9 @@
 
           if (currentReportType === 'robert') {
             return buildRobertUploadResult(workbook, file, rawBuffer);
+          }
+          if (currentReportType === 'unfiltered') {
+            return unfilteredUploadResult(buildRobertUploadResult(workbook, file, rawBuffer));
           }
 
           // A file that's already this app's OWN exported "Listed Variants"
