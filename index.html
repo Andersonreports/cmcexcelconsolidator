@@ -720,6 +720,10 @@
   // Populated asynchronously from omim_genemap2.txt (col 8 = gene symbol, col 12 = phenotypes).
   // Maps GENE_SYMBOL.toUpperCase() → first phenotype MIM number string (e.g. "610921").
   var omimGeneMap = new Map();
+  // GENE_SYMBOL.toUpperCase() → full genemap2 phenotype text, used by the
+  // Unfiltered template's OMIM_phenotypes for genes VarSeq's own OMIM track
+  // doesn't cover (it annotates one gene per variant).
+  var omimGenePhenotypes = new Map();
 
   fetch('omim_genemap2.txt')
     .then(function (r) { return r.text(); })
@@ -730,6 +734,7 @@
         var symbol = (cols[8] || '').trim();
         var phenotypes = (cols[12] || '').trim();
         if (!symbol || !phenotypes) return;
+        omimGenePhenotypes.set(symbol.toUpperCase(), phenotypes);
         var m = phenotypes.match(/\b(\d{6})\b/);
         if (m) omimGeneMap.set(symbol.toUpperCase(), m[1]);
       });
@@ -4582,6 +4587,9 @@
         return Object.assign({}, shared, {
           Zygosity_1: zyg, Read_Frequency_1: vaf, Read_Count_1: dp, Quality_1: gq, Pass_filter: filt,
           _alleleDepths: getSampleField(row, alleleDepthCols, slot),
+          // Source sheet row - lets the Unfiltered template read the extra
+          // per-transcript annotation it needs (see enrichUnfilteredRows).
+          _sheetRow: r,
         });
       }
 
@@ -4802,6 +4810,8 @@
   function toUnfilteredRow(row) {
     var out = Object.assign({}, row);
     if (row._alleleDepths) out.Read_Frequency_1 = String(row._alleleDepths).replace(/\s+/g, '');
+    // The reference only ever uses Het/Hom - a hemizygous call is Hom.
+    if (out.Zygosity_1 === 'Hemi') out.Zygosity_1 = 'Hom';
     out.Gene_refGene = String(row.Gene_refGene || '').split(/[,;]/).map(function (g) { return g.trim(); }).filter(Boolean).join(';');
     ROBERT_COLUMNS.forEach(function (c) {
       var k = c.key;
@@ -4819,9 +4829,312 @@
     return out;
   }
 
-  function unfilteredUploadResult(result) {
+  function unfilteredUploadResult(result, workbook) {
+    if (workbook) enrichUnfilteredRows(result.rows, workbook);
     result.rows = result.rows.map(toUnfilteredRow);
     return result;
+  }
+
+  // ── ANNOVAR-style columns rebuilt from VarSeq's own annotation ──────────
+  // The reference sheet (Mariyamath_Afna_final.xlsx) came out of an ANNOVAR
+  // pipeline; the VarSeq export carries the same underlying facts in a
+  // different shape. Each rule below was worked out from the reference's
+  // own values:
+  //   - Func_refGene: union of every RefSeq transcript's region, in the
+  //     fixed order UNFILTERED_FUNC_ORDER (every combination in the
+  //     reference follows it). An intronic change within 20 bp of an exon
+  //     counts as splicing too ("splicing;intronic" - the reference never
+  //     has "splicing" alone, and its splice offsets top out at 20).
+  //     Upstream/downstream only within 1 kb (ANNOVAR's default); a variant
+  //     with nothing closer is intergenic.
+  //   - Gene_refGene: the unique genes behind those regions, same order.
+  //   - ExonicFunc_refGene / AAChange_refGene: ANNOVAR wording and
+  //     GENE:NM_x:exonN:c.x:p.x (one-letter amino acids, NM without version)
+  //     for coding transcripts; an incomplete transcript adds "unknown" /
+  //     ";UNKNOWN".
+  //   - GeneDetail_refGene: NM_x:exonN:c.x for splice changes, NM_x:c.x for
+  //     UTRs, dist=N for upstream/downstream/intergenic.
+  var UNFILTERED_FUNC_ORDER = ['exonic', 'ncRNA_exonic', 'splicing', 'ncRNA_splicing', 'intronic', 'ncRNA_intronic', 'UTR5', 'UTR3', 'upstream', 'downstream', 'intergenic'];
+  var UNFILTERED_SPLICE_DISTANCE = 20;
+  var UNFILTERED_FLANK_DISTANCE = 1000;
+  var AA_THREE_TO_ONE = {
+    Ala: 'A', Arg: 'R', Asn: 'N', Asp: 'D', Cys: 'C', Gln: 'Q', Glu: 'E', Gly: 'G', His: 'H', Ile: 'I',
+    Leu: 'L', Lys: 'K', Met: 'M', Phe: 'F', Pro: 'P', Ser: 'S', Thr: 'T', Trp: 'W', Tyr: 'Y', Val: 'V',
+    Sec: 'U', Pyl: 'O', Ter: 'X'
+  };
+
+  // VarSeq joins list values with a bare "," - commas inside one value
+  // (an OMIM title, a ClinVar condition) are always followed by a space.
+  function splitVarSeqList(value) {
+    var s = String(value == null ? '' : value);
+    if (!s) return [];
+    return s.split(/,(?! )/).map(function (x) { return x.trim(); });
+  }
+
+  function firstListValue(value) {
+    var list = splitVarSeqList(value).filter(Boolean);
+    return list.length ? list[0] : '';
+  }
+
+  function stripTranscriptVersion(name) {
+    return String(name || '').replace(/\.\d+$/, '');
+  }
+
+  function hgvsAfterColon(value) {
+    var s = String(value || '');
+    var i = s.indexOf(':');
+    return i === -1 ? s : s.slice(i + 1);
+  }
+
+  // HGVS p. (three-letter) -> ANNOVAR's one-letter form: p.Arg272Gln ->
+  // p.R272Q, p.Tyr330Ter -> p.Y330X, p.Gly76AlafsTer150 -> p.G76Afs*150,
+  // p.Ala410= -> p.A410A.
+  function hgvsPToAnnovar(p) {
+    var s = hgvsAfterColon(p).replace(/[()]/g, '');
+    if (!s) return '';
+    var syn = s.match(/^p\.([A-Z][a-z]{2})(\d+)=$/);
+    if (syn) return 'p.' + (AA_THREE_TO_ONE[syn[1]] || syn[1]) + syn[2] + (AA_THREE_TO_ONE[syn[1]] || syn[1]);
+    s = s.replace(/fsTer/g, 'fs*');
+    // Stop-loss: VarSeq writes "p.1023Glnext*1" (no leading Ter) or
+    // "p.Ter1023GlnextTer1"; ANNOVAR writes "p.X1023Q".
+    if (/ext/.test(s)) s = s.replace(/^p\.(?=\d)/, 'p.Ter').replace(/ext(Ter|\*)?\??\d*$/, '');
+    return s.replace(/[A-Z][a-z]{2}/g, function (aa) { return AA_THREE_TO_ONE[aa] || aa; });
+  }
+
+  function intronOffset(hgvsC) {
+    var m = hgvsAfterColon(hgvsC).match(/^[cn]\.[-*]?\d+[+-](\d+)/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function exonicFuncFor(so, ref, alt) {
+    so = String(so || '');
+    var isDel = alt === '-' || (ref.length > alt.length && alt !== '');
+    var isIns = ref === '-' || (alt.length > ref.length && ref !== '');
+    if (so.indexOf('frameshift') !== -1) return isDel ? 'frameshift deletion' : isIns ? 'frameshift insertion' : 'frameshift substitution';
+    if (so.indexOf('stop_gained') !== -1) return 'stopgain';
+    if (so.indexOf('stop_lost') !== -1) return 'stoploss';
+    if (so.indexOf('start_lost') !== -1 || so.indexOf('initiator_codon') !== -1) return 'startloss';
+    if (so.indexOf('inframe_deletion') !== -1) return 'nonframeshift deletion';
+    if (so.indexOf('inframe_insertion') !== -1) return 'nonframeshift insertion';
+    if (so.indexOf('missense') !== -1) return 'nonsynonymous SNV';
+    if (so.indexOf('synonymous') !== -1 || so.indexOf('stop_retained') !== -1) return 'synonymous SNV';
+    return 'unknown';
+  }
+
+  // "(2 Stars) Criteria Provided, Multiple Submitters, No Conflicts" ->
+  // "criteria_provided,_multiple_submitters,_no_conflicts"
+  function annovarClinvarText(value) {
+    return String(value || '').replace(/^\(\d+\s+Stars?\)\s*/i, '').trim().toLowerCase().replace(/ /g, '_');
+  }
+
+  function intervarLabel(value) {
+    var v = String(firstListValue(value) || '').toLowerCase();
+    if (!v) return '';
+    if (v.indexOf('vus') === 0 || v.indexOf('uncertain') !== -1) return 'Uncertain significance';
+    if (v.indexOf('likely pathogenic') === 0) return 'Likely pathogenic';
+    if (v.indexOf('likely benign') === 0) return 'Likely benign';
+    if (v.indexOf('pathogenic') === 0) return 'Pathogenic';
+    if (v.indexOf('benign') === 0) return 'Benign';
+    return firstListValue(value);
+  }
+
+  // "OTITIS MEDIA, SUSCEPTIBILITY TO; OMS" -> "Otitis media, susceptibility to"
+  function omimTitleSentenceCase(title) {
+    var t = String(title || '').split(';')[0].trim().toLowerCase();
+    return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
+  }
+
+  function enrichUnfilteredRows(rows, workbook) {
+    var sheet = workbook.worksheets[0];
+    if (!sheet) return;
+    var groupRow = sheet.getRow(1);
+    var headerRow = sheet.getRow(2);
+    var colCount = effectiveVarSeqColCount(sheet, groupRow, headerRow);
+    function col(spec) { return findVarSeqColumn(groupRow, headerRow, colCount, spec); }
+    function cols(spec) { return findVarSeqColumns(groupRow, headerRow, colCount, spec); }
+    var TX = { groupIncludes: ['Transcript Interactions'], groupExcludes: ['Overlapping'] };
+    var AUX = { groupIncludes: ['Aux Fields'], groupExcludes: ['Overlapping'] };
+    function txCol(h) { return col({ header: h, groupIncludes: TX.groupIncludes, groupExcludes: TX.groupExcludes }); }
+    function auxCol(h) { return col({ header: h, groupIncludes: AUX.groupIncludes, groupExcludes: AUX.groupExcludes }); }
+    var OMIM = { groupIncludes: ['OMIM Phenotypes'], groupExcludes: ['Overlapping'] };
+    function omimCol(h) { return col({ header: h, groupIncludes: OMIM.groupIncludes, groupExcludes: OMIM.groupExcludes }); }
+    var CV = { groupIncludes: ['ClinVar'], groupExcludes: ['CNV', 'Overlapping'] };
+    function cvCol(h) { return col({ header: h, groupIncludes: CV.groupIncludes, groupExcludes: CV.groupExcludes }); }
+    function nsfpCol(h) { return col({ header: h, groupIncludes: ['dbNSFP Functional Predictions'] }); }
+
+    var c = {
+      txGene: txCol('Gene Name'), txName: txCol('Transcript Name'), txRegion: txCol('Gene Region'),
+      txSo: txCol('Sequence Ontology'), txExon: txCol('Exon Number'), txC: txCol('HGVS c.'), txP: txCol('HGVS p.'),
+      txSpliceDist: txCol('Distance to Splice Site'), txStatus: txCol('Transcript Status'),
+      auxType: auxCol('Transcript Type'), auxGene: auxCol('Gene Name'), auxProduct: auxCol('Summary of Product'),
+      omimGene: omimCol('Gene Name'), omimId: omimCol('OMIM ID'), omimTitle: omimCol('Title'),
+      omimInh: omimCol('Inheritance'), omimPheno: omimCol('Phenotypes'),
+      cohortAf: col({ header: 'Allele Frequencies', groupIncludes: ['Cohort Variant Frequencies'] }),
+      cohortHet: col({ header: 'Heterozygous Count', groupIncludes: ['Cohort Variant Frequencies'] }),
+      cohortHom: col({ header: 'Homozygous Count', groupIncludes: ['Cohort Variant Frequencies'] }),
+      gaAf: col({ header: 'Alt Allele Freq (AF)', groupIncludes: ['GenomeAsia'] }),
+      gaAc: col({ header: 'Alt Allele Counts (AC)', groupIncludes: ['GenomeAsia'] }),
+      cvSig: cvCol('Clinical Significance'), cvConditions: cvCol('Conditions'),
+      cvMedgen: cvCol('MedGen Concept ID'), cvReview: cvCol('Review Status'),
+      gerp: nsfpCol('GERP++ RS'), siftPred: nsfpCol('SIFT Pred'),
+      polyphen: col({ headerStartsWith: 'PolyPhen2 Prediction', groupIncludes: ['SIFT and PolyPHen2'] }),
+      acmg: col({ header: 'Classification', groupIncludes: ['ACMG'], groupExcludes: ['CNV'] }),
+    };
+    // GenomeAsia only has per-population homozygous counts - their sum is
+    // the overall count. The track appears twice in some exports; only the
+    // first copy's columns are summed.
+    var gaGroupFirst = c.gaAf ? groupTextAtColumn(groupRow, colCount, c.gaAf) : '';
+    var gaHomCols = cols({ headerStartsWith: '', groupIncludes: ['GenomeAsia'] }).filter(function (ci) {
+      return /Homozygous Sample Counts \(HOM_/.test(String(headerRow.getCell(ci).value || ''));
+    }).slice(0, 7);
+    // dbNSFP predictors: same keys Dr. Robert reads, but only the first of
+    // VarSeq's per-transcript values (ANNOVAR reports one).
+    var NSFP_FIRST_VALUE_KEYS = ['LRT_pred', 'MutationTaster_pred', 'MutationAssessor_pred', 'FATHMM_pred', 'PROVEAN_pred',
+      'MetaSVM_pred', 'MetaLR_pred', 'M-CAP_pred', 'MutPred_score', 'PrimateAI_pred', 'DEOGEN2_pred', 'BayesDel_addAF_pred',
+      'LIST-S2_pred', 'DANN_score', 'fathmm-XF_coding_pred', 'MCAP', 'REVEL_score'];
+
+    rows.forEach(function (row) {
+      if (!row._sheetRow) return;
+      var sr = sheet.getRow(row._sheetRow);
+      function v(ci) { return ci ? cellText(sr.getCell(ci).value) : ''; }
+      function list(ci) { return ci ? String(v(ci) || '').split(',') : []; }
+
+      // ---- per-transcript region / effect ----
+      var names = list(c.txName), genes = list(c.txGene), regions = list(c.txRegion), sos = list(c.txSo),
+        exons = list(c.txExon), hc = list(c.txC), hp = list(c.txP), sdist = list(c.txSpliceDist),
+        status = list(c.txStatus), types = list(c.auxType);
+      var ref = String(row.Ref || ''), alt = String(row.Alt || '');
+      var catGenes = {}; UNFILTERED_FUNC_ORDER.forEach(function (k) { catGenes[k] = []; });
+      var detail = [], exonicFuncs = [], aaChanges = [], hasUnknown = false, far = [];
+      function addCat(cat, gene) { if (gene && catGenes[cat].indexOf(gene) === -1) catGenes[cat].push(gene); if (!gene) catGenes[cat].push(''); }
+      function addDetail(d) { if (d && detail.indexOf(d) === -1) detail.push(d); }
+
+      names.forEach(function (name, i) {
+        if (!name) return;
+        var gene = genes[i] || '';
+        var region = regions[i] || '';
+        var so = sos[i] || '';
+        var isNc = /^NR_/.test(name) || (types[i] && types[i] !== 'mRNA');
+        var nm = stripTranscriptVersion(name);
+        var cdot = hgvsAfterColon(hc[i]);
+        var off = intronOffset(hc[i]);
+        var spliceSo = /splice_(acceptor|donor)/.test(so);
+        if (region === 'exon') {
+          addCat(isNc ? 'ncRNA_exonic' : 'exonic', gene);
+          if (/splice/.test(so)) addCat(isNc ? 'ncRNA_splicing' : 'splicing', gene);
+          if (!isNc) {
+            var complete = !status[i] || status[i] === 'complete';
+            if (!complete) { hasUnknown = true; return; }
+            var ef = exonicFuncFor(so, ref, alt);
+            if (exonicFuncs.indexOf(ef) === -1) exonicFuncs.push(ef);
+            var p = hgvsPToAnnovar(hp[i]);
+            aaChanges.push(gene + ':' + nm + ':exon' + (exons[i] || '') + ':' + cdot + (p ? ':' + p : ''));
+          }
+        } else if (region === 'intron') {
+          addCat(isNc ? 'ncRNA_intronic' : 'intronic', gene);
+          if ((off != null && off <= UNFILTERED_SPLICE_DISTANCE) || spliceSo) {
+            addCat(isNc ? 'ncRNA_splicing' : 'splicing', gene);
+            addDetail(nm + ':exon' + (exons[i] || '') + ':' + cdot);
+          }
+        } else if (region === 'UTR5' || region === 'UTR3') {
+          addCat(region, gene);
+          addDetail(nm + ':' + cdot);
+        } else if (region === 'upstream_intergenic' || region === 'downstream_intergenic') {
+          var d = parseInt(sdist[i], 10);
+          if (!isNaN(d) && d <= UNFILTERED_FLANK_DISTANCE) {
+            addCat(region === 'upstream_intergenic' ? 'upstream' : 'downstream', gene);
+            addDetail('dist=' + d);
+          } else {
+            far.push({ gene: gene, dist: isNaN(d) ? null : d });
+          }
+        }
+      });
+
+      var func = UNFILTERED_FUNC_ORDER.filter(function (k) { return catGenes[k].length; });
+      var geneList = [];
+      func.forEach(function (k) { catGenes[k].forEach(function (g) { if (g && geneList.indexOf(g) === -1) geneList.push(g); }); });
+      if (!func.length && names.some(Boolean)) {
+        func = ['intergenic'];
+        far.forEach(function (f) {
+          if (f.gene && geneList.indexOf(f.gene) === -1 && geneList.length < 2) {
+            geneList.push(f.gene);
+            if (f.dist != null) addDetail('dist=' + f.dist);
+          }
+        });
+      }
+      if (func.length) row.Func_refGene = func.join(';');
+      if (geneList.length) row.Gene_refGene = geneList.join(';');
+      if (hasUnknown) exonicFuncs.push('unknown');
+      row.ExonicFunc_refGene = exonicFuncs.length ? exonicFuncs.join(';') : '.';
+      row.AAChange_refGene = aaChanges.length ? aaChanges.join(',') + (hasUnknown ? ';UNKNOWN' : '') : (hasUnknown ? 'UNKNOWN' : '.');
+      row.GeneDetail_refGene = detail.length ? detail.join(';') : '.';
+
+      // ---- in-house cohort: AF, Het, Hom; the reference's next two
+      // columns (Inhouse_GATK_Allele_frequency and the unlabeled T) both
+      // repeat the Het count ----
+      if (c.cohortAf || c.cohortHet) {
+        row.Inhouse_GRCh38_Allele_frequency = v(c.cohortAf);
+        row.Inhouse_GRCh38_HET_Count = v(c.cohortHet);
+        row.Inhouse_GRCh38_HOM_Count = v(c.cohortHom);
+        row.Inhouse_GATK_Allele_frequency = v(c.cohortHet);
+        row.Inhouse_GATK_Total_Allele_Number = v(c.cohortHet);
+      }
+
+      // ---- GenomeAsia: overall AF / AC, Hom = sum over populations ----
+      if (c.gaAf) {
+        row.GenomeAsia_Freq = v(c.gaAf);
+        row.GenomeAsia_Het = v(c.gaAc);
+        var homSum = 0, anyHom = false;
+        gaHomCols.forEach(function (ci) {
+          if (groupTextAtColumn(groupRow, colCount, ci) !== gaGroupFirst) return;
+          var n = parseFloat(v(ci));
+          if (!isNaN(n)) { homSum += n; anyHom = true; }
+        });
+        row.GenomeAsia_Hom = anyHom ? homSum : '';
+      }
+
+      // ---- OMIM (VarSeq annotates one gene per variant) - kept per gene
+      // for expandUnfilteredRowsByGene ----
+      var omimGene = firstListValue(v(c.omimGene));
+      var ids = splitVarSeqList(v(c.omimId)), titles = splitVarSeqList(v(c.omimTitle)), inh = splitVarSeqList(v(c.omimInh));
+      var phenoParts = [];
+      ids.forEach(function (id, i) {
+        if (!id) return;
+        var t = omimTitleSentenceCase(titles[i]);
+        phenoParts.push((t ? t + ', ' : '') + id + ' (3)' + (inh[i] ? ', ' + inh[i] : ''));
+      });
+      var hpo = splitVarSeqList(v(c.omimPheno)).filter(Boolean);
+      row._omimGene = omimGene;
+      row._omimPhenotypes = phenoParts.join('; ');
+      row._hpoPhenotype = hpo.length ? '|' + hpo.join('|') : '';
+      var products = {};
+      var auxGenes = list(c.auxGene), auxProducts = splitVarSeqList(v(c.auxProduct));
+      auxGenes.forEach(function (g, i) { if (g && !products[g] && auxProducts[i]) products[g] = auxProducts[i]; });
+      row._productByGene = products;
+      // Preview-grid values (one row per variant); the export recomputes
+      // these per gene.
+      row.OMIM_gene = omimGene;
+      row.OMIM_phenotypes = row._omimPhenotypes || 'NO OMIM PHENOTYPE';
+      row.HPO_Phenotype = row._hpoPhenotype || 'NO HPO PHENOTYPE';
+      row.Gene_full_name_refGene = products[omimGene] || products[String(row.Gene_refGene || '').split(';')[0]] || '';
+
+      // ---- ClinVar in ANNOVAR's underscore style ----
+      var sig = v(c.cvSig);
+      row.CLNSIG = sig ? sig.replace(/ /g, '_') : '';
+      row.CLNDN = splitVarSeqList(v(c.cvConditions)).filter(Boolean).map(function (x) { return x.replace(/ /g, '_'); }).join('|');
+      row.CLNDISDB = splitVarSeqList(v(c.cvMedgen)).filter(Boolean).map(function (x) { return 'MedGen:' + x; }).join('|');
+      row.CLNREVSTAT = annovarClinvarText(firstListValue(v(c.cvReview)));
+
+      // ---- predictors ----
+      row['GERP++_RS'] = firstListValue(v(c.gerp));
+      row.SIFT_pred = firstListValue(v(c.siftPred));
+      var pp = firstListValue(v(c.polyphen));
+      var ppLetter = /damag/i.test(pp) ? (/possibly/i.test(pp) ? 'P' : 'D') : (pp ? 'B' : '');
+      row.Polyphen2_HDIV_pred = ppLetter;
+      row.Polyphen2_HVAR_pred = ppLetter;
+      NSFP_FIRST_VALUE_KEYS.forEach(function (k) { if (row[k]) row[k] = firstListValue(row[k]); });
+      row.InterVar_automated = intervarLabel(v(c.acmg));
+    });
   }
 
   // Excel's default text sort ignores hyphens and apostrophes and is
@@ -4842,7 +5155,20 @@
       // A variant hitting only microRNA genes keeps one row rather than
       // being dropped from an "unfiltered" sheet.
       if (!kept.length) kept = genes.length ? [genes[0]] : [r.OMIM_gene && r.OMIM_gene !== '.' ? r.OMIM_gene : '.'];
-      kept.forEach(function (g) { out.push(Object.assign({}, r, { OMIM_gene: g })); });
+      kept.forEach(function (g) {
+        var perGene = { OMIM_gene: g };
+        // Rows built by enrichUnfilteredRows carry OMIM/HPO/gene-name data
+        // per gene: VarSeq's own OMIM track for the gene it annotates,
+        // genemap2 for any other gene, else the reference's "NO ..." text.
+        if (r._productByGene) {
+          var isOmimGene = r._omimGene && r._omimGene.toUpperCase() === String(g).toUpperCase();
+          var gm = omimGenePhenotypes.get(String(g).toUpperCase());
+          perGene.OMIM_phenotypes = (isOmimGene && r._omimPhenotypes) || gm || 'NO OMIM PHENOTYPE';
+          perGene.HPO_Phenotype = (isOmimGene && r._hpoPhenotype) || 'NO HPO PHENOTYPE';
+          perGene.Gene_full_name_refGene = r._productByGene[g] || '.';
+        }
+        out.push(Object.assign({}, r, perGene));
+      });
     });
     return out;
   }
@@ -6559,7 +6885,7 @@
           return;
         }
         if (item.reportType === 'unfiltered') {
-          Object.assign(item, unfilteredUploadResult(buildRobertUploadResult(workbook, fakeFile, item.rawBuffer)));
+          Object.assign(item, unfilteredUploadResult(buildRobertUploadResult(workbook, fakeFile, item.rawBuffer), workbook));
           return;
         }
         var sheet = workbook.worksheets[0];
@@ -6613,7 +6939,7 @@
             return buildRobertUploadResult(workbook, file, rawBuffer);
           }
           if (currentReportType === 'unfiltered') {
-            return unfilteredUploadResult(buildRobertUploadResult(workbook, file, rawBuffer));
+            return unfilteredUploadResult(buildRobertUploadResult(workbook, file, rawBuffer), workbook);
           }
 
           // A file that's already this app's OWN exported "Listed Variants"
