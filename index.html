@@ -2281,10 +2281,21 @@
   // group id (see _multiGeneGroupId), even across multiple uploaded files.
   var multiGeneGroupCounter = 0;
 
+  // Mitochondrial genes are the exception to the "c." rule: the mtDNA tRNA/
+  // rRNA genes (MT-TS1, MT-TK, MT-RNR1, ...) only ever get a non-coding
+  // "n." (or "m.") notation, yet they carry well-known pathogenic variants
+  // (e.g. MT-TS1:n.49dupG / m.7471dup). Without this, a row listing
+  // "MT-ATP8,MT-CO1,MT-CO2,MT-TD,MT-TK,MT-TS1" kept only the three protein
+  // genes and silently hid the clinically relevant tRNA entries.
+  function isMitoGeneName(name) {
+    return /^MT-/i.test(String(name || '').trim());
+  }
+
   function pickCodingVariant(genes, hgvsCList, hgvsPList) {
     var indices = [];
     hgvsCList.forEach(function (v, i) {
-      if (/^c\./i.test(stripHgvsPrefix(v))) indices.push(i);
+      var hgvs = stripHgvsPrefix(v);
+      if (/^c\./i.test(hgvs) || (isMitoGeneName(genes[i]) && /^[nm]\./i.test(hgvs))) indices.push(i);
     });
     if (indices.length === 0) return null;
     return {
