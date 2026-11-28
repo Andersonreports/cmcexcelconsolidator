@@ -1889,7 +1889,14 @@
     // Single-mode: gnomAD South Asian male allele counts (genome + exome 4.1)
     gnomadGenome4SAMale: { header: 'South Asian Male Allele Count', groupIncludes: ['gnomAD Genomes', '4.1'] },
     gnomadExome4SAMale: { header: 'South Asian Male Allele Count', groupIncludes: ['gnomAD Exomes', '4.1'] },
-    phenoRank: { header: 'Gene Rank', groupIncludes: ['PhoRank'] },
+    // Exports carrying CNV tracks have a second PhoRank block ("CNV phorank
+    // PhoRank Research") that sorts *before* the variant one and is blank for
+    // SNV rows - matching it first left RANK empty. Prefer the non-CNV block,
+    // falling back to any PhoRank "Gene Rank" if that's the only one present.
+    phenoRank: [
+      { header: 'Gene Rank', groupIncludes: ['PhoRank'], groupExcludes: ['CNV'] },
+      { header: 'Gene Rank', groupIncludes: ['PhoRank'] },
+    ],
     // Genomic coordinates — used to build direct Franklin links
     variantChr: { header: 'Chr' },
     variantPos: { header: 'Pos' },
